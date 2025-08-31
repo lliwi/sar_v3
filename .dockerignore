@@ -1,0 +1,181 @@
+# Git files
+.git
+.gitignore
+.gitattributes
+
+#Claude
+.claude
+settings.local.json
+
+# Documentation
+README.md
+CLAUDE.md
+*.md
+
+# Environment files (contain sensitive data)
+.env
+.env.*
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+data/
+postgres_data/
+redis_data/
+
+# Log files
+logs/
+*.log
+app.log
+error.log
+access.log
+
+# Test files and artifacts
+test_files/
+*.html
+cookies*.txt
+*_test.html
+*_debug.html
+*_response.html
+*_result.html
+auth_*.html
+dashboard_*.html
+login_*.html
+
+# Backup files
+backup/
+backups/
+*.backup
+*.bak
+
+# Development and IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Package files
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# Testing
+.pytest_cache/
+.tox/
+.nox/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Upload directories
+uploads/
+temp/
+tmp/
+
+# SSL certificates and keys (CRITICAL - never include these)
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+
+# Docker compose files (for local development)
+docker-compose*.yml
+Dockerfile.dev
+Dockerfile.test
+
+# Airflow generated files
+airflow_generated/
+dags_generated/
+
+# Generated reports and exports
+reports/
+exports/
+*.csv
+*.xlsx
+*.pdf
+
+# Flask session files
+flask_session/
+
+# Temporary files created during development/testing
+temp_*
+debug_*
+test_*
+sample_*
+example_*
+
+# Test and development folders
+_to delete/
+test_data/
+test_env/
+test_files/
+
+# Cookies and session files from testing
+cookies*.txt
+csrf_token.txt
+*_cookies.txt
+
+# API response files from testing
+*_api.json
+*_response.json
+*_result.json
+
+# Claude and Playwright MCP
+.playwright-mcp/
+
+# Migration versions (only include structure, not data)
+# migrations/versions/
+
+# Local configuration files
+config_local.py
+local_settings.py
+instance/
+
+# Node.js dependencies (if any)
+node_modules/
+npm-debug.log*
+
+# Any files containing "secret", "password", "key" in their name
+*secret*
+*password*
+*key*
+*credential*

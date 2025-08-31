@@ -1,0 +1,222 @@
+from datetime import datetime, timedelta
+from app import db
+import json
+
+class Task(db.Model):
+    __tablename__ = 'tasks'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False)
+    task_type = db.Column(db.String(50), nullable=False)  # 'airflow_dag', 'ad_verification'
+    status = db.Column(db.String(20), default='pending', nullable=False)  # 'pending', 'running', 'completed', 'failed', 'retry'
+    
+    # Task execution details
+    attempt_count = db.Column(db.Integer, default=0)
+    max_attempts = db.Column(db.Integer, default=1)
+    next_execution_at = db.Column(db.DateTime, default=datetime.utcnow)
+    delay_seconds = db.Column(db.Integer, default=0)  # Delay before execution
+    
+    # Task data and results
+    task_data = db.Column(db.Text)  # JSON data for task execution
+    result_data = db.Column(db.Text)  # JSON result from task execution
+    error_message = db.Column(db.Text)
+    
+    # Related entities
+    permission_request_id = db.Column(db.Integer, db.ForeignKey('permission_requests.id'), nullable=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    started_at = db.Column(db.DateTime)
+    completed_at = db.Column(db.DateTime)
+    
+    # Relationships
+    permission_request = db.relationship('PermissionRequest', backref='tasks')
+    created_by = db.relationship('User', backref='created_tasks')
+    
+    # Constraints
+    __table_args__ = (
+        db.CheckConstraint(task_type.in_(['airflow_dag', 'ad_verification']), name='check_task_type'),
+        db.CheckConstraint(status.in_(['pending', 'running', 'completed', 'failed', 'retry', 'cancelled']), name='check_task_status')
+    )
+    
+    def __repr__(self):
+        return f'<Task {self.name} - {self.task_type} - {self.status}>'
+    
+    def set_task_data(self, data):
+        """Set task data as JSON"""
+        self.task_data = json.dumps(data) if data else None
+    
+    def get_task_data(self):
+        """Get task data from JSON"""
+        try:
+            return json.loads(self.task_data) if self.task_data else {}
+        except json.JSONDecodeError:
+            return {}
+    
+    def set_result_data(self, data):
+        """Set result data as JSON"""
+        self.result_data = json.dumps(data) if data else None
+    
+    def get_result_data(self):
+        """Get result data from JSON"""
+        try:
+            return json.loads(self.result_data) if self.result_data else {}
+        except json.JSONDecodeError:
+            return {}
+    
+    def mark_as_running(self):
+        """Mark task as running"""
+        self.status = 'running'
+        self.started_at = datetime.utcnow()
+        self.updated_at = datetime.utcnow()
+    
+    def mark_as_completed(self, result_data=None):
+        """Mark task as completed"""
+        self.status = 'completed'
+        self.completed_at = datetime.utcnow()
+        self.updated_at = datetime.utcnow()
+        if result_data:
+            self.set_result_data(result_data)
+    
+    def mark_as_failed(self, error_message=None, result_data=None):
+        """Mark task as failed"""
+        self.status = 'failed'
+        self.error_message = error_message
+        self.updated_at = datetime.utcnow()
+        if result_data:
+            self.set_result_data(result_data)
+    
+    def schedule_retry(self, delay_seconds=30):
+        """Schedule task for retry"""
+        self.attempt_count += 1
+        
+        if self.attempt_count >= self.max_attempts:
+            self.mark_as_failed("Maximum retry attempts exceeded")
+            return False
+        
+        self.status = 'retry'
+        self.next_execution_at = datetime.utcnow() + timedelta(seconds=delay_seconds)
+        self.updated_at = datetime.utcnow()
+        return True
+    
+    def can_execute(self):
+        """Check if task can be executed now"""
+        if self.status not in ['pending', 'retry']:
+            return False
+        
+        return datetime.utcnow() >= self.next_execution_at
+    
+    def is_pending(self):
+        return self.status == 'pending'
+    
+    def is_running(self):
+        return self.status == 'running'
+    
+    def is_completed(self):
+        return self.status == 'completed'
+    
+    def is_failed(self):
+        return self.status == 'failed'
+    
+    def is_retry(self):
+        return self.status == 'retry'
+    
+    def is_cancelled(self):
+        return self.status == 'cancelled'
+    
+    def can_be_cancelled(self):
+        """Check if task can be cancelled (only pending, retry tasks)"""
+        return self.status in ['pending', 'retry']
+    
+    def cancel(self, cancelled_by=None, reason=None):
+        """Cancel a pending or retry task"""
+        if not self.can_be_cancelled():
+            raise ValueError(f"Cannot cancel task with status '{self.status}'")
+        
+        self.status = 'cancelled'
+        self.updated_at = datetime.utcnow()
+        self.error_message = reason or 'Task cancelled by user'
+        
+        # Store cancellation info in result_data
+        cancellation_data = {
+            'cancelled_at': datetime.utcnow().isoformat(),
+            'cancelled_by': cancelled_by.username if cancelled_by else 'system',
+            'cancellation_reason': reason or 'Task cancelled by user'
+        }
+        self.set_result_data(cancellation_data)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'task_type': self.task_type,
+            'status': self.status,
+            'attempt_count': self.attempt_count,
+            'max_attempts': self.max_attempts,
+            'next_execution_at': self.next_execution_at.isoformat() if self.next_execution_at else None,
+            'delay_seconds': self.delay_seconds,
+            'task_data': self.get_task_data(),
+            'result_data': self.get_result_data(),
+            'error_message': self.error_message,
+            'permission_request_id': self.permission_request_id,
+            'created_by': self.created_by.username if self.created_by else None,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat(),
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None
+        }
+
+    @classmethod
+    def create_airflow_task(cls, permission_request, created_by, csv_file_path=None):
+        """Create an Airflow DAG execution task"""
+        task = cls(
+            name=f"Airflow DAG execution for request #{permission_request.id}",
+            task_type='airflow_dag',
+            permission_request_id=permission_request.id,
+            created_by_id=created_by.id,
+            max_attempts=3
+        )
+        
+        task_data = {
+            'dag_id': 'SAR_V3',
+            'permission_request_id': permission_request.id,
+            'folder_path': permission_request.folder.path,
+            'ad_group_name': permission_request.ad_group.name if permission_request.ad_group else None,
+            'permission_type': permission_request.permission_type,
+            'requester': permission_request.requester.username,
+            'validator': created_by.username,
+            'csv_file_path': csv_file_path
+        }
+        task.set_task_data(task_data)
+        
+        return task
+    
+    @classmethod
+    def create_ad_verification_task(cls, permission_request, created_by, delay_seconds=30):
+        """Create an AD verification task"""
+        task = cls(
+            name=f"AD verification for request #{permission_request.id}",
+            task_type='ad_verification',
+            permission_request_id=permission_request.id,
+            created_by_id=created_by.id,
+            max_attempts=3,
+            delay_seconds=delay_seconds,
+            next_execution_at=datetime.utcnow() + timedelta(seconds=delay_seconds)
+        )
+        
+        task_data = {
+            'permission_request_id': permission_request.id,
+            'folder_path': permission_request.folder.path,
+            'ad_group_name': permission_request.ad_group.name if permission_request.ad_group else None,
+            'permission_type': permission_request.permission_type,
+            'expected_changes': {
+                'group': permission_request.ad_group.name if permission_request.ad_group else None,
+                'folder_path': permission_request.folder.path,
+                'access_type': permission_request.permission_type
+            }
+        }
+        task.set_task_data(task_data)
+        
+        return task

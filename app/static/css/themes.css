@@ -1,0 +1,288 @@
+/* ==================================================================
+   SAR Application - Theme Variants
+   ================================================================== */
+
+/* ==================================================================
+   Default Theme (Blue)
+   ================================================================== */
+[data-theme="default"], :root {
+    --primary-color: #007bff;
+    --primary-dark: #0056b3;
+    --primary-light: #66b3ff;
+    --secondary-color: #6c757d;
+    --secondary-dark: #495057;
+    --secondary-light: #adb5bd;
+}
+
+/* ==================================================================
+   Corporate Theme (Dark Blue/Gray)
+   ================================================================== */
+[data-theme="corporate"] {
+    --primary-color: #1f4e79 !important;
+    --primary-dark: #143654 !important;
+    --primary-light: #4a7ba7 !important;
+    --secondary-color: #5a6c7d !important;
+    --secondary-dark: #3d4a57 !important;
+    --secondary-light: #8fa0b3 !important;
+    --sidebar-bg: #495057 !important;
+    --sidebar-active-bg: #3d4249 !important;
+    
+    /* Background colors for corporate theme */
+    --bg-primary: #2d2d2d !important;
+    --bg-secondary: #3a3a3a !important;
+    --bg-dark: #4a4a4a !important;
+    
+    /* Text colors for corporate theme */
+    --text-primary: #ffffff !important;
+    --text-secondary: #cccccc !important;
+    --text-muted: #999999 !important;
+    
+    /* Border colors for corporate theme */
+    --border-color: #555555 !important;
+    --border-light: #666666 !important;
+    --border-dark: #777777 !important;
+    
+    /* Sidebar text colors for dark background */
+    --sidebar-text: #ffffff !important;
+    --sidebar-text-hover: #f8f9fa !important;
+    --sidebar-active-text: #ffffff !important;
+}
+
+/* ==================================================================
+   Modal Styles for Corporate Theme
+   ================================================================== */
+[data-theme="corporate"] .modal-content {
+    background-color: #ffffff !important;
+    color: #212529 !important;
+}
+
+[data-theme="corporate"] .modal-header,
+[data-theme="corporate"] .modal-body,
+[data-theme="corporate"] .modal-footer {
+    background-color: #ffffff !important;
+    color: #212529 !important;
+}
+
+[data-theme="corporate"] .modal-body .text-dark,
+[data-theme="corporate"] .modal-body strong {
+    color: #212529 !important;
+}
+
+[data-theme="corporate"] .modal-body .text-secondary,
+[data-theme="corporate"] .modal-body p {
+    color: #6c757d !important;
+}
+
+/* ==================================================================
+   Card and Widget Styles for Corporate Theme
+   ================================================================== */
+[data-theme="corporate"] .card-body {
+    background-color: #ffffff !important;
+    color: #212529 !important;
+}
+
+[data-theme="corporate"] .card-body strong,
+[data-theme="corporate"] .card-body .text-dark {
+    color: #212529 !important;
+}
+
+[data-theme="corporate"] .card-body .text-muted,
+[data-theme="corporate"] .card-body .text-secondary {
+    color: #6c757d !important;
+}
+
+[data-theme="corporate"] .card-body .row > div,
+[data-theme="corporate"] .card-body .col-md-6,
+[data-theme="corporate"] .card-body .col-md-4 {
+    color: #212529 !important;
+}
+
+/* Permission details specific styles */
+[data-theme="corporate"] .permission-info,
+[data-theme="corporate"] .user-info,
+[data-theme="corporate"] .folder-info {
+    background-color: #ffffff !important;
+    color: #212529 !important;
+}
+
+[data-theme="corporate"] .permission-info label,
+[data-theme="corporate"] .user-info label,
+[data-theme="corporate"] .folder-info label {
+    color: #212529 !important;
+    font-weight: bold;
+}
+
+[data-theme="corporate"] .permission-info span,
+[data-theme="corporate"] .user-info span,
+[data-theme="corporate"] .folder-info span {
+    color: #6c757d !important;
+}
+
+/* Validadores Actuales title in white */
+[data-theme="corporate"] .bg-light h6.text-dark,
+[data-theme="corporate"] .card-header.bg-light h6 {
+    color: #ffffff !important;
+}
+
+/* ==================================================================
+   Sidebar Styles for Corporate Theme (Light Gray)
+   ================================================================== */
+[data-theme="corporate"] .sidebar {
+    background-color: var(--sidebar-bg) !important;
+}
+
+[data-theme="corporate"] .sidebar .nav-link {
+    color: var(--sidebar-text) !important;
+}
+
+[data-theme="corporate"] .sidebar .nav-link:hover {
+    color: var(--sidebar-text-hover) !important;
+    background-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-theme="corporate"] .sidebar .nav-link.active {
+    color: var(--sidebar-active-text) !important;
+    background-color: var(--primary-color) !important;
+}
+
+[data-theme="corporate"] .sidebar .navbar-brand {
+    color: #ffffff !important;
+}
+
+[data-theme="corporate"] .sidebar hr {
+    border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+[data-theme="corporate"] .sidebar .dropdown-toggle {
+    color: var(--sidebar-text) !important;
+}
+
+/* ==================================================================
+   Green Theme (Nature/Eco)
+   ================================================================== */
+[data-theme="green"] {
+    --primary-color: #28a745;
+    --primary-dark: #1e7e34;
+    --primary-light: #71dd8a;
+    --secondary-color: #6c7b7d;
+    --secondary-dark: #495752;
+    --secondary-light: #a8b5b0;
+    --sidebar-bg: #2d5016;
+    --sidebar-active-bg: #3d6b1f;
+}
+
+/* ==================================================================
+   Purple Theme (Creative)
+   ================================================================== */
+[data-theme="purple"] {
+    --primary-color: #6f42c1;
+    --primary-dark: #59339d;
+    --primary-light: #a370f7;
+    --secondary-color: #6c757d;
+    --secondary-dark: #495057;
+    --secondary-light: #adb5bd;
+    --sidebar-bg: #4a2c7a;
+    --sidebar-active-bg: #5a3c8a;
+}
+
+/* ==================================================================
+   Orange Theme (Energy)
+   ================================================================== */
+[data-theme="orange"] {
+    --primary-color: #fd7e14;
+    --primary-dark: #e8590c;
+    --primary-light: #ffad5a;
+    --secondary-color: #6c757d;
+    --secondary-dark: #495057;
+    --secondary-light: #adb5bd;
+    --sidebar-bg: #8b4513;
+    --sidebar-active-bg: #a0522d;
+}
+
+/* ==================================================================
+   Red Theme (Bold)
+   ================================================================== */
+[data-theme="red"] {
+    --primary-color: #dc3545;
+    --primary-dark: #c82333;
+    --primary-light: #f1808a;
+    --secondary-color: #6c757d;
+    --secondary-dark: #495057;
+    --secondary-light: #adb5bd;
+    --sidebar-bg: #8b1538;
+    --sidebar-active-bg: #a11d48;
+}
+
+/* ==================================================================
+   Teal Theme (Modern)
+   ================================================================== */
+[data-theme="teal"] {
+    --primary-color: #20c997;
+    --primary-dark: #1aa179;
+    --primary-light: #6eddc3;
+    --secondary-color: #6c757d;
+    --secondary-dark: #495057;
+    --secondary-light: #adb5bd;
+    --sidebar-bg: #117a65;
+    --sidebar-active-bg: #148f77;
+}
+
+/* ==================================================================
+   Dark Theme
+   ================================================================== */
+[data-theme="dark"] {
+    --primary-color: #0d6efd;
+    --primary-dark: #0b5ed7;
+    --primary-light: #6ea8fe;
+    --secondary-color: #6c757d;
+    --secondary-dark: #5c636a;
+    --secondary-light: #adb5bd;
+    
+    /* Background colors for dark theme */
+    --bg-primary: #212529;
+    --bg-secondary: #343a40;
+    --bg-dark: #495057;
+    
+    /* Text colors for dark theme */
+    --text-primary: #ffffff;
+    --text-secondary: #adb5bd;
+    --text-muted: #6c757d;
+    
+    /* Sidebar colors for dark theme */
+    --sidebar-bg: #1a1e21;
+    --sidebar-text: #adb5bd;
+    --sidebar-text-hover: #ffffff;
+    --sidebar-active-bg: #495057;
+    --sidebar-active-text: #ffffff;
+    
+    /* Border colors for dark theme */
+    --border-color: #495057;
+    --border-light: #6c757d;
+    --border-dark: #adb5bd;
+}
+
+/* ==================================================================
+   High Contrast Theme (Accessibility)
+   ================================================================== */
+[data-theme="high-contrast"] {
+    --primary-color: #0000ff;
+    --primary-dark: #0000cc;
+    --primary-light: #3333ff;
+    --secondary-color: #000000;
+    --secondary-dark: #333333;
+    --secondary-light: #666666;
+    
+    --bg-primary: #ffffff;
+    --bg-secondary: #ffffff;
+    --text-primary: #000000;
+    --text-secondary: #000000;
+    
+    --sidebar-bg: #000000;
+    --sidebar-text: #ffffff;
+    --sidebar-text-hover: #ffff00;
+    --sidebar-active-bg: #0000ff;
+    --sidebar-active-text: #ffffff;
+    
+    --border-color: #000000;
+    --border-light: #333333;
+}

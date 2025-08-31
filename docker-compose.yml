@@ -1,0 +1,249 @@
+# SAR v3 Application - Enhanced Docker Compose Configuration
+# Task Management System - Production Ready Setup
+
+services:
+  web:
+    #build: .
+    image: lliwi/sar_v3:latest
+    ports:
+      - "${FLASK_PORT:-5000}:8080"
+    environment:
+      # Flask Configuration
+      - FLASK_ENV=${FLASK_ENV:-development}
+      - FLASK_DEBUG=${FLASK_DEBUG:-True}
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=${DATABASE_URL}
+      # Session and Security
+      - SESSION_TIMEOUT=${SESSION_TIMEOUT:-3600}
+      - CSRF_TIMEOUT=${CSRF_TIMEOUT:-3600}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MAX_CONTENT_LENGTH=${MAX_CONTENT_LENGTH:-16777216}
+      # LDAP Configuration
+      - LDAP_HOST=${LDAP_HOST}
+      - LDAP_BASE_DN=${LDAP_BASE_DN}
+      - LDAP_USER_DN=${LDAP_USER_DN}
+      - LDAP_GROUP_DN=${LDAP_GROUP_DN}
+      - LDAP_BIND_USER_DN=${LDAP_BIND_USER_DN}
+      - LDAP_BIND_USER_PASSWORD=${LDAP_BIND_USER_PASSWORD}
+      - LDAP_ATTR_USER=${LDAP_ATTR_USER:-cn}
+      - LDAP_ATTR_DEPARTMENT=${LDAP_ATTR_DEPARTMENT:-department}
+      - LDAP_ATTR_EMAIL=${LDAP_ATTR_EMAIL:-mail}
+      - LDAP_ATTR_FIRSTNAME=${LDAP_ATTR_FIRSTNAME:-givenName}
+      - LDAP_ATTR_LASTNAME=${LDAP_ATTR_LASTNAME:-sn}
+      - LDAP_SEARCH_OUS=${LDAP_SEARCH_OUS}
+      - LDAP_CONNECTION_TIMEOUT=${LDAP_CONNECTION_TIMEOUT:-30}
+      - LDAP_SEARCH_TIMEOUT=${LDAP_SEARCH_TIMEOUT:-60}
+      - LDAP_USE_SSL=${LDAP_USE_SSL:-false}
+      # SMTP Configuration
+      - SMTP_SERVER=${SMTP_SERVER}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-false}
+      - SMTP_USE_SSL=${SMTP_USE_SSL:-false}
+      - SMTP_TIMEOUT=${SMTP_TIMEOUT:-30}
+      - SMTP_FROM=${SMTP_FROM}
+      # Admin Notifications
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - ADMIN_NOTIFICATION_ENABLED=${ADMIN_NOTIFICATION_ENABLED:-true}
+      # Celery Configuration
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+      - CELERY_TASK_SERIALIZER=${CELERY_TASK_SERIALIZER:-json}
+      - CELERY_RESULT_SERIALIZER=${CELERY_RESULT_SERIALIZER:-json}
+      - CELERY_ACCEPT_CONTENT=${CELERY_ACCEPT_CONTENT:-json}
+      - CELERY_TIMEZONE=${CELERY_TIMEZONE:-UTC}
+      - CELERY_ENABLE_UTC=${CELERY_ENABLE_UTC:-true}
+      # Airflow Configuration
+      - AIRFLOW_API_URL=${AIRFLOW_API_URL}
+      - AIRFLOW_USERNAME=${AIRFLOW_USERNAME}
+      - AIRFLOW_PASSWORD=${AIRFLOW_PASSWORD}
+      - AIRFLOW_AUTH_TOKEN=${AIRFLOW_AUTH_TOKEN}
+      - AIRFLOW_TIMEOUT=${AIRFLOW_TIMEOUT:-300}
+      - AIRFLOW_VERIFY_SSL=${AIRFLOW_VERIFY_SSL:-false}
+      - AIRFLOW_DAG_NAME=${AIRFLOW_DAG_NAME:-SAR_V3}
+      - AIRFLOW_RETRY_ATTEMPTS=${AIRFLOW_RETRY_ATTEMPTS:-3}
+      - AIRFLOW_RETRY_DELAY=${AIRFLOW_RETRY_DELAY:-60}
+      # CSV Configuration
+      - CSV_OUTPUT_DIR=${CSV_OUTPUT_DIR:-/tmp/sar_csv_files}
+      - AD_DOMAIN_PREFIX=${AD_DOMAIN_PREFIX:-}
+      - AD_TARGET_DOMAIN=${AD_TARGET_DOMAIN:-AUDI}
+      # Application URLs
+      - SERVER_URL=${SERVER_URL}
+      - BASE_URL=${BASE_URL}
+      # Task Management Configuration
+      - TASK_PROCESSING_INTERVAL=${TASK_PROCESSING_INTERVAL:-300}
+      - TASK_MAX_RETRIES=${TASK_MAX_RETRIES:-3}
+      - TASK_RETRY_DELAY=${TASK_RETRY_DELAY:-300}
+      - TASK_CLEANUP_DAYS=${TASK_CLEANUP_DAYS:-30}
+      - TASK_BATCH_SIZE=${TASK_BATCH_SIZE:-10}
+      # Feature Flags
+      - ENABLE_TASK_MONITORING=${ENABLE_TASK_MONITORING:-true}
+      - ENABLE_AUTO_CLEANUP=${ENABLE_AUTO_CLEANUP:-true}
+      - ENABLE_AUDIT_LOGGING=${ENABLE_AUDIT_LOGGING:-true}
+      - ENABLE_EMAIL_NOTIFICATIONS=${ENABLE_EMAIL_NOTIFICATIONS:-true}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app:ro
+      - ./logs:/app/logs
+      - ./exports:/app/exports
+      - ./data:/app/data
+      - ./backups:/app/backups
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-sarapp}
+      - POSTGRES_USER=${POSTGRES_USER:-saruser}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_INITDB_ARGS=${POSTGRES_INITDB_ARGS:---encoding=UTF-8 --lc-collate=C --lc-ctype=C}
+      - POSTGRES_MAX_CONNECTIONS=${POSTGRES_MAX_CONNECTIONS:-100}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/var/backups
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-saruser} -d ${POSTGRES_DB:-sarapp}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  celery:
+    build: .
+    command: celery -A celery_worker.celery worker --loglevel=info --concurrency=4 --prefetch-multiplier=1
+    environment:
+      # Flask Configuration
+      - FLASK_ENV=${FLASK_ENV:-development}
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=${DATABASE_URL}
+      # Celery Configuration
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+      - CELERY_TASK_SERIALIZER=${CELERY_TASK_SERIALIZER:-json}
+      - CELERY_RESULT_SERIALIZER=${CELERY_RESULT_SERIALIZER:-json}
+      - CELERY_ACCEPT_CONTENT=${CELERY_ACCEPT_CONTENT:-json}
+      - CELERY_TIMEZONE=${CELERY_TIMEZONE:-UTC}
+      - CELERY_ENABLE_UTC=${CELERY_ENABLE_UTC:-true}
+      - CELERY_WORKER_PREFETCH_MULTIPLIER=${CELERY_WORKER_PREFETCH_MULTIPLIER:-1}
+      # SMTP Configuration
+      - SMTP_SERVER=${SMTP_SERVER}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-false}
+      - SMTP_TIMEOUT=${SMTP_TIMEOUT:-30}
+      - SMTP_FROM=${SMTP_FROM}
+      # Application URLs
+      - SERVER_URL=${SERVER_URL}
+      - BASE_URL=${BASE_URL}
+      # Task Management
+      - TASK_PROCESSING_INTERVAL=${TASK_PROCESSING_INTERVAL:-300}
+      - TASK_MAX_RETRIES=${TASK_MAX_RETRIES:-3}
+      - TASK_RETRY_DELAY=${TASK_RETRY_DELAY:-300}
+      # Airflow Configuration for task execution
+      - AIRFLOW_API_URL=${AIRFLOW_API_URL}
+      - AIRFLOW_USERNAME=${AIRFLOW_USERNAME}
+      - AIRFLOW_PASSWORD=${AIRFLOW_PASSWORD}
+      - AIRFLOW_AUTH_TOKEN=${AIRFLOW_AUTH_TOKEN}
+      - AIRFLOW_TIMEOUT=${AIRFLOW_TIMEOUT:-300}
+      - AIRFLOW_VERIFY_SSL=${AIRFLOW_VERIFY_SSL:-false}
+      - AIRFLOW_DAG_NAME=${AIRFLOW_DAG_NAME:-SAR_V3}
+      # CSV Configuration
+      - CSV_OUTPUT_DIR=${CSV_OUTPUT_DIR:-/tmp/sar_csv_files}
+      - AD_DOMAIN_PREFIX=${AD_DOMAIN_PREFIX:-}
+      - AD_TARGET_DOMAIN=${AD_TARGET_DOMAIN:-AUDI}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app:ro
+      - ./logs:/app/logs
+      - ./exports:/app/exports
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "celery", "-A", "celery_worker.celery", "inspect", "ping"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 120s
+
+  # Task Scheduler Service - Processes pending tasks every 5 minutes
+  task-scheduler:
+    build: .
+    command: python task_scheduler.py
+    environment:
+      - FLASK_ENV=${FLASK_ENV:-development}
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=${DATABASE_URL}
+      - TASK_PROCESSING_INTERVAL=${TASK_PROCESSING_INTERVAL:-300}
+      - AIRFLOW_API_URL=${AIRFLOW_API_URL}
+      - AIRFLOW_USERNAME=${AIRFLOW_USERNAME}
+      - AIRFLOW_PASSWORD=${AIRFLOW_PASSWORD}
+      - AIRFLOW_AUTH_TOKEN=${AIRFLOW_AUTH_TOKEN}
+      - AIRFLOW_TIMEOUT=${AIRFLOW_TIMEOUT:-300}
+      - AIRFLOW_VERIFY_SSL=${AIRFLOW_VERIFY_SSL:-false}
+      - AIRFLOW_DAG_NAME=${AIRFLOW_DAG_NAME:-SAR_V3}
+      # CSV Configuration
+      - CSV_OUTPUT_DIR=${CSV_OUTPUT_DIR:-/tmp/sar_csv_files}
+      - AD_DOMAIN_PREFIX=${AD_DOMAIN_PREFIX:-}
+      - AD_TARGET_DOMAIN=${AD_TARGET_DOMAIN:-AUDI}
+      - LDAP_HOST=${LDAP_HOST}
+      - LDAP_BASE_DN=${LDAP_BASE_DN}
+      - LDAP_BIND_USER_DN=${LDAP_BIND_USER_DN}
+      - LDAP_BIND_USER_PASSWORD=${LDAP_BIND_USER_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  # MailHog for email testing (optional)
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "1025:1025"  # SMTP server
+      - "8025:8025"  # Web UI
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    name: sar_network

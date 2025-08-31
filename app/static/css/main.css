@@ -1,0 +1,866 @@
+/* ==================================================================
+   SAR Application - Main Styles
+   ================================================================== */
+
+/* Import variables, accessibility enhancements, and utilities */
+@import url('variables.css');
+@import url('accessibility.css');
+@import url('utilities.css');
+
+/* ==================================================================
+   Base Styles
+   ================================================================== */
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.6;
+}
+
+/* ==================================================================
+   Layout Components
+   ================================================================== */
+
+/* Sidebar Styles */
+.sidebar {
+    min-height: 100vh;
+    background-color: var(--sidebar-bg);
+    box-shadow: var(--shadow);
+    transition: all var(--transition-normal);
+}
+
+.sidebar .nav-link {
+    color: var(--sidebar-text);
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--border-radius);
+    margin: var(--spacing-xs) 0;
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+}
+
+.sidebar .nav-link:hover {
+    color: var(--sidebar-text-hover);
+    background-color: rgba(255, 255, 255, 0.1);
+    transform: translateX(4px);
+}
+
+.sidebar .nav-link.active {
+    color: var(--sidebar-active-text);
+    background-color: var(--sidebar-active-bg);
+    box-shadow: var(--shadow-sm);
+}
+
+.sidebar .nav-link i {
+    margin-right: var(--spacing-sm);
+    width: 1.2rem;
+    text-align: center;
+}
+
+/* Main Content Area */
+.main-content {
+    min-height: 100vh;
+    background-color: var(--bg-secondary);
+    padding: var(--spacing-lg);
+}
+
+/* ==================================================================
+   Navigation Components
+   ================================================================== */
+
+.navbar-brand {
+    font-weight: bold;
+    color: var(--primary-color) !important;
+    font-size: var(--font-size-lg);
+}
+
+.navbar {
+    background-color: var(--bg-secondary) !important;
+    border-bottom: 1px solid var(--border-light);
+    box-shadow: var(--shadow-sm);
+}
+
+/* ==================================================================
+   Alert Components
+   ================================================================== */
+
+.alert-dismissible {
+    margin-bottom: var(--spacing-md);
+    border: none;
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+.alert-success {
+    background-color: var(--success-light);
+    color: var(--success-dark);
+}
+
+.alert-warning {
+    background-color: var(--warning-light);
+    color: var(--warning-dark);
+}
+
+.alert-danger {
+    background-color: var(--danger-light);
+    color: var(--danger-dark);
+}
+
+.alert-info {
+    background-color: var(--info-light);
+    color: var(--info-dark);
+}
+
+/* ==================================================================
+   Card Components
+   ================================================================== */
+
+.card {
+    border: none;
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow);
+    transition: all var(--transition-normal);
+    margin-bottom: var(--spacing-lg);
+}
+
+.card:hover {
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-2px);
+}
+
+.card-header {
+    background-color: var(--bg-primary);
+    border-bottom: 1px solid var(--border-light);
+    border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0 !important;
+    padding: var(--spacing-md) var(--spacing-lg);
+}
+
+.card-body {
+    padding: var(--spacing-lg);
+}
+
+/* ==================================================================
+   Button Components
+   ================================================================== */
+
+.btn {
+    border-radius: var(--border-radius);
+    font-weight: 500;
+    transition: all var(--transition-fast);
+    border: none;
+    box-shadow: var(--shadow-sm);
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow);
+}
+
+.btn-primary {
+    background-color: var(--primary-color);
+    color: var(--white);
+}
+
+.btn-primary:hover {
+    background-color: var(--primary-dark);
+}
+
+.btn-secondary {
+    background-color: var(--secondary-color);
+    color: var(--white);
+}
+
+.btn-secondary:hover {
+    background-color: var(--secondary-dark);
+}
+
+.btn-success {
+    background-color: var(--success-color);
+    color: var(--white);
+}
+
+.btn-success:hover {
+    background-color: var(--success-dark);
+}
+
+.btn-warning {
+    background-color: var(--warning-color);
+    color: var(--dark);
+}
+
+.btn-warning:hover {
+    background-color: var(--warning-dark);
+}
+
+.btn-danger {
+    background-color: var(--danger-color);
+    color: var(--white);
+}
+
+.btn-danger:hover {
+    background-color: var(--danger-dark);
+}
+
+/* ==================================================================
+   Form Components
+   ================================================================== */
+
+.form-control {
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: var(--spacing-sm) var(--spacing-md);
+    transition: all var(--transition-fast);
+}
+
+.form-control:focus {
+    border-color: var(--focus-color);
+    outline: var(--focus-ring-width) solid var(--focus-color);
+    outline-offset: var(--focus-ring-offset);
+    box-shadow: var(--focus-shadow);
+}
+
+.form-label {
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-xs);
+}
+
+/* Multi-select form controls */
+.form-select[multiple] {
+    position: relative;
+    z-index: 1;
+    background-color: var(--white);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: var(--spacing-sm);
+    transition: all var(--transition-fast);
+}
+
+.form-select[multiple]:focus {
+    border-color: var(--focus-color);
+    outline: var(--focus-ring-width) solid var(--focus-color);
+    outline-offset: var(--focus-ring-offset);
+    box-shadow: var(--focus-shadow);
+    z-index: 10;
+}
+
+/* Container para campos de propietarios y validadores */
+.owners-validators-container {
+    position: relative;
+    z-index: 5;
+}
+
+/* Container para grupos AD con menor z-index */
+.ad-groups-container {
+    position: relative;
+    z-index: 1;
+}
+
+/* Asegurar que los dropdowns de arriba tienen mayor z-index */
+.owners-validators-container .form-select[multiple] {
+    z-index: 10;
+}
+
+.owners-validators-container .form-select[multiple]:focus {
+    z-index: 20;
+}
+
+.ad-groups-container .form-select[multiple] {
+    z-index: 5;
+}
+
+.ad-groups-container .form-select[multiple]:focus {
+    z-index: 15;
+}
+
+/* Mejorar la visibilidad de los dropdowns activos */
+.form-select[multiple]:focus {
+    border-width: var(--focus-ring-width);
+    box-shadow: var(--focus-shadow);
+}
+
+/* Agregar un pequeño margen inferior para evitar solapamiento */
+.owners-validators-container {
+    margin-bottom: var(--spacing-lg);
+}
+
+/* Mejor estilo para opciones seleccionadas en múltiple selección */
+.form-select[multiple] option:checked {
+    background: var(--primary-color) !important;
+    color: var(--white) !important;
+}
+
+.form-select[multiple] option {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-bottom: 1px solid var(--border-light);
+}
+
+/* ==================================================================
+   Table Components
+   ================================================================== */
+
+.table {
+    background-color: var(--white);
+    border-radius: var(--border-radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+}
+
+.table th {
+    background-color: var(--bg-primary);
+    border-color: var(--border-light);
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.table td {
+    border-color: var(--border-light);
+    vertical-align: middle;
+}
+
+.table-striped tbody tr:nth-of-type(odd) {
+    background-color: rgba(0, 0, 0, 0.02);
+}
+
+/* ==================================================================
+   Badge Components
+   ================================================================== */
+
+.badge {
+    border-radius: var(--border-radius);
+    font-weight: 500;
+    padding: var(--spacing-xs) var(--spacing-sm);
+}
+
+.badge-success {
+    background-color: var(--success-color);
+}
+
+.badge-warning {
+    background-color: var(--warning-color);
+    color: var(--dark);
+}
+
+.badge-danger {
+    background-color: var(--danger-color);
+}
+
+.badge-info {
+    background-color: var(--info-color);
+}
+
+.badge-secondary {
+    background-color: var(--secondary-color);
+}
+
+/* ==================================================================
+   Login Page Styles
+   ================================================================== */
+
+.login-container {
+    min-height: 100vh;
+    background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.login-card {
+    max-width: 400px;
+    width: 100%;
+    margin: var(--spacing-lg);
+}
+
+.login-header {
+    text-align: center;
+    margin-bottom: var(--spacing-lg);
+}
+
+.login-header h2 {
+    color: var(--text-primary);
+    font-weight: 600;
+    margin-bottom: var(--spacing-sm);
+}
+
+.login-header p {
+    color: var(--text-secondary);
+    margin-bottom: 0;
+}
+
+/* ==================================================================
+   Dashboard Stats Cards
+   ================================================================== */
+
+.stats-card {
+    border-left: 4px solid var(--primary-color);
+    transition: all var(--transition-normal);
+}
+
+.stats-card.success {
+    border-left-color: var(--success-color);
+}
+
+.stats-card.warning {
+    border-left-color: var(--warning-color);
+}
+
+.stats-card.danger {
+    border-left-color: var(--danger-color);
+}
+
+.stats-card.info {
+    border-left-color: var(--info-color);
+}
+
+.stats-number {
+    font-size: var(--font-size-xxl);
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.stats-label {
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* ==================================================================
+   Utility Classes
+   ================================================================== */
+
+.text-primary-custom {
+    color: var(--primary-color) !important;
+}
+
+.text-secondary-custom {
+    color: var(--secondary-color) !important;
+}
+
+.bg-primary-custom {
+    background-color: var(--primary-color) !important;
+}
+
+.bg-secondary-custom {
+    background-color: var(--secondary-color) !important;
+}
+
+.border-primary-custom {
+    border-color: var(--primary-color) !important;
+}
+
+.border-secondary-custom {
+    border-color: var(--secondary-color) !important;
+}
+
+/* ==================================================================
+   Responsive Design
+   ================================================================== */
+
+@media (max-width: 768px) {
+    .sidebar {
+        position: fixed;
+        top: 0;
+        left: -250px;
+        width: 250px;
+        height: 100vh;
+        z-index: 1000;
+        transition: left var(--transition-normal);
+    }
+    
+    .sidebar.show {
+        left: 0;
+    }
+    
+    .main-content {
+        margin-left: 0;
+        padding: var(--spacing-md);
+    }
+    
+    .stats-number {
+        font-size: var(--font-size-xl);
+    }
+}
+
+/* ==================================================================
+   Combobox con Filtrado - Estilo del ejemplo
+   ================================================================== */
+
+.combobox-container {
+    position: relative;
+    margin-bottom: 20px;
+}
+
+.combobox-input {
+    width: 100%;
+    padding: 0.375rem 2.25rem 0.375rem 0.75rem;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    font-size: 1rem;
+    line-height: 1.5;
+    height: calc(1.5em + 0.75rem + 2px);
+    background: white url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6,9 12,15 18,9"></polyline></svg>') no-repeat right 0.75rem center;
+    background-size: 16px 12px;
+    transition: all 0.3s ease;
+}
+
+.combobox-input:focus {
+    outline: none;
+    border-color: #86b7fe;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+}
+
+.combobox-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid #dee2e6;
+    border-top: none;
+    border-radius: 0 0 0.375rem 0.375rem;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 1000;
+    display: none;
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+}
+
+.combobox-dropdown.show {
+    display: block;
+    animation: fadeInDown 0.3s ease;
+}
+
+@keyframes fadeInDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.combobox-option {
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-bottom: 1px solid #f0f0f0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.combobox-option:hover {
+    background-color: #f8f9fa;
+    color: #16181b;
+}
+
+.combobox-option.selected {
+    background-color: #0d6efd;
+    color: white;
+}
+
+.combobox-option:last-child {
+    border-bottom: none;
+}
+
+.folder-icon {
+    font-size: 1rem;
+    color: #6b7280;
+}
+
+.combobox-option.selected .folder-icon {
+    color: white;
+}
+
+.combobox-option.selected .folder-path {
+    color: white;
+}
+
+.folder-info {
+    flex: 1;
+}
+
+.folder-path {
+    font-weight: 500;
+    font-size: 0.95rem;
+    color: #6b7280;
+}
+
+.folder-description {
+    font-size: 0.8125rem;
+    color: #6b7280;
+    margin-top: 2px;
+}
+
+.combobox-option.selected .folder-description {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.no-results {
+    padding: 20px;
+    text-align: center;
+    color: #999;
+    font-style: italic;
+}
+
+
+/* Scrollbar personalizado */
+.combobox-dropdown::-webkit-scrollbar {
+    width: 8px;
+}
+
+.combobox-dropdown::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+}
+
+.combobox-dropdown::-webkit-scrollbar-thumb {
+    background: #667eea;
+    border-radius: 10px;
+}
+
+.combobox-dropdown::-webkit-scrollbar-thumb:hover {
+    background: #5a6fd8;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .combobox-input {
+        font-size: 16px;
+        padding: 12px 40px 12px 15px;
+    }
+}
+    
+    body[data-theme="auto"] .selectbox-option:hover,
+    body[data-theme="auto"] .selectbox-option.highlighted {
+        background-color: #374151;
+    }
+    
+    body[data-theme="auto"] .selectbox-option.selected {
+        background-color: #1e3a8a;
+    }
+
+
+/* Animation for smooth dropdown appearance */
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-0.5rem);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.selectbox-dropdown {
+    animation: slideDown 0.15s ease-out;
+}
+
+/* ==================================================================
+   Dark Mode Support - Disabled (Using fixed corporate theme)
+   ================================================================== */
+
+/* ==================================================================
+   Single-Select Combobox with Filter (Propietarios)
+   ================================================================== */
+
+.single-combobox-container {
+    position: relative;
+    width: 100%;
+}
+
+.single-combobox-input-container {
+    position: relative;
+    width: 100%;
+    background: var(--white);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.single-combobox-input-container:hover {
+    border-color: var(--primary-color);
+}
+
+.single-combobox-input-container.active {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+.single-combobox-input {
+    width: 100%;
+    padding: var(--spacing-sm) 2.5rem var(--spacing-sm) var(--spacing-md);
+    background: transparent;
+    border: none;
+    outline: none;
+    font-size: 1rem;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.single-combobox-input::placeholder {
+    color: var(--text-secondary);
+    font-weight: 400;
+}
+
+.single-combobox-arrow {
+    position: absolute;
+    right: var(--spacing-md);
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    transition: transform var(--transition-fast);
+    pointer-events: none;
+}
+
+.single-combobox-input-container.active .single-combobox-arrow {
+    transform: translateY(-50%) rotate(180deg);
+}
+
+.single-combobox-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    background: var(--white);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+    margin-top: 0.25rem;
+    max-height: 300px;
+    overflow: hidden;
+    display: none;
+    animation: fadeInDown 0.3s ease;
+}
+
+.single-combobox-dropdown.show {
+    display: block;
+}
+
+.single-combobox-options {
+    max-height: 280px;
+    overflow-y: auto;
+    padding: 0.25rem 0;
+}
+
+.single-combobox-option {
+    padding: var(--spacing-sm) var(--spacing-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    border-left: 3px solid transparent;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.single-combobox-option:hover {
+    background-color: var(--bg-secondary);
+    border-left-color: var(--primary-color);
+    transform: translateX(2px);
+}
+
+.single-combobox-option.selected {
+    background-color: var(--primary-color);
+    color: var(--white);
+    border-left-color: var(--primary-dark);
+    font-weight: 500;
+}
+
+.single-combobox-option .option-icon {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    flex-shrink: 0;
+}
+
+.single-combobox-option.selected .option-icon {
+    color: var(--white);
+}
+
+.single-combobox-option .option-text {
+    font-size: 0.95rem;
+    color: var(--text-primary);
+}
+
+.single-combobox-option.selected .option-text {
+    color: var(--white);
+}
+
+.single-combobox-no-results {
+    padding: 2rem var(--spacing-md);
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.single-combobox-no-results i {
+    font-size: 1.5rem;
+    margin-bottom: 0.5rem;
+    display: block;
+    opacity: 0.5;
+}
+
+/* Scrollbar para el dropdown */
+.single-combobox-options::-webkit-scrollbar {
+    width: 6px;
+}
+
+.single-combobox-options::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+    border-radius: 3px;
+}
+
+.single-combobox-options::-webkit-scrollbar-thumb {
+    background: var(--primary-color);
+    border-radius: 3px;
+}
+
+.single-combobox-options::-webkit-scrollbar-thumb:hover {
+    background: var(--primary-dark);
+}
+
+/* Z-index específico para el selector de propietarios */
+.owners-validators-container .single-combobox-dropdown {
+    z-index: 25;
+}
+
+/* ==================================================================
+   Company Logo Styles
+   ================================================================== */
+
+.company-logo {
+    height: 40px; /* Altura fija para mantener consistencia */
+    width: auto; /* Mantiene la proporción de aspecto */
+    max-width: 120px; /* Ancho máximo para evitar que sea demasiado grande */
+    object-fit: contain; /* Mantiene la proporción sin distorsionar */
+    transition: all var(--transition-fast);
+    border-radius: var(--border-radius-sm);
+    background: transparent;
+}
+
+.company-logo:hover {
+    transform: scale(1.05);
+    filter: brightness(1.1);
+}
+
+/* Responsive adjustments for logo */
+@media (max-width: 768px) {
+    .company-logo {
+        height: 32px;
+        max-width: 100px;
+    }
+}
+
+@media (max-width: 576px) {
+    .company-logo {
+        height: 28px;
+        max-width: 80px;
+    }
+}
