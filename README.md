@@ -29,7 +29,6 @@ SAR (Sistema de Accesos y Recursos) es una aplicación web desarrollada en Flask
 - **Cache/Broker**: Redis
 - **Worker**: Celery (para tareas asíncronas)
 - **Contenedores**: Docker & Docker Compose
-- **IA**: Ollama (modelos LLM locales)
 - **Orquestación**: Apache Airflow
 
 ### Extensiones de Flask
@@ -127,13 +126,13 @@ docker-compose exec web flask db upgrade
 
 ### 5. Verificar Instalación
 
-Abrir navegador en `http://localhost:5000` y usar credenciales de Active Directory.
+Abrir navegador en `http://localhost:8080` y usar credenciales de Active Directory.
 
 ## 🐳 Servicios Docker
 
 El `docker-compose.yml` incluye los siguientes servicios:
 
-- **web** - Aplicación Flask principal (puerto 5000)
+- **web** - Aplicación Flask principal (puerto 8080)
 - **db** - Base de datos PostgreSQL (puerto 5432)
 - **redis** - Cache y broker para Celery (puerto 6379)
 - **celery** - Worker para tareas asíncronas
