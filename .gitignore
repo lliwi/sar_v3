@@ -286,7 +286,7 @@ _to delete/
 test_data/
 test_env/
 test_files/
-
+scripts/
 # Cookies and session files from testing
 cookies*.txt
 csrf_token.txt
