@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, request, flash, redirect, url_for,
 from flask_login import login_required, current_user
 from sqlalchemy.orm import joinedload
 from datetime import datetime
-from app.models import PermissionRequest, Folder, AuditEvent, FolderPermission, User, UserFolderPermission
+from app.models import PermissionRequest, Folder, AuditEvent, FolderPermission, User, UserFolderPermission, ADGroup
 from app.forms import PermissionRequestForm, PermissionValidationForm
 from app.services.email_service import send_permission_request_notification
 from app.services.airflow_service import trigger_permission_changes
@@ -909,4 +909,252 @@ def revoke_user_permission(permission_id):
     
     flash(f'Permiso de {permission.permission_type} revocado del usuario {user.username}. Tarea creada para aplicar cambios.', 'success')
     return redirect(url_for('main.manage_resource', folder_id=folder.id))
+
+@main_bp.route('/delete-user-permission', methods=['POST'])
+@login_required
+def delete_user_permission():
+    """Delete user permission from my-permissions page"""
+    folder_id = request.form.get('folder_id', type=int)
+    ad_group_id = request.form.get('ad_group_id', type=int)
+    permission_type = request.form.get('permission_type')
+    
+    if not folder_id or not ad_group_id or not permission_type:
+        flash('Datos de solicitud inválidos.', 'error')
+        return redirect(url_for('main.my_permissions'))
+    
+    folder = Folder.query.get_or_404(folder_id)
+    ad_group = ADGroup.query.get_or_404(ad_group_id)
+    
+    # Find the user's permission request for this folder/group/type combination
+    user_permission_request = PermissionRequest.query.filter_by(
+        requester_id=current_user.id,
+        folder_id=folder_id,
+        ad_group_id=ad_group_id,
+        permission_type=permission_type,
+        status='approved'
+    ).first()
+    
+    if not user_permission_request:
+        flash('No se encontró el permiso especificado.', 'error')
+        return redirect(url_for('main.my_permissions'))
+    
+    # Generate CSV for permission deletion
+    from app.services.csv_generator_service import CSVGeneratorService
+    csv_service = CSVGeneratorService()
+    csv_file_path = csv_service.generate_user_permission_deletion_csv(
+        user=current_user,
+        folder=folder,
+        ad_group=ad_group,
+        permission_type=permission_type
+    )
+    
+    # Create deletion task
+    from app.services.task_service import create_user_permission_deletion_task
+    task = create_user_permission_deletion_task(
+        user=current_user,
+        folder=folder,
+        ad_group=ad_group,
+        permission_type=permission_type,
+        csv_file_path=csv_file_path,
+        original_request=user_permission_request
+    )
+    
+    if task:
+        # Mark the original request as revoked
+        user_permission_request.status = 'revoked'
+        
+        db.session.commit()
+        
+        # Log audit event
+        AuditEvent.log_event(
+            user=current_user,
+            event_type='permission_deletion',
+            action='delete_own_permission',
+            resource_type='permission_request',
+            resource_id=user_permission_request.id,
+            description=f'Usuario eliminó su propio permiso {permission_type} del grupo {ad_group.name} para carpeta {folder.path}',
+            metadata={
+                'folder_path': folder.path,
+                'ad_group_name': ad_group.name,
+                'permission_type': permission_type,
+                'task_id': task.id,
+                'csv_file_path': csv_file_path
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent')
+        )
+        
+        flash(f'Permiso de {permission_type} eliminado del grupo {ad_group.name}. Se han creado tareas para aplicar los cambios.', 'success')
+    else:
+        flash('Error al crear las tareas de eliminación de permiso.', 'error')
+    
+    return redirect(url_for('main.my_permissions'))
+
+@main_bp.route('/delete-user-permission-by-request', methods=['POST'])
+@login_required
+def delete_user_permission_by_request():
+    """Delete user permission by permission request ID from my-permissions page"""
+    permission_request_id = request.form.get('permission_request_id', type=int)
+    
+    if not permission_request_id:
+        flash('ID de solicitud de permiso inválido.', 'error')
+        return redirect(url_for('main.my_permissions'))
+    
+    permission_request = PermissionRequest.query.get_or_404(permission_request_id)
+    
+    # Verify this is the user's own permission request
+    if permission_request.requester_id != current_user.id:
+        flash('No tienes permisos para eliminar esta solicitud.', 'error')
+        return redirect(url_for('main.my_permissions'))
+    
+    # Verify it's approved
+    if permission_request.status != 'approved':
+        flash('Solo se pueden eliminar permisos aprobados.', 'error')
+        return redirect(url_for('main.my_permissions'))
+    
+    # Generate CSV for permission deletion
+    from app.services.csv_generator_service import CSVGeneratorService
+    csv_service = CSVGeneratorService()
+    csv_file_path = csv_service.generate_permission_deletion_csv(permission_request)
+    
+    # Create deletion task
+    from app.services.task_service import create_permission_deletion_task
+    task = create_permission_deletion_task(
+        permission_request=permission_request,
+        deleted_by=current_user,
+        csv_file_path=csv_file_path
+    )
+    
+    if task:
+        # Mark the request as revoked
+        permission_request.status = 'revoked'
+        
+        db.session.commit()
+        
+        # Log audit event
+        AuditEvent.log_event(
+            user=current_user,
+            event_type='permission_deletion',
+            action='delete_own_permission_by_request',
+            resource_type='permission_request',
+            resource_id=permission_request.id,
+            description=f'Usuario eliminó su permiso aprobado {permission_request.permission_type} para carpeta {permission_request.folder.path}',
+            metadata={
+                'folder_path': permission_request.folder.path,
+                'ad_group_name': permission_request.ad_group.name if permission_request.ad_group else None,
+                'permission_type': permission_request.permission_type,
+                'task_id': task.id,
+                'csv_file_path': csv_file_path
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent')
+        )
+        
+        flash(f'Permiso de {permission_request.permission_type} eliminado. Se han creado tareas para aplicar los cambios.', 'success')
+    else:
+        flash('Error al crear las tareas de eliminación de permiso.', 'error')
+    
+    return redirect(url_for('main.my_permissions'))
+
+@main_bp.route('/delete-user-permission-from-ad-group', methods=['POST'])
+@login_required
+def delete_user_permission_from_ad_group():
+    """Delete user permission from AD group in manage-resource page"""
+    folder_id = request.form.get('folder_id', type=int)
+    user_id = request.form.get('user_id', type=int)
+    ad_group_id = request.form.get('ad_group_id', type=int)
+    permission_type = request.form.get('permission_type')
+    
+    if not all([folder_id, user_id, permission_type]):
+        flash('Datos de solicitud inválidos.', 'error')
+        return redirect(url_for('main.manage_resource', folder_id=folder_id))
+    
+    folder = Folder.query.get_or_404(folder_id)
+    target_user = User.query.get_or_404(user_id)
+    
+    # Check if current user can manage this folder
+    if not current_user.can_validate_folder(folder):
+        flash('No tienes permisos para gestionar esta carpeta.', 'error')
+        return redirect(url_for('main.my_resources'))
+    
+    # Try to find the AD group if provided
+    ad_group = None
+    if ad_group_id:
+        ad_group = ADGroup.query.get(ad_group_id)
+    
+    # Find permission requests that match this user, folder, and permission type
+    permission_requests = PermissionRequest.query.filter_by(
+        requester_id=user_id,
+        folder_id=folder_id,
+        permission_type=permission_type,
+        status='approved'
+    )
+    
+    if ad_group:
+        permission_requests = permission_requests.filter_by(ad_group_id=ad_group_id)
+    
+    permission_request = permission_requests.first()
+    
+    if not permission_request:
+        flash('No se encontró la solicitud de permiso especificada.', 'error')
+        return redirect(url_for('main.manage_resource', folder_id=folder_id))
+    
+    # Generate CSV for permission deletion
+    from app.services.csv_generator_service import CSVGeneratorService
+    csv_service = CSVGeneratorService()
+    
+    try:
+        if ad_group:
+            csv_file_path = csv_service.generate_user_permission_deletion_csv(
+                user=target_user,
+                folder=folder,
+                ad_group=ad_group,
+                permission_type=permission_type
+            )
+        else:
+            csv_file_path = csv_service.generate_permission_deletion_csv(permission_request)
+    except Exception as e:
+        flash(f'Error al generar archivo CSV: {str(e)}', 'error')
+        return redirect(url_for('main.manage_resource', folder_id=folder_id))
+    
+    # Create deletion task
+    from app.services.task_service import create_permission_deletion_task
+    task = create_permission_deletion_task(
+        permission_request=permission_request,
+        deleted_by=current_user,
+        csv_file_path=csv_file_path
+    )
+    
+    if task:
+        # Mark the request as revoked
+        permission_request.status = 'revoked'
+        
+        db.session.commit()
+        
+        # Log audit event
+        AuditEvent.log_event(
+            user=current_user,
+            event_type='permission_deletion',
+            action='delete_user_permission_from_ad_group',
+            resource_type='permission_request',
+            resource_id=permission_request.id,
+            description=f'Administrador eliminó permiso {permission_type} del usuario {target_user.username} para carpeta {folder.path}',
+            metadata={
+                'folder_path': folder.path,
+                'target_user_id': target_user.id,
+                'target_username': target_user.username,
+                'ad_group_name': ad_group.name if ad_group else None,
+                'permission_type': permission_type,
+                'task_id': task.id,
+                'csv_file_path': csv_file_path
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent')
+        )
+        
+        flash(f'Permiso de {permission_type} eliminado del usuario {target_user.username}. Se han creado tareas para aplicar los cambios.', 'success')
+    else:
+        flash('Error al crear las tareas de eliminación de permiso.', 'error')
+    
+    return redirect(url_for('main.manage_resource', folder_id=folder_id))
 

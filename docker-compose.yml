@@ -77,6 +77,12 @@ services:
       - TASK_RETRY_DELAY=${TASK_RETRY_DELAY:-300}
       - TASK_CLEANUP_DAYS=${TASK_CLEANUP_DAYS:-30}
       - TASK_BATCH_SIZE=${TASK_BATCH_SIZE:-10}
+      # AD Synchronization Scheduler Configuration
+      - AD_USER_SYNC_ENABLED=${AD_USER_SYNC_ENABLED:-true}
+      - AD_GROUP_SYNC_ENABLED=${AD_GROUP_SYNC_ENABLED:-true}
+      - AD_USER_PERMISSIONS_SYNC_ENABLED=${AD_USER_PERMISSIONS_SYNC_ENABLED:-true}
+      - SYNC_MAX_RETRIES=${SYNC_MAX_RETRIES:-3}
+      - SYNC_RETRY_DELAY=${SYNC_RETRY_DELAY:-60}
       # Feature Flags
       - ENABLE_TASK_MONITORING=${ENABLE_TASK_MONITORING:-true}
       - ENABLE_AUTO_CLEANUP=${ENABLE_AUTO_CLEANUP:-true}
@@ -198,6 +204,52 @@ services:
       timeout: 30s
       retries: 3
       start_period: 120s
+
+  # AD Sync Scheduler Service - Handles periodic AD synchronization
+  ad-scheduler:
+    #build: .
+    image: lliwi/sar_v3:latest
+    command: python scheduler_standalone.py
+    environment:
+      # Flask Configuration
+      - FLASK_ENV=${FLASK_ENV:-development}
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=${DATABASE_URL}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # LDAP Configuration
+      - LDAP_HOST=${LDAP_HOST}
+      - LDAP_BASE_DN=${LDAP_BASE_DN}
+      - LDAP_USER_DN=${LDAP_USER_DN}
+      - LDAP_GROUP_DN=${LDAP_GROUP_DN}
+      - LDAP_BIND_USER_DN=${LDAP_BIND_USER_DN}
+      - LDAP_BIND_USER_PASSWORD=${LDAP_BIND_USER_PASSWORD}
+      - LDAP_ATTR_USER=${LDAP_ATTR_USER:-cn}
+      - LDAP_ATTR_DEPARTMENT=${LDAP_ATTR_DEPARTMENT:-department}
+      - LDAP_ATTR_EMAIL=${LDAP_ATTR_EMAIL:-mail}
+      - LDAP_ATTR_FIRSTNAME=${LDAP_ATTR_FIRSTNAME:-givenName}
+      - LDAP_ATTR_LASTNAME=${LDAP_ATTR_LASTNAME:-sn}
+      - LDAP_SEARCH_OUS=${LDAP_SEARCH_OUS}
+      - LDAP_CONNECTION_TIMEOUT=${LDAP_CONNECTION_TIMEOUT:-30}
+      - LDAP_SEARCH_TIMEOUT=${LDAP_SEARCH_TIMEOUT:-60}
+      - LDAP_USE_SSL=${LDAP_USE_SSL:-false}
+      # Task Management Configuration
+      - TASK_PROCESSING_INTERVAL=${TASK_PROCESSING_INTERVAL:-300}
+      - TASK_MAX_RETRIES=${TASK_MAX_RETRIES:-3}
+      - TASK_RETRY_DELAY=${TASK_RETRY_DELAY:-300}
+      # AD Synchronization Scheduler Configuration
+      - AD_USER_SYNC_ENABLED=${AD_USER_SYNC_ENABLED:-true}
+      - AD_GROUP_SYNC_ENABLED=${AD_GROUP_SYNC_ENABLED:-true}
+      - AD_USER_PERMISSIONS_SYNC_ENABLED=${AD_USER_PERMISSIONS_SYNC_ENABLED:-true}
+      - SYNC_MAX_RETRIES=${SYNC_MAX_RETRIES:-3}
+      - SYNC_RETRY_DELAY=${SYNC_RETRY_DELAY:-60}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app:ro
+      - ./scheduler_standalone.py:/app/scheduler_standalone.py:ro
+      - ./logs:/app/logs
+    restart: unless-stopped
 
   # Task Scheduler Service - Processes pending tasks every 5 minutes
   task-scheduler:

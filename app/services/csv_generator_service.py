@@ -331,3 +331,82 @@ class CSVGeneratorService:
         current_app.logger.info(f"CSV de eliminación AD sync generado: {file_path}")
         
         return file_path
+    
+    def generate_user_permission_deletion_csv(self, user: User, folder, ad_group: ADGroup, permission_type: str) -> str:
+        """
+        Genera CSV para eliminar permisos de usuario específicos.
+        
+        Args:
+            user: Usuario del que se va a eliminar el permiso
+            folder: Carpeta de la que se elimina el permiso  
+            ad_group: Grupo AD del que se elimina el permiso
+            permission_type: Tipo de permiso ('read' o 'write')
+        
+        Returns:
+            str: Ruta del archivo CSV generado
+        """
+        # Generar archivo CSV
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_id = str(uuid.uuid4())[:8]
+        filename = f"deleteUserPermission_{timestamp}_{unique_id}.csv"
+        file_path = os.path.join(self.output_directory, filename)
+        
+        # Formatear nombre de usuario
+        username = user.username
+        if '\\' in username:
+            username = username.split('\\')[1]
+        
+        # Formatear grupo AD
+        ad_domain_prefix = os.getenv('AD_DOMAIN_PREFIX', '')
+        group_name = ad_group.name
+        if ad_domain_prefix and not group_name.startswith(f'{ad_domain_prefix}\\'):
+            group_name = f"{ad_domain_prefix}\\{group_name}"
+        
+        matricula = getattr(user, 'employee_id', user.id)
+        mode_id = 1 if permission_type == 'read' else 2
+        
+        csv_data = [{
+            'UserName': username,
+            'ADGroup': group_name,
+            'idTarea': f"DELETE_USER_PERM_{folder.id}_{user.id}_{unique_id}",
+            'idAccion': 2,  # 2 = eliminar
+            'MatriculaUsu': matricula,
+            'idRecurso': folder.id,
+            'idModo': mode_id
+        }]
+        
+        # Escribir archivo CSV
+        self._write_csv_file(file_path, csv_data)
+        
+        current_app.logger.info(f"CSV de eliminación de permiso de usuario generado: {file_path}")
+        
+        return file_path
+    
+    def generate_permission_deletion_csv(self, permission_request: PermissionRequest) -> str:
+        """
+        Genera CSV para eliminar un permiso basado en una solicitud de permiso aprobada.
+        
+        Args:
+            permission_request: Solicitud de permiso aprobada que se va a eliminar
+        
+        Returns:
+            str: Ruta del archivo CSV generado
+        """
+        if not permission_request.ad_group:
+            raise ValueError("No se puede generar CSV sin grupo AD asignado")
+            
+        # Generar archivo CSV
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_id = str(uuid.uuid4())[:8]
+        filename = f"deletePermissionRequest_{timestamp}_{unique_id}.csv"
+        file_path = os.path.join(self.output_directory, filename)
+        
+        # Usar el método existente para preparar la fila con acción de eliminación
+        csv_data = self._prepare_csv_row(permission_request, 2)  # 2 = eliminar
+        
+        # Escribir archivo CSV
+        self._write_csv_file(file_path, [csv_data])
+        
+        current_app.logger.info(f"CSV de eliminación de solicitud de permiso generado: {file_path}")
+        
+        return file_path

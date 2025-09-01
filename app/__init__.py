@@ -123,6 +123,10 @@ def create_app(config_name=None):
         db.create_all()
         from app.models import Role
         Role.create_default_roles()
+        
+        # Scheduler is now handled by a separate standalone service
+        # to avoid multi-process conflicts in Gunicorn
+        app.logger.info("AD Synchronization handled by standalone scheduler service")
     
     return app
 

@@ -1147,3 +1147,168 @@ def create_user_permission_task(action, folder, user, permission_type, created_b
         db.session.rollback()
         logger.error(f"Error creating user permission tasks: {str(e)}")
         return None
+
+def create_user_permission_deletion_task(user, folder, ad_group, permission_type, csv_file_path, original_request=None):
+    """Create a task for deleting a user permission"""
+    try:
+        # Get configuration
+        task_service = TaskService()
+        config = task_service.get_config()
+        
+        # Create a task for permission deletion
+        task_data = {
+            'action': 'delete',
+            'folder_id': folder.id,
+            'folder_path': folder.path,
+            'folder_name': folder.name,
+            'user_id': user.id,
+            'username': user.username,
+            'user_full_name': user.full_name,
+            'ad_group_id': ad_group.id,
+            'ad_group_name': ad_group.name,
+            'permission_type': permission_type,
+            'csv_file_path': csv_file_path,
+            'original_request_id': original_request.id if original_request else None,
+            'deleted_by_id': user.id,
+            'deleted_by_username': user.username,
+            'execution_timestamp': datetime.utcnow().isoformat()
+        }
+        
+        # Create Airflow task for applying the permission deletion
+        from app.models import Task
+        airflow_task = Task(
+            name=f"Airflow DAG delete user permission: {user.username} -> {folder.name} ({ad_group.name})",
+            task_type='airflow_dag',
+            status='pending',
+            max_attempts=config['max_retries'],
+            attempt_count=0,
+            created_by_id=user.id,
+            permission_request_id=original_request.id if original_request else None,
+            next_execution_at=datetime.utcnow()  # Execute immediately
+        )
+        
+        # Set task data
+        airflow_task.set_task_data(task_data)
+        
+        db.session.add(airflow_task)
+        db.session.flush()  # Get the ID
+        
+        # Create verification task (delayed by retry_delay)
+        verification_task = Task(
+            name=f"AD verification delete user: {user.username} -> {folder.name} ({ad_group.name})",
+            task_type='ad_verification',
+            status='pending',
+            max_attempts=config['max_retries'],
+            attempt_count=0,
+            created_by_id=user.id,
+            permission_request_id=original_request.id if original_request else None,
+            next_execution_at=datetime.utcnow() + timedelta(seconds=config['retry_delay'])
+        )
+        
+        # Create verification task data
+        verification_data = task_data.copy()
+        verification_data.update({
+            'depends_on_task_id': airflow_task.id,
+            'verification_type': 'user_permission_deletion',
+            'expected_changes': {
+                'folder_path': folder.path,
+                'group': ad_group.name,
+                'access_type': permission_type,
+                'action': 'delete',
+                'user': user.username
+            }
+        })
+        verification_task.set_task_data(verification_data)
+        
+        db.session.add(verification_task)
+        db.session.commit()
+        
+        logger.info(f"Created delete user permission tasks for folder {folder.id}, user {user.id}, group {ad_group.id}")
+        return airflow_task
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error creating user permission deletion tasks: {str(e)}")
+        return None
+
+def create_permission_deletion_task(permission_request, deleted_by, csv_file_path):
+    """Create a task for deleting a permission based on a permission request"""
+    try:
+        # Get configuration
+        task_service = TaskService()
+        config = task_service.get_config()
+        
+        # Create a task for permission deletion
+        task_data = {
+            'action': 'delete',
+            'permission_request_id': permission_request.id,
+            'folder_id': permission_request.folder_id,
+            'folder_path': permission_request.folder.path,
+            'folder_name': permission_request.folder.name,
+            'user_id': permission_request.requester_id,
+            'username': permission_request.requester.username,
+            'ad_group_id': permission_request.ad_group_id,
+            'ad_group_name': permission_request.ad_group.name if permission_request.ad_group else None,
+            'permission_type': permission_request.permission_type,
+            'csv_file_path': csv_file_path,
+            'deleted_by_id': deleted_by.id,
+            'deleted_by_username': deleted_by.username,
+            'execution_timestamp': datetime.utcnow().isoformat()
+        }
+        
+        # Create Airflow task for applying the permission deletion
+        from app.models import Task
+        airflow_task = Task(
+            name=f"Airflow DAG delete permission request #{permission_request.id}",
+            task_type='airflow_dag',
+            status='pending',
+            max_attempts=config['max_retries'],
+            attempt_count=0,
+            created_by_id=deleted_by.id,
+            permission_request_id=permission_request.id,
+            next_execution_at=datetime.utcnow()  # Execute immediately
+        )
+        
+        # Set task data
+        airflow_task.set_task_data(task_data)
+        
+        db.session.add(airflow_task)
+        db.session.flush()  # Get the ID
+        
+        # Create verification task (delayed by retry_delay)
+        verification_task = Task(
+            name=f"AD verification delete permission request #{permission_request.id}",
+            task_type='ad_verification',
+            status='pending',
+            max_attempts=config['max_retries'],
+            attempt_count=0,
+            created_by_id=deleted_by.id,
+            permission_request_id=permission_request.id,
+            next_execution_at=datetime.utcnow() + timedelta(seconds=config['retry_delay'])
+        )
+        
+        # Create verification task data
+        verification_data = task_data.copy()
+        verification_data.update({
+            'depends_on_task_id': airflow_task.id,
+            'verification_type': 'permission_request_deletion',
+            'expected_changes': {
+                'folder_path': permission_request.folder.path,
+                'group': permission_request.ad_group.name if permission_request.ad_group else None,
+                'access_type': permission_request.permission_type,
+                'action': 'delete',
+                'user': permission_request.requester.username
+            }
+        })
+        verification_task.set_task_data(verification_data)
+        
+        db.session.add(verification_task)
+        db.session.commit()
+        
+        logger.info(f"Created delete permission request tasks for request {permission_request.id}")
+        return airflow_task
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error creating permission request deletion tasks: {str(e)}")
+        return None
