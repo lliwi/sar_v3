@@ -8,11 +8,12 @@ def make_celery(app=None):
     
     celery = Celery(
         app.import_name,
-        backend=app.config.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0'),
-        broker=app.config.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+        backend=app.config.get('result_backend', 'redis://localhost:6379/0'),
+        broker=app.config.get('broker_url', 'redis://localhost:6379/0')
     )
     
     celery.conf.update(app.config)
+    celery.conf.broker_connection_retry_on_startup = True
     
     class ContextTask(celery.Task):
         """Make celery tasks work with Flask app context."""
