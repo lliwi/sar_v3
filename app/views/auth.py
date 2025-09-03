@@ -117,8 +117,17 @@ def login():
                 logger.debug(f"Admin groups configured: {admin_groups}")
                 
                 # Check if user is in admin groups
-                is_domain_admin = any(group for group in user_groups 
-                                    if any(admin_group in group for admin_group in admin_groups))
+                # Extract group names from DNs (format: CN=GroupName,OU=...)
+                user_group_names = []
+                for group_dn in user_groups:
+                    if group_dn.startswith('CN='):
+                        # Extract group name from DN
+                        group_name = group_dn.split(',')[0][3:]  # Remove 'CN=' prefix
+                        user_group_names.append(group_name)
+                
+                logger.debug(f"Extracted group names for {username}: {user_group_names}")
+                
+                is_domain_admin = any(group_name in admin_groups for group_name in user_group_names)
                 logger.debug(f"User {username} is admin: {is_domain_admin}")
                 
                 if is_domain_admin:
