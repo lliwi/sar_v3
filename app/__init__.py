@@ -118,9 +118,18 @@ def create_app(config_name=None):
     app.register_blueprint(api_bp, url_prefix='/api')
     app.register_blueprint(admin_bp, url_prefix='/admin')
     
-    # Create tables and default data
+    # Create tables and default data only if needed
     with app.app_context():
-        db.create_all()
+        # Only create tables if they don't exist (safer for production)
+        try:
+            # Check if main table exists by trying to query it
+            from app.models import Role
+            Role.query.first()  # This will fail if table doesn't exist
+        except Exception:
+            # Tables don't exist, create them
+            db.create_all()
+            
+        # Ensure default roles exist (safe to run multiple times)
         from app.models import Role
         Role.create_default_roles()
         
