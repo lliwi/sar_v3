@@ -62,36 +62,71 @@ class LDAPService:
         all_entries = []
         
         if self.search_ous:
-            # Search in each configured OU
+            # Search in each configured OU with pagination
             for ou in self.search_ous:
                 ou = ou.strip()  # Remove any whitespace
                 if ou:
                     try:
                         logger.debug(f"Searching in OU: {ou}")
-                        conn.search(
-                            search_base=ou,
-                            search_filter=search_filter,
-                            attributes=attributes,
-                            search_scope=scope
-                        )
-                        all_entries.extend(conn.entries)
-                        logger.debug(f"Found {len(conn.entries)} entries in {ou}")
+                        ou_entries = self._search_with_pagination(conn, ou, search_filter, attributes)
+                        all_entries.extend(ou_entries)
+                        logger.debug(f"Found {len(ou_entries)} entries in {ou}")
                     except Exception as e:
                         logger.warning(f"Error searching in OU {ou}: {str(e)}")
                         continue
         else:
-            # Fallback to base DN search
+            # Fallback to base DN search with pagination
             logger.debug(f"Searching in base DN: {self.base_dn}")
-            conn.search(
-                search_base=self.base_dn,
-                search_filter=search_filter,
-                attributes=attributes,
-                search_scope=scope
-            )
-            all_entries.extend(conn.entries)
+            all_entries = self._search_with_pagination(conn, self.base_dn, search_filter, attributes)
         
         # Return all found entries (cannot modify conn.entries directly)
         return all_entries
+    
+    def _search_with_pagination(self, conn, search_base, search_filter, attributes, page_size=1000):
+        """Search with pagination to get all results"""
+        all_entries = []
+        
+        try:
+            # Initialize paged search
+            conn.search(
+                search_base=search_base,
+                search_filter=search_filter,
+                attributes=attributes,
+                paged_size=page_size,
+                search_scope=ldap3.SUBTREE
+            )
+            
+            # Get first page
+            all_entries.extend(conn.entries)
+            logger.debug(f"First page: {len(conn.entries)} entries from {search_base}")
+            
+            # Get additional pages if available
+            cookie = conn.result['controls']['1.2.840.113556.1.4.319']['value']['cookie']
+            while cookie:
+                conn.search(
+                    search_base=search_base,
+                    search_filter=search_filter,
+                    attributes=attributes,
+                    paged_size=page_size,
+                    search_scope=ldap3.SUBTREE,
+                    paged_cookie=cookie
+                )
+                
+                all_entries.extend(conn.entries)
+                logger.debug(f"Additional page: {len(conn.entries)} entries from {search_base}")
+                
+                try:
+                    cookie = conn.result['controls']['1.2.840.113556.1.4.319']['value']['cookie']
+                except KeyError:
+                    # No more pages
+                    break
+                    
+            logger.info(f"Pagination completed: {len(all_entries)} total entries from {search_base}")
+            return all_entries
+            
+        except Exception as e:
+            logger.error(f"Error in paginated search for {search_base}: {str(e)}")
+            return all_entries  # Return what we have so far
     
     def authenticate_user(self, username, password):
         """Authenticate user against LDAP"""
@@ -219,27 +254,17 @@ class LDAPService:
                 all_entries = self._search_in_multiple_ous(conn, search_filter, attributes, ldap3.SUBTREE)
                 # Also include groups from base DN to capture system groups
                 if self.group_dn:
-                    conn.search(
-                        search_base=self.group_dn,
-                        search_filter=search_filter,
-                        attributes=attributes,
-                        paged_size=100
-                    )
+                    # Use pagination to get all groups
+                    group_entries = self._search_with_pagination(conn, self.group_dn, search_filter, attributes)
                     # Avoid duplicates by checking if entries are already in all_entries
                     existing_dns = {entry.entry_dn for entry in all_entries}
-                    for entry in conn.entries:
+                    for entry in group_entries:
                         if entry.entry_dn not in existing_dns:
                             all_entries.append(entry)
             else:
-                # Fallback to original behavior
+                # Fallback to original behavior with pagination
                 search_base = self.group_dn if self.group_dn else self.base_dn
-                conn.search(
-                    search_base=search_base,
-                    search_filter=search_filter,
-                    attributes=attributes,
-                    paged_size=100
-                )
-                all_entries = conn.entries
+                all_entries = self._search_with_pagination(conn, search_base, search_filter, attributes)
             
             synced_count = 0
             current_time = datetime.utcnow()
@@ -419,15 +444,8 @@ class LDAPService:
             if self.search_ous:
                 all_entries = self._search_in_multiple_ous(conn, search_filter, attributes, ldap3.SUBTREE)
             else:
-                # Fallback to base DN search
-                conn.search(
-                    search_base=self.base_dn,
-                    search_filter=search_filter,
-                    attributes=attributes,
-                    paged_size=100,
-                    search_scope=ldap3.SUBTREE
-                )
-                all_entries = conn.entries
+                # Fallback to base DN search with pagination
+                all_entries = self._search_with_pagination(conn, self.base_dn, search_filter, attributes)
             
             synced_count = 0
             current_time = datetime.utcnow()

@@ -202,25 +202,44 @@ def new_folder():
         
         # Add permissions (new folder, so no existing permissions to worry about)
         try:
-            # Add read permissions
-            for group_id in form.read_groups.data:
-                read_permission = FolderPermission(
-                    folder_id=folder.id,
-                    ad_group_id=group_id,
-                    permission_type='read',
-                    granted_by_id=current_user.id
-                )
-                db.session.add(read_permission)
+            # Deduplicate group IDs and convert to integers to avoid constraint violations
+            read_groups_raw = form.read_groups.data if form.read_groups.data else []
+            write_groups_raw = form.write_groups.data if form.write_groups.data else []
             
-            # Add write permissions
-            for group_id in form.write_groups.data:
-                write_permission = FolderPermission(
+            # Convert to integers and deduplicate
+            unique_read_groups = list(set(int(g) for g in read_groups_raw if g and str(g).strip()))
+            unique_write_groups = list(set(int(g) for g in write_groups_raw if g and str(g).strip()))
+            
+            # Create a comprehensive mapping of group -> permission type
+            # Write permissions override read permissions
+            group_permissions = {}
+            
+            # First, add all read permissions
+            for group_id in unique_read_groups:
+                group_permissions[group_id] = 'read'
+            
+            # Then override with write permissions (write includes read)
+            for group_id in unique_write_groups:
+                group_permissions[group_id] = 'write'
+            
+            # Now create permissions based on the final mapping
+            for group_id, permission_type in group_permissions.items():
+                # Double-check that permission doesn't already exist (should not happen in new folder)
+                existing = FolderPermission.query.filter_by(
                     folder_id=folder.id,
                     ad_group_id=group_id,
-                    permission_type='write',
-                    granted_by_id=current_user.id
-                )
-                db.session.add(write_permission)
+                    permission_type=permission_type,
+                    is_active=True
+                ).first()
+                
+                if not existing:
+                    permission = FolderPermission(
+                        folder_id=folder.id,
+                        ad_group_id=group_id,
+                        permission_type=permission_type,
+                        granted_by_id=current_user.id
+                    )
+                    db.session.add(permission)
                     
         except Exception as e:
             db.session.rollback()
