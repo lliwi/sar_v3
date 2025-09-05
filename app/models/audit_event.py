@@ -15,7 +15,7 @@ class AuditEvent(db.Model):
     event_data = db.Column(db.Text)  # JSON string with additional data
     ip_address = db.Column(db.String(45))  # IPv4 or IPv6
     user_agent = db.Column(db.String(500))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.now, index=True)
     
     # Relationships
     user = db.relationship('User', backref='audit_events')
