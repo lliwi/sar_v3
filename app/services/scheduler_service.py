@@ -34,10 +34,20 @@ class SchedulerService:
     def get_config(self) -> Dict[str, Any]:
         """Obtiene la configuración del programador desde variables de entorno"""
         return {
+            # Intervalos de sincronización específicos (en segundos)
+            'user_sync_interval': int(os.getenv('AD_USER_SYNC_INTERVAL', 600)),  # 10 minutos por defecto
+            'group_sync_interval': int(os.getenv('AD_GROUP_SYNC_INTERVAL', 300)),  # 5 minutos por defecto
+            'user_permissions_sync_interval': int(os.getenv('AD_USER_PERMISSIONS_SYNC_INTERVAL', 900)),  # 15 minutos por defecto
+            
+            # Intervalo general para compatibilidad (usado por task scheduler)
             'processing_interval': int(os.getenv('TASK_PROCESSING_INTERVAL', 300)),  # 5 minutos por defecto
+            
+            # Configuraciones de habilitación
             'user_sync_enabled': os.getenv('AD_USER_SYNC_ENABLED', 'true').lower() == 'true',
             'group_sync_enabled': os.getenv('AD_GROUP_SYNC_ENABLED', 'true').lower() == 'true',
             'user_permissions_sync_enabled': os.getenv('AD_USER_PERMISSIONS_SYNC_ENABLED', 'true').lower() == 'true',
+            
+            # Configuraciones de reintentos
             'max_retries': int(os.getenv('SYNC_MAX_RETRIES', 3)),
             'retry_delay': int(os.getenv('SYNC_RETRY_DELAY', 60))  # 1 minuto por defecto
         }
@@ -96,21 +106,23 @@ class SchedulerService:
         try:
             config = self.get_config()
             now = datetime.utcnow()
-            interval_minutes = config['processing_interval'] / 60
             
             # Sincronización de usuarios
             if config['user_sync_enabled']:
-                if self._should_sync('user', now, interval_minutes):
+                user_interval_minutes = config['user_sync_interval'] / 60
+                if self._should_sync('user', now, user_interval_minutes):
                     self._sync_users()
             
             # Sincronización de grupos AD
             if config['group_sync_enabled']:
-                if self._should_sync('group', now, interval_minutes):
+                group_interval_minutes = config['group_sync_interval'] / 60
+                if self._should_sync('group', now, group_interval_minutes):
                     self._sync_ad_groups()
             
             # Sincronización de permisos de usuarios
             if config['user_permissions_sync_enabled']:
-                if self._should_sync('user_permissions', now, interval_minutes):
+                permissions_interval_minutes = config['user_permissions_sync_interval'] / 60
+                if self._should_sync('user_permissions', now, permissions_interval_minutes):
                     self._sync_user_permissions()
         finally:
             self._sync_lock.release()
@@ -152,7 +164,7 @@ class SchedulerService:
                 metadata={
                     'synced_count': synced_count,
                     'sync_type': 'automatic',
-                    'scheduler_interval': self.get_config()['processing_interval']
+                    'user_sync_interval': self.get_config()['user_sync_interval']
                 }
             )
             
@@ -200,7 +212,7 @@ class SchedulerService:
                 metadata={
                     'synced_count': synced_count,
                     'sync_type': 'automatic',
-                    'scheduler_interval': self.get_config()['processing_interval']
+                    'group_sync_interval': self.get_config()['group_sync_interval']
                 }
             )
             
@@ -267,7 +279,7 @@ class SchedulerService:
                     'permissions_processed': results['permissions_processed'],
                     'errors_count': len(results['errors']),
                     'sync_type': 'automatic',
-                    'scheduler_interval': self.get_config()['processing_interval']
+                    'user_permissions_sync_interval': self.get_config()['user_permissions_sync_interval']
                 }
             )
             
@@ -338,9 +350,9 @@ class SchedulerService:
                 'user_permissions': self.last_user_permissions_sync.isoformat() if self.last_user_permissions_sync else None
             },
             'next_syncs': {
-                'users': self._get_next_sync_time('user', config['processing_interval']),
-                'groups': self._get_next_sync_time('group', config['processing_interval']),
-                'user_permissions': self._get_next_sync_time('user_permissions', config['processing_interval'])
+                'users': self._get_next_sync_time('user', config['user_sync_interval']),
+                'groups': self._get_next_sync_time('group', config['group_sync_interval']),
+                'user_permissions': self._get_next_sync_time('user_permissions', config['user_permissions_sync_interval'])
             }
         }
     

@@ -1,5 +1,8 @@
 FROM python:3.11-slim
 
+# Set environment variable to avoid debconf errors
+ENV DEBIAN_FRONTEND=noninteractive
+
 WORKDIR /app
 
 # Install system dependencies

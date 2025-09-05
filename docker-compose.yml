@@ -81,6 +81,10 @@ services:
       - AD_USER_SYNC_ENABLED=${AD_USER_SYNC_ENABLED:-true}
       - AD_GROUP_SYNC_ENABLED=${AD_GROUP_SYNC_ENABLED:-true}
       - AD_USER_PERMISSIONS_SYNC_ENABLED=${AD_USER_PERMISSIONS_SYNC_ENABLED:-true}
+      # AD Synchronization Interval Configuration (in seconds)
+      - AD_USER_SYNC_INTERVAL=${AD_USER_SYNC_INTERVAL:-600}  # 10 minutes default
+      - AD_GROUP_SYNC_INTERVAL=${AD_GROUP_SYNC_INTERVAL:-300}  # 5 minutes default
+      - AD_USER_PERMISSIONS_SYNC_INTERVAL=${AD_USER_PERMISSIONS_SYNC_INTERVAL:-900}  # 15 minutes default
       - SYNC_MAX_RETRIES=${SYNC_MAX_RETRIES:-3}
       - SYNC_RETRY_DELAY=${SYNC_RETRY_DELAY:-60}
       # Feature Flags
@@ -241,6 +245,10 @@ services:
       - AD_USER_SYNC_ENABLED=${AD_USER_SYNC_ENABLED:-true}
       - AD_GROUP_SYNC_ENABLED=${AD_GROUP_SYNC_ENABLED:-true}
       - AD_USER_PERMISSIONS_SYNC_ENABLED=${AD_USER_PERMISSIONS_SYNC_ENABLED:-true}
+      # AD Synchronization Interval Configuration (in seconds)
+      - AD_USER_SYNC_INTERVAL=${AD_USER_SYNC_INTERVAL:-600}  # 10 minutes default
+      - AD_GROUP_SYNC_INTERVAL=${AD_GROUP_SYNC_INTERVAL:-300}  # 5 minutes default
+      - AD_USER_PERMISSIONS_SYNC_INTERVAL=${AD_USER_PERMISSIONS_SYNC_INTERVAL:-900}  # 15 minutes default
       - SYNC_MAX_RETRIES=${SYNC_MAX_RETRIES:-3}
       - SYNC_RETRY_DELAY=${SYNC_RETRY_DELAY:-60}
     depends_on:
