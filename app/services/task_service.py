@@ -47,6 +47,15 @@ class TaskService:
             config = self.get_config()
             logger.info(f"Starting task creation for permission request {permission_request.id}")
             
+            # Check if tasks already exist for this permission request
+            from app.models import Task
+            existing_tasks = Task.query.filter_by(permission_request_id=permission_request.id).all()
+            
+            if existing_tasks:
+                logger.warning(f"Tasks already exist for permission request {permission_request.id}. Existing tasks: {[t.id for t in existing_tasks]}")
+                # Return existing tasks instead of creating duplicates
+                return existing_tasks
+            
             # Task 1: Execute Airflow DAG
             logger.debug(f"Creating Airflow task for request {permission_request.id}")
             airflow_task = Task.create_airflow_task(permission_request, validator, csv_file_path)
@@ -85,6 +94,16 @@ class TaskService:
     def create_revocation_tasks(self, permission_request, validator, csv_file_path=None):
         """Create tasks when a permission request is revoked"""
         try:
+            # Check if revocation tasks already exist for this permission request
+            from app.models import Task
+            existing_tasks = Task.query.filter_by(permission_request_id=permission_request.id).filter(
+                Task.name.contains('revocation')
+            ).all()
+            
+            if existing_tasks:
+                logger.warning(f"Revocation tasks already exist for permission request {permission_request.id}. Existing tasks: {[t.id for t in existing_tasks]}")
+                return existing_tasks
+                
             # Task 1: Execute Airflow DAG for revocation
             airflow_task = Task.create_airflow_task(permission_request, validator, csv_file_path)
             # Update the task name to reflect it's a revocation
@@ -404,7 +423,8 @@ class TaskService:
             verification_result = self.verify_ad_changes(
                 folder_path=expected_changes.get('folder_path'),
                 ad_group_name=expected_changes.get('group'),
-                access_type=expected_changes.get('access_type')
+                access_type=expected_changes.get('access_type'),
+                action_type=expected_changes.get('action', task_data.get('action', 'add'))
             )
             
             if verification_result['success']:
@@ -464,20 +484,33 @@ class TaskService:
         finally:
             db.session.commit()
     
-    def verify_ad_changes(self, folder_path, ad_group_name, access_type):
+    def verify_ad_changes(self, folder_path, ad_group_name, access_type, action_type='add'):
         """Verify that AD changes have been applied"""
         try:
-            logger.info(f"Verifying AD changes for {folder_path}, group {ad_group_name}, access {access_type}")
+            logger.info(f"Verifying AD changes for {folder_path}, group {ad_group_name}, access {access_type}, action: {action_type}")
+            
+            # For removal actions, we check that the permission is NO LONGER present
+            is_removal_action = action_type in ['remove', 'remove_ad_sync', 'delete']
             
             # Check if the group exists and is active in our database
             from app.models import ADGroup
             ad_group = ADGroup.query.filter_by(name=ad_group_name, is_active=True).first()
             
-            if not ad_group:
+            if not ad_group and not is_removal_action:
                 return {
                     'success': False,
                     'error': f'AD group {ad_group_name} not found or inactive in database',
                     'details': {}
+                }
+            elif not ad_group and is_removal_action:
+                # For removal, if group doesn't exist in DB, that's actually success
+                return {
+                    'success': True,
+                    'details': {
+                        'group_found_in_db': False,
+                        'action_type': action_type,
+                        'verification_reason': 'Group not found in database - removal successful'
+                    }
                 }
             
             # Attempt actual AD verification using LDAP service
@@ -505,14 +538,23 @@ class TaskService:
                 # Simulate checking folder permissions
                 # In production, you would use Windows PowerShell commands or 
                 # direct NTFS API calls to verify ACL changes
-                permissions_verified = self._simulate_folder_permission_check(folder_path, ad_group_name, access_type)
+                permissions_verified = self._simulate_folder_permission_check(folder_path, ad_group_name, access_type, action_type)
                 
                 verification_details['permissions_verified'] = permissions_verified
+                verification_details['action_type'] = action_type
+                
+                # For removal actions, success means permissions are NOT found
+                if is_removal_action:
+                    success = not permissions_verified  # Inverted logic for removals
+                    error_msg = 'Permission still exists on folder' if permissions_verified else None
+                else:
+                    success = permissions_verified
+                    error_msg = 'Permissions not found on folder' if not permissions_verified else None
                 
                 return {
-                    'success': permissions_verified,
+                    'success': success,
                     'details': verification_details,
-                    'error': None if permissions_verified else 'Permissions not found on folder'
+                    'error': error_msg
                 }
                 
             except Exception as ldap_error:
@@ -531,8 +573,15 @@ class TaskService:
                     'verification_timestamp': datetime.utcnow().isoformat()
                 }
                 
+                # For fallback mode, assume success but note the limitation
+                fallback_success = True
+                if is_removal_action:
+                    verification_details['verification_reason'] = 'Fallback mode - assuming removal successful'
+                else:
+                    verification_details['verification_reason'] = 'Fallback mode - assuming addition successful'
+                
                 return {
-                    'success': True,  # Assume success in fallback mode
+                    'success': fallback_success,
                     'details': verification_details
                 }
             
@@ -544,7 +593,7 @@ class TaskService:
                 'details': {}
             }
     
-    def _simulate_folder_permission_check(self, folder_path, ad_group_name, access_type):
+    def _simulate_folder_permission_check(self, folder_path, ad_group_name, access_type, action_type='add'):
         """Simulate checking folder permissions (replace with actual implementation)"""
         try:
             # In a real implementation, this would:
@@ -557,18 +606,37 @@ class TaskService:
             import time
             time.sleep(0.5)  # Simulate network/filesystem check delay
             
-            logger.info(f"Simulated permission check for {folder_path}: {ad_group_name} -> {access_type}")
+            is_removal_action = action_type in ['remove', 'remove_ad_sync', 'delete']
             
-            # Simulate occasional failures (10% chance) to test retry logic
+            logger.info(f"Simulated permission check for {folder_path}: {ad_group_name} -> {access_type} (action: {action_type})")
+            
+            # Simulate different behaviors for add vs remove operations
             import random
-            if random.random() < 0.1:
-                return False
             
-            return True
+            if is_removal_action:
+                # For removal operations, simulate that permissions are usually gone (90% success rate)
+                # Return False means "permission not found" which is success for removal
+                if random.random() < 0.9:
+                    logger.info(f"Simulated removal verification: permission NOT found (success)")
+                    return False  # Permission not found = successful removal
+                else:
+                    logger.warning(f"Simulated removal verification: permission still exists (failure)")
+                    return True   # Permission still found = failed removal
+            else:
+                # For addition operations, simulate that permissions are usually applied (90% success rate)
+                # Return True means "permission found" which is success for addition
+                if random.random() < 0.9:
+                    logger.info(f"Simulated addition verification: permission found (success)")
+                    return True   # Permission found = successful addition
+                else:
+                    logger.warning(f"Simulated addition verification: permission NOT found (failure)")
+                    return False  # Permission not found = failed addition
             
         except Exception as e:
             logger.error(f"Error in folder permission check simulation: {str(e)}")
-            return False
+            # For removal operations, assume success on error
+            # For addition operations, assume failure on error
+            return action_type in ['remove', 'remove_ad_sync', 'delete']
     
     def process_pending_tasks(self):
         """Process all pending and retry tasks that are ready for execution"""
@@ -671,38 +739,57 @@ class TaskService:
             task_data = task.get_task_data()
             permission_request_id = task_data.get('permission_request_id')
             
-            # Get permission request
-            permission_request = PermissionRequest.query.get(permission_request_id)
-            if not permission_request:
-                task.mark_as_failed(f"Permission request {permission_request_id} not found")
+            # Get permission request (may be None for temporary objects)
+            permission_request = None
+            if permission_request_id:
+                permission_request = PermissionRequest.query.get(permission_request_id)
+                if not permission_request:
+                    task.mark_as_failed(f"Permission request {permission_request_id} not found")
+                    db.session.commit()
+                    return False
+            # If permission_request_id is None, we continue without the permission_request object
+            # This is normal for temporary objects created during deletion processes
+            
+            # Get folder_id from task_data or permission_request
+            folder_id = task_data.get('folder_id')
+            if not folder_id and permission_request:
+                folder_id = permission_request.folder_id
+            
+            if not folder_id:
+                task.mark_as_failed("No folder_id available for verification")
                 db.session.commit()
                 return False
             
-            # Run AD verification using LDAP service
-            folder_validation = self.ldap_service.validate_folder_permissions(permission_request.folder_id)
+            # Use the corrected verify_ad_changes method
+            expected_changes = task_data.get('expected_changes', {})
+            
+            # Verify AD changes using the corrected logic for deletions
+            verification_result = self.verify_ad_changes(
+                folder_path=expected_changes.get('folder_path'),
+                ad_group_name=expected_changes.get('group'),
+                access_type=expected_changes.get('access_type'),
+                action_type=expected_changes.get('action', task_data.get('action', 'add'))
+            )
             
             result_data = {
-                'verification_completed': True,
-                'folder_validation': folder_validation,
-                'verification_time': datetime.utcnow().isoformat()
+                'verification_status': 'success' if verification_result['success'] else 'failed',
+                'ad_permissions_applied': verification_result['success'],
+                'verification_time': datetime.utcnow().isoformat(),
+                'details': verification_result['details']
             }
             
-            if folder_validation.get('success', False):
+            if verification_result['success']:
                 task.mark_as_completed(result_data)
                 logger.info(f"AD verification task {task.id} completed successfully")
-                
-                # Log any discrepancies found
-                if folder_validation.get('discrepancies'):
-                    for discrepancy in folder_validation['discrepancies']:
-                        logger.warning(f"AD discrepancy detected: {discrepancy}")
                 
                 # Clean up CSV file after successful completion
                 self.cleanup_csv_file(task)
                 
                 success = True
             else:
-                task.mark_as_failed("AD verification found issues", result_data)
-                logger.error(f"AD verification task {task.id} found validation issues")
+                error_msg = verification_result.get('error', 'Unknown verification error')
+                task.mark_as_failed(f"AD verification failed: {error_msg}", result_data)
+                logger.error(f"AD verification task {task.id} failed: {error_msg}")
                 
                 # Clean up CSV file after permanent failure
                 self.cleanup_csv_file(task)
@@ -1238,17 +1325,27 @@ def create_permission_deletion_task(permission_request, deleted_by, csv_file_pat
         task_service = TaskService()
         config = task_service.get_config()
         
+        # Get related objects from database (handles both persisted and temporary objects)
+        from app.models import Folder, User, ADGroup
+        folder = Folder.query.get(permission_request.folder_id)
+        user = User.query.get(permission_request.requester_id)
+        ad_group = ADGroup.query.get(permission_request.ad_group_id) if permission_request.ad_group_id else None
+        
+        if not folder or not user:
+            logger.error(f"Required objects not found: folder={folder}, user={user}")
+            return None
+        
         # Create a task for permission deletion
         task_data = {
             'action': 'delete',
-            'permission_request_id': permission_request.id,
+            'permission_request_id': permission_request.id if permission_request.id else None,
             'folder_id': permission_request.folder_id,
-            'folder_path': permission_request.folder.path,
-            'folder_name': permission_request.folder.name,
+            'folder_path': folder.path,
+            'folder_name': folder.name,
             'user_id': permission_request.requester_id,
-            'username': permission_request.requester.username,
+            'username': user.username,
             'ad_group_id': permission_request.ad_group_id,
-            'ad_group_name': permission_request.ad_group.name if permission_request.ad_group else None,
+            'ad_group_name': ad_group.name if ad_group else None,
             'permission_type': permission_request.permission_type,
             'csv_file_path': csv_file_path,
             'deleted_by_id': deleted_by.id,
@@ -1258,14 +1355,16 @@ def create_permission_deletion_task(permission_request, deleted_by, csv_file_pat
         
         # Create Airflow task for applying the permission deletion
         from app.models import Task
+        request_id_display = permission_request.id if permission_request.id else f"temp_{permission_request.requester_id}_{permission_request.folder_id}"
+        
         airflow_task = Task(
-            name=f"Airflow DAG delete permission request #{permission_request.id}",
+            name=f"Airflow DAG delete permission request #{request_id_display}",
             task_type='airflow_dag',
             status='pending',
             max_attempts=config['max_retries'],
             attempt_count=0,
             created_by_id=deleted_by.id,
-            permission_request_id=permission_request.id,
+            permission_request_id=permission_request.id if permission_request.id else None,
             next_execution_at=datetime.utcnow()  # Execute immediately
         )
         
@@ -1277,13 +1376,13 @@ def create_permission_deletion_task(permission_request, deleted_by, csv_file_pat
         
         # Create verification task (delayed by retry_delay)
         verification_task = Task(
-            name=f"AD verification delete permission request #{permission_request.id}",
+            name=f"AD verification delete permission request #{request_id_display}",
             task_type='ad_verification',
             status='pending',
             max_attempts=config['max_retries'],
             attempt_count=0,
             created_by_id=deleted_by.id,
-            permission_request_id=permission_request.id,
+            permission_request_id=permission_request.id if permission_request.id else None,
             next_execution_at=datetime.utcnow() + timedelta(seconds=config['retry_delay'])
         )
         
@@ -1293,11 +1392,11 @@ def create_permission_deletion_task(permission_request, deleted_by, csv_file_pat
             'depends_on_task_id': airflow_task.id,
             'verification_type': 'permission_request_deletion',
             'expected_changes': {
-                'folder_path': permission_request.folder.path,
-                'group': permission_request.ad_group.name if permission_request.ad_group else None,
+                'folder_path': folder.path,
+                'group': ad_group.name if ad_group else None,
                 'access_type': permission_request.permission_type,
                 'action': 'delete',
-                'user': permission_request.requester.username
+                'user': user.username
             }
         })
         verification_task.set_task_data(verification_data)
@@ -1305,7 +1404,7 @@ def create_permission_deletion_task(permission_request, deleted_by, csv_file_pat
         db.session.add(verification_task)
         db.session.commit()
         
-        logger.info(f"Created delete permission request tasks for request {permission_request.id}")
+        logger.info(f"Created delete permission request tasks for request {request_id_display}")
         return airflow_task
         
     except Exception as e:

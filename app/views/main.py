@@ -925,7 +925,12 @@ def delete_user_permission():
     folder = Folder.query.get_or_404(folder_id)
     ad_group = ADGroup.query.get_or_404(ad_group_id)
     
-    # Find the user's permission request for this folder/group/type combination
+    # Check what type of permission exists for this user, folder, and permission type
+    permission_found = False
+    user_permission_request = None
+    permission_source = None
+    
+    # 1. First, try to find an existing approved permission request
     user_permission_request = PermissionRequest.query.filter_by(
         requester_id=current_user.id,
         folder_id=folder_id,
@@ -934,9 +939,74 @@ def delete_user_permission():
         status='approved'
     ).first()
     
-    if not user_permission_request:
-        flash('No se encontró el permiso especificado.', 'error')
+    if user_permission_request:
+        permission_found = True
+        permission_source = 'permission_request'
+    
+    # 2. If no permission request found, check for direct user permission
+    if not permission_found:
+        from app.models import UserFolderPermission
+        direct_permission = UserFolderPermission.query.filter_by(
+            user_id=current_user.id,
+            folder_id=folder_id,
+            permission_type=permission_type,
+            is_active=True
+        ).first()
+        
+        if direct_permission:
+            # Create a permission request for this direct permission
+            user_permission_request = PermissionRequest(
+                requester_id=current_user.id,
+                folder_id=folder_id,
+                permission_type=permission_type,
+                ad_group_id=ad_group_id,
+                status='approved',
+                justification='Direct permission removal from my permissions',
+                validator_id=current_user.id,
+                validation_date=datetime.utcnow()
+            )
+            permission_found = True
+            permission_source = 'direct_permission'
+    
+    # 3. If still not found, check for AD-synced permission
+    if not permission_found:
+        from app.models import UserADGroupMembership, FolderPermission
+        
+        # Check if user is member of the specified AD group
+        membership = UserADGroupMembership.query.filter_by(
+            user_id=current_user.id,
+            ad_group_id=ad_group_id,
+            is_active=True
+        ).first()
+        
+        # Check if folder has permission for this AD group
+        folder_permission = FolderPermission.query.filter_by(
+            folder_id=folder_id,
+            ad_group_id=ad_group_id,
+            permission_type=permission_type,
+            is_active=True
+        ).first()
+        
+        if membership and folder_permission:
+            # This is an AD-synced permission, create a temporary permission request for processing
+            user_permission_request = PermissionRequest(
+                requester_id=current_user.id,
+                folder_id=folder_id,
+                permission_type=permission_type,
+                ad_group_id=ad_group_id,
+                status='approved',
+                justification='AD sync removal from my permissions',
+                validator_id=current_user.id,
+                validation_date=datetime.utcnow()
+            )
+            permission_found = True
+            permission_source = 'ad_sync'
+    
+    if not permission_found:
+        flash(f'No se encontró ningún permiso {permission_type} para la carpeta {folder.path} con el grupo {ad_group.name}.', 'error')
         return redirect(url_for('main.my_permissions'))
+    
+    current_app.logger.info(f"Permission found for deletion from my permissions: source={permission_source}, user={current_user.username}, folder={folder.path}, type={permission_type}")
     
     # Generate CSV for permission deletion
     from app.services.csv_generator_service import CSVGeneratorService
@@ -960,10 +1030,16 @@ def delete_user_permission():
     )
     
     if task:
-        # Mark the original request as revoked
-        user_permission_request.status = 'revoked'
-        
-        db.session.commit()
+        # Mark the original request as revoked (only if it was persisted)
+        if user_permission_request.id:  # Check if it's persisted to DB
+            user_permission_request.status = 'revoked'
+            db.session.commit()
+        else:
+            # For AD-synced or direct permissions, we created a temporary request object
+            # Save it now so we have a record of the deletion request
+            user_permission_request.status = 'revoked'
+            db.session.add(user_permission_request)
+            db.session.commit()
         
         # Log audit event
         AuditEvent.log_event(
@@ -1082,7 +1158,12 @@ def delete_user_permission_from_ad_group():
     if ad_group_id:
         ad_group = ADGroup.query.get(ad_group_id)
     
-    # Find permission requests that match this user, folder, and permission type
+    # Check what type of permission exists for this user, folder, and permission type
+    permission_found = False
+    permission_request = None
+    permission_source = None
+    
+    # 1. First, try to find an existing approved permission request
     permission_requests = PermissionRequest.query.filter_by(
         requester_id=user_id,
         folder_id=folder_id,
@@ -1095,9 +1176,102 @@ def delete_user_permission_from_ad_group():
     
     permission_request = permission_requests.first()
     
-    if not permission_request:
-        flash('No se encontró la solicitud de permiso especificada.', 'error')
+    if permission_request:
+        permission_found = True
+        permission_source = 'permission_request'
+    
+    # 2. If no permission request found, check for direct user permission
+    if not permission_found:
+        from app.models import UserFolderPermission
+        direct_permission = UserFolderPermission.query.filter_by(
+            user_id=user_id,
+            folder_id=folder_id,
+            permission_type=permission_type,
+            is_active=True
+        ).first()
+        
+        if direct_permission:
+            # Create a permission request for this direct permission
+            permission_request = PermissionRequest(
+                requester_id=user_id,
+                folder_id=folder_id,
+                permission_type=permission_type,
+                status='approved',
+                justification='Direct permission removal',
+                validator_id=current_user.id,
+                validation_date=datetime.utcnow()
+            )
+            permission_found = True
+            permission_source = 'direct_permission'
+    
+    # 3. If still not found, check for AD-synced permission
+    if not permission_found:
+        from app.models import UserADGroupMembership, FolderPermission
+        
+        if ad_group:
+            # Check specific AD group
+            membership = UserADGroupMembership.query.filter_by(
+                user_id=user_id,
+                ad_group_id=ad_group_id,
+                is_active=True
+            ).first()
+            
+            folder_permission = FolderPermission.query.filter_by(
+                folder_id=folder_id,
+                ad_group_id=ad_group_id,
+                permission_type=permission_type,
+                is_active=True
+            ).first()
+            
+            if membership and folder_permission:
+                permission_request = PermissionRequest(
+                    requester_id=user_id,
+                    folder_id=folder_id,
+                    permission_type=permission_type,
+                    ad_group_id=ad_group_id,
+                    status='approved',
+                    justification='AD sync removal',
+                    validator_id=current_user.id,
+                    validation_date=datetime.utcnow()
+                )
+                permission_found = True
+                permission_source = 'ad_sync'
+        else:
+            # Check all AD groups the user is member of for this folder permission
+            user_memberships = UserADGroupMembership.query.filter_by(
+                user_id=user_id,
+                is_active=True
+            ).all()
+            
+            for membership in user_memberships:
+                folder_permission = FolderPermission.query.filter_by(
+                    folder_id=folder_id,
+                    ad_group_id=membership.ad_group_id,
+                    permission_type=permission_type,
+                    is_active=True
+                ).first()
+                
+                if folder_permission:
+                    permission_request = PermissionRequest(
+                        requester_id=user_id,
+                        folder_id=folder_id,
+                        permission_type=permission_type,
+                        ad_group_id=membership.ad_group_id,
+                        status='approved',
+                        justification='AD sync removal',
+                        validator_id=current_user.id,
+                        validation_date=datetime.utcnow()
+                    )
+                    ad_group = membership.ad_group  # Update ad_group for later use
+                    permission_found = True
+                    permission_source = 'ad_sync'
+                    break
+    
+    if not permission_found:
+        flash(f'No se encontró ningún permiso {permission_type} para el usuario {target_user.username} en la carpeta {folder.path}.', 'error')
         return redirect(url_for('main.manage_resource', folder_id=folder_id))
+    
+    current_app.logger.info(f"Permission found for deletion: source={permission_source}, user={target_user.username}, folder={folder.path}, type={permission_type}")
     
     # Generate CSV for permission deletion
     from app.services.csv_generator_service import CSVGeneratorService
@@ -1126,10 +1300,16 @@ def delete_user_permission_from_ad_group():
     )
     
     if task:
-        # Mark the request as revoked
-        permission_request.status = 'revoked'
-        
-        db.session.commit()
+        # Mark the request as revoked (only if it was persisted)
+        if permission_request.id:  # Check if it's persisted to DB
+            permission_request.status = 'revoked'
+            db.session.commit()
+        else:
+            # For AD-synced permissions, we created a temporary request object
+            # Save it now so we have a record of the deletion request
+            permission_request.status = 'revoked'
+            db.session.add(permission_request)
+            db.session.commit()
         
         # Log audit event
         AuditEvent.log_event(

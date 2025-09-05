@@ -20,10 +20,10 @@ def main():
     # Obtener intervalo de procesamiento de variables de entorno
     interval = int(os.getenv('TASK_PROCESSING_INTERVAL', 300))  # 5 minutos por defecto
     
-    print(f'🚀 Iniciando planificador de tareas SAR v3')
-    print(f'⏱️  Intervalo de procesamiento: {interval} segundos')
-    print(f'📅 Fecha de inicio: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
-    print('-' * 60)
+    print(f'🚀 Iniciando planificador de tareas SAR v3', flush=True)
+    print(f'⏱️  Intervalo de procesamiento: {interval} segundos', flush=True)
+    print(f'📅 Fecha de inicio: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}', flush=True)
+    print('-' * 60, flush=True)
     
     while True:
         try:
@@ -32,11 +32,11 @@ def main():
                 processed_count = task_service.process_pending_tasks()
                 
                 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                print(f'[{current_time}] ✅ Procesadas {processed_count} tareas')
+                print(f'[{current_time}] ✅ Procesadas {processed_count} tareas', flush=True)
                 
         except Exception as e:
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            print(f'[{current_time}] ❌ Error procesando tareas: {str(e)}')
+            print(f'[{current_time}] ❌ Error procesando tareas: {str(e)}', flush=True)
             import traceback
             traceback.print_exc()
         

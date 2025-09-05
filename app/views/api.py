@@ -144,19 +144,9 @@ def validate_permission_by_email(request_id, token):
                 existing_permission.granted_at = datetime.utcnow()
             current_app.logger.info(f'Permission already exists for request {permission_request.id}, skipping creation')
         
-        # Create tasks for Airflow DAG execution and AD verification
-        try:
-            from app.services.task_service import TaskService
-            task_service = TaskService()
-            tasks = task_service.create_approval_tasks(permission_request, validator)
-            
-            if tasks:
-                current_app.logger.info(f"Created {len(tasks)} tasks for email-approved request {permission_request.id}")
-            else:
-                current_app.logger.warning(f"No tasks created for email-approved request {permission_request.id}")
-        except Exception as e:
-            current_app.logger.error(f"Error creating tasks for email-approved request {permission_request.id}: {str(e)}")
-            # Continue with approval even if task creation fails
+        # Note: Tasks are automatically created by the permission_request.approve() method above
+        # No need to create tasks manually here to avoid duplication
+        current_app.logger.info(f"Email approval completed for permission request {permission_request.id}. Tasks created automatically by approve() method.")
         
         # Log audit event
         AuditEvent.log_event(
@@ -497,31 +487,9 @@ def validate_request_api(request_id):
                     existing_permission.granted_at = datetime.utcnow()
                 current_app.logger.info(f'Permission already exists for request {permission_request.id}, skipping creation')
             
-            # Create tasks for Airflow DAG execution and AD verification
-            try:
-                from app.services.task_service import TaskService
-                from app.services.airflow_service import AirflowService
-                
-                task_service = TaskService()
-                airflow_service = AirflowService()
-                
-                # Generate CSV file for Airflow DAG
-                csv_file_path = airflow_service.create_permission_change_file([permission_request])
-                
-                if csv_file_path:
-                    current_app.logger.info(f"Created CSV file for request {permission_request.id}: {csv_file_path}")
-                    tasks = task_service.create_approval_tasks(permission_request, current_user, csv_file_path)
-                    
-                    if tasks:
-                        current_app.logger.info(f"Created {len(tasks)} tasks for permission request {permission_request.id}")
-                    else:
-                        current_app.logger.warning(f"No tasks created for permission request {permission_request.id}")
-                else:
-                    current_app.logger.error(f"Failed to create CSV file for permission request {permission_request.id}")
-                    
-            except Exception as e:
-                current_app.logger.error(f"Error creating tasks for permission request {permission_request.id}: {str(e)}")
-                # Continue with approval even if task creation fails
+            # Note: Tasks are automatically created by the permission_request.approve() method above
+            # No need to create tasks manually here to avoid duplication
+            current_app.logger.info(f"Approval completed for permission request {permission_request.id}. Tasks created automatically by approve() method.")
             
             # AD validation is now handled by the verification task
             
