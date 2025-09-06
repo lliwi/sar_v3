@@ -3,6 +3,8 @@
 
 services:
   web:
+    env_file:
+      - .env
     #build: .
     image: lliwi/sar_v3:latest
     ports:
@@ -27,6 +29,7 @@ services:
       - LDAP_GROUP_DN=${LDAP_GROUP_DN}
       - LDAP_BIND_USER_DN=${LDAP_BIND_USER_DN}
       - LDAP_BIND_USER_PASSWORD=${LDAP_BIND_USER_PASSWORD}
+      - LDAP_ADMIN_GROUPS=${LDAP_ADMIN_GROUPS}
       - LDAP_ATTR_USER=${LDAP_ATTR_USER:-cn}
       - LDAP_ATTR_DEPARTMENT=${LDAP_ATTR_DEPARTMENT:-department}
       - LDAP_ATTR_EMAIL=${LDAP_ATTR_EMAIL:-mail}
@@ -155,6 +158,8 @@ services:
       start_period: 30s
 
   celery:
+    env_file:
+      - .env
     #build: .
     image: lliwi/sar_v3:latest
     command: celery -A celery_worker.celery worker --loglevel=info --concurrency=4 --prefetch-multiplier=1
@@ -222,6 +227,8 @@ services:
 
   # AD Sync Scheduler Service - Handles periodic AD synchronization
   ad-scheduler:
+    env_file:
+      - .env
     #build: .
     image: lliwi/sar_v3:latest
     command: python scheduler_standalone.py
@@ -240,6 +247,7 @@ services:
       - LDAP_GROUP_DN=${LDAP_GROUP_DN}
       - LDAP_BIND_USER_DN=${LDAP_BIND_USER_DN}
       - LDAP_BIND_USER_PASSWORD=${LDAP_BIND_USER_PASSWORD}
+      - LDAP_ADMIN_GROUPS=${LDAP_ADMIN_GROUPS}
       - LDAP_ATTR_USER=${LDAP_ATTR_USER:-cn}
       - LDAP_ATTR_DEPARTMENT=${LDAP_ATTR_DEPARTMENT:-department}
       - LDAP_ATTR_EMAIL=${LDAP_ATTR_EMAIL:-mail}
@@ -275,6 +283,8 @@ services:
 
   # Task Scheduler Service - Processes pending tasks every 5 minutes
   task-scheduler:
+    env_file:
+      - .env
     #build: .
     image: lliwi/sar_v3:latest
     command: python task_scheduler.py
@@ -300,6 +310,7 @@ services:
       - LDAP_BASE_DN=${LDAP_BASE_DN}
       - LDAP_BIND_USER_DN=${LDAP_BIND_USER_DN}
       - LDAP_BIND_USER_PASSWORD=${LDAP_BIND_USER_PASSWORD}
+      - LDAP_ADMIN_GROUPS=${LDAP_ADMIN_GROUPS}
     depends_on:
       db:
         condition: service_healthy
