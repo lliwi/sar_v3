@@ -128,6 +128,58 @@ def edit_user(user_id):
     return render_template('admin/user_form.html', 
                          title='Editar Usuario', form=form, user=user)
 
+@admin_bp.route('/users/<int:user_id>/toggle', methods=['POST'])
+@login_required
+@admin_required
+def toggle_user_status(user_id):
+    """Toggle user active status"""
+    try:
+        user = User.query.get_or_404(user_id)
+        
+        # Prevent deactivating yourself
+        if user.id == current_user.id:
+            return jsonify({
+                'success': False,
+                'message': 'No puedes desactivar tu propio usuario'
+            }), 400
+        
+        # Toggle status
+        old_status = user.is_active
+        user.is_active = not user.is_active
+        
+        db.session.commit()
+        
+        # Log audit event
+        AuditEvent.log_event(
+            user=current_user,
+            event_type='user_management',
+            action='toggle_status',
+            resource_type='user',
+            resource_id=user.id,
+            description=f'Usuario {user.username} {"activado" if user.is_active else "desactivado"}',
+            metadata={
+                'username': user.username,
+                'old_status': old_status,
+                'new_status': user.is_active
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent')
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': f'Usuario {user.username} {"activado" if user.is_active else "desactivado"} exitosamente',
+            'is_active': user.is_active
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f'Error toggling user {user_id} status: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': f'Error al cambiar estado del usuario: {str(e)}'
+        }), 500
+
 @admin_bp.route('/users/sync')
 @login_required
 @admin_required
