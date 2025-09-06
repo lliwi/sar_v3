@@ -239,6 +239,12 @@ class SchedulerService:
         try:
             logger.info("Starting automatic user permissions synchronization")
             
+            # Check if current time is during business hours to avoid peak load
+            current_hour = datetime.now().hour
+            if 8 <= current_hour <= 18:  # Business hours 8 AM to 6 PM
+                logger.info("Skipping sync during business hours to avoid performance impact")
+                return
+            
             # Crear usuario del sistema para el audit log
             system_user = self._get_or_create_system_user()
             

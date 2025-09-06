@@ -87,9 +87,9 @@ services:
       - AD_GROUP_SYNC_ENABLED=${AD_GROUP_SYNC_ENABLED:-true}
       - AD_USER_PERMISSIONS_SYNC_ENABLED=${AD_USER_PERMISSIONS_SYNC_ENABLED:-true}
       # AD Synchronization Interval Configuration (in seconds)
-      - AD_USER_SYNC_INTERVAL=${AD_USER_SYNC_INTERVAL:-600}  # 10 minutes default
-      - AD_GROUP_SYNC_INTERVAL=${AD_GROUP_SYNC_INTERVAL:-300}  # 5 minutes default
-      - AD_USER_PERMISSIONS_SYNC_INTERVAL=${AD_USER_PERMISSIONS_SYNC_INTERVAL:-900}  # 15 minutes default
+      - AD_USER_SYNC_INTERVAL=${AD_USER_SYNC_INTERVAL:-1800}  # 30 minutes default (reduced frequency)
+      - AD_GROUP_SYNC_INTERVAL=${AD_GROUP_SYNC_INTERVAL:-900}  # 15 minutes default (reduced frequency)
+      - AD_USER_PERMISSIONS_SYNC_INTERVAL=${AD_USER_PERMISSIONS_SYNC_INTERVAL:-3600}  # 60 minutes default (reduced frequency)
       - SYNC_MAX_RETRIES=${SYNC_MAX_RETRIES:-3}
       - SYNC_RETRY_DELAY=${SYNC_RETRY_DELAY:-60}
       # Feature Flags
@@ -97,6 +97,11 @@ services:
       - ENABLE_AUTO_CLEANUP=${ENABLE_AUTO_CLEANUP:-true}
       - ENABLE_AUDIT_LOGGING=${ENABLE_AUDIT_LOGGING:-true}
       - ENABLE_EMAIL_NOTIFICATIONS=${ENABLE_EMAIL_NOTIFICATIONS:-true}
+      # Background Sync Configuration
+      - BACKGROUND_SYNC_MAX_FOLDERS=${BACKGROUND_SYNC_MAX_FOLDERS:-50}
+      - BACKGROUND_SYNC_MAX_MEMBERS_PER_GROUP=${BACKGROUND_SYNC_MAX_MEMBERS_PER_GROUP:-200}
+      - BACKGROUND_SYNC_BATCH_SIZE=${BACKGROUND_SYNC_BATCH_SIZE:-25}
+      - BACKGROUND_SYNC_ENABLE_FULL_SYNC=${BACKGROUND_SYNC_ENABLE_FULL_SYNC:-true}
     depends_on:
       db:
         condition: service_healthy
@@ -206,6 +211,11 @@ services:
       - CSV_OUTPUT_DIR=${CSV_OUTPUT_DIR:-/tmp/sar_csv_files}
       - AD_DOMAIN_PREFIX=${AD_DOMAIN_PREFIX:-}
       - AD_TARGET_DOMAIN=${AD_TARGET_DOMAIN:-AUDI}
+      # Background Sync Configuration
+      - BACKGROUND_SYNC_MAX_FOLDERS=${BACKGROUND_SYNC_MAX_FOLDERS:-50}
+      - BACKGROUND_SYNC_MAX_MEMBERS_PER_GROUP=${BACKGROUND_SYNC_MAX_MEMBERS_PER_GROUP:-200}
+      - BACKGROUND_SYNC_BATCH_SIZE=${BACKGROUND_SYNC_BATCH_SIZE:-25}
+      - BACKGROUND_SYNC_ENABLE_FULL_SYNC=${BACKGROUND_SYNC_ENABLE_FULL_SYNC:-true}
     depends_on:
       db:
         condition: service_healthy
@@ -266,9 +276,9 @@ services:
       - AD_GROUP_SYNC_ENABLED=${AD_GROUP_SYNC_ENABLED:-true}
       - AD_USER_PERMISSIONS_SYNC_ENABLED=${AD_USER_PERMISSIONS_SYNC_ENABLED:-true}
       # AD Synchronization Interval Configuration (in seconds)
-      - AD_USER_SYNC_INTERVAL=${AD_USER_SYNC_INTERVAL:-600}  # 10 minutes default
-      - AD_GROUP_SYNC_INTERVAL=${AD_GROUP_SYNC_INTERVAL:-300}  # 5 minutes default
-      - AD_USER_PERMISSIONS_SYNC_INTERVAL=${AD_USER_PERMISSIONS_SYNC_INTERVAL:-900}  # 15 minutes default
+      - AD_USER_SYNC_INTERVAL=${AD_USER_SYNC_INTERVAL:-1800}  # 30 minutes default (reduced frequency)
+      - AD_GROUP_SYNC_INTERVAL=${AD_GROUP_SYNC_INTERVAL:-900}  # 15 minutes default (reduced frequency)
+      - AD_USER_PERMISSIONS_SYNC_INTERVAL=${AD_USER_PERMISSIONS_SYNC_INTERVAL:-3600}  # 60 minutes default (reduced frequency)
       - SYNC_MAX_RETRIES=${SYNC_MAX_RETRIES:-3}
       - SYNC_RETRY_DELAY=${SYNC_RETRY_DELAY:-60}
     depends_on:

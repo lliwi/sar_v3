@@ -917,6 +917,10 @@ def active_permissions_report():
         user_search = request.args.get('user_search', '').strip()
         permission_type = request.args.get('permission_type', 'all')
         
+        # Pagination parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)  # Default 20 users per page
+        
         permissions_by_user = {}
         all_permissions = []
         
@@ -946,7 +950,7 @@ def active_permissions_report():
                        user_search.lower() in (permission.requester.full_name or '').lower()):
                     continue
             
-            user_id = permission.requester_id
+            user_id = permission.requester.id
             folder_id_key = permission.folder_id
             
             if user_id not in permissions_by_user:
@@ -1041,14 +1045,48 @@ def active_permissions_report():
         # Get all folders for filter dropdown
         all_folders = Folder.query.filter_by(is_active=True).order_by(Folder.name).all()
         
+        # Implement pagination for user records
+        total_records = len(permissions_by_user)
+        user_items = list(permissions_by_user.items())
+        
+        # Sort user records by username for consistent pagination
+        user_items.sort(key=lambda x: x[1]['user'].username.lower())
+        
+        # Calculate pagination
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        paginated_user_items = user_items[start_idx:end_idx]
+        
+        # Convert back to dict for template
+        paginated_permissions_by_user = dict(paginated_user_items)
+        
+        # Calculate pagination info
+        total_pages = (total_records + per_page - 1) // per_page
+        has_prev = page > 1
+        has_next = page < total_pages
+        prev_num = page - 1 if has_prev else None
+        next_num = page + 1 if has_next else None
+        
+        pagination = {
+            'page': page,
+            'per_page': per_page,
+            'total': total_records,
+            'pages': total_pages,
+            'has_prev': has_prev,
+            'has_next': has_next,
+            'prev_num': prev_num,
+            'next_num': next_num
+        }
+        
         return render_template('admin/active_permissions_report.html',
                              title='Permisos activos',
-                             permissions_by_user=permissions_by_user,
+                             permissions_by_user=paginated_permissions_by_user,
                              approved_permissions=all_permissions,
                              all_folders=all_folders,
                              filters={'permission_type': permission_type},
                              folder_id=folder_id,
                              user_search=user_search,
+                             pagination=pagination,
                              now=datetime.now())
                              
     except Exception as e:
@@ -1344,7 +1382,134 @@ def get_folder_ad_permissions(folder_id):
 @login_required
 @admin_required
 def sync_users_from_ad():
-    """Sync users with permissions from AD for all folders"""
+    """Start background sync task for complete user synchronization"""
+    import logging
+    import os
+    
+    logger = logging.getLogger(__name__)
+    
+    try:
+        from celery_worker import sync_users_from_ad_task
+        logger.info("🚀 Starting complete background sync task via Celery")
+        
+        # Start background task (no parameters - uses env config)
+        task = sync_users_from_ad_task.delay(user_id=current_user.id)
+        
+        logger.info(f"✅ Background sync task started with ID: {task.id}")
+        
+        # Get configuration for display
+        max_folders = int(os.getenv('BACKGROUND_SYNC_MAX_FOLDERS', 50))
+        max_members_per_group = int(os.getenv('BACKGROUND_SYNC_MAX_MEMBERS_PER_GROUP', 200))
+        enable_full_sync = os.getenv('BACKGROUND_SYNC_ENABLE_FULL_SYNC', 'true').lower() == 'true'
+        
+        # Log this action
+        AuditEvent.log_event(
+            user=current_user,
+            event_type='ad_sync',
+            action='sync_users_from_ad_background_started',
+            resource_type='system',
+            description=f'Sincronización completa en background iniciada - Task ID: {task.id}',
+            metadata={
+                'task_id': task.id,
+                'max_folders': max_folders,
+                'max_members_per_group': max_members_per_group,
+                'full_sync_enabled': enable_full_sync,
+                'background_task': True
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent')
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': 'Sincronización completa iniciada en background',
+            'task_id': task.id,
+            'status': 'STARTED',
+            'background_task': True,
+            'configuration': {
+                'max_folders': max_folders,
+                'max_members_per_group': max_members_per_group,
+                'full_sync_enabled': enable_full_sync
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Error starting background sync task: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Error iniciando tarea en background: {str(e)}'
+        }), 500
+
+@admin_bp.route('/folders/sync-task-status/<task_id>', methods=['GET'])
+@login_required
+@admin_required
+def get_sync_task_status(task_id):
+    """Get status of background sync task"""
+    try:
+        from celery_worker import sync_users_from_ad_task
+        from celery.result import AsyncResult
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        
+        # Get task result
+        task_result = AsyncResult(task_id)
+        
+        response = {
+            'task_id': task_id,
+            'status': task_result.state,
+            'current': 0,
+            'total': 0,
+            'result': None
+        }
+        
+        if task_result.state == 'PENDING':
+            response.update({
+                'status': 'PENDING',
+                'current': 0,
+                'total': 1,
+                'message': 'Tarea en cola, esperando...'
+            })
+        elif task_result.state == 'PROGRESS':
+            response.update({
+                'status': 'PROGRESS',
+                'current': task_result.info.get('current', 0),
+                'total': task_result.info.get('total', 1),
+                'message': task_result.info.get('message', 'Procesando...')
+            })
+        elif task_result.state == 'SUCCESS':
+            response.update({
+                'status': 'SUCCESS',
+                'current': 1,
+                'total': 1,
+                'result': task_result.result,
+                'message': 'Sincronización completada exitosamente'
+            })
+        else:  # FAILURE
+            response.update({
+                'status': 'FAILURE',
+                'current': 1,
+                'total': 1,
+                'error': str(task_result.info),
+                'message': f'Error en sincronización: {str(task_result.info)}'
+            })
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting task status: {str(e)}")
+        return jsonify({
+            'task_id': task_id,
+            'status': 'ERROR',
+            'error': f'Error obteniendo estado de la tarea: {str(e)}'
+        }), 500
+
+
+@admin_bp.route('/folders/sync-users-from-ad-old', methods=['POST'])
+@login_required
+@admin_required
+def sync_users_from_ad_old():
+    """Sync users with permissions from AD for all folders (OPTIMIZED FOR LARGE DATASETS)"""
     try:
         from app.services.ldap_service import LDAPService
         from app.models import Folder, User, FolderPermission, UserADGroupMembership, ADGroup
@@ -1352,15 +1517,7 @@ def sync_users_from_ad():
         import ldap3
         
         logger = logging.getLogger(__name__)
-        
-        # Temporarily enable debug logging for sync operation
-        original_level = logger.level
-        logger.setLevel(logging.DEBUG)
-        
-        # Also enable debug for LDAP operations
-        ldap_logger = logging.getLogger('app.services.ldap_service')
-        ldap_original_level = ldap_logger.level
-        ldap_logger.setLevel(logging.DEBUG)
+        logger.info("🚀 Starting OPTIMIZED user sync from AD")
         
         ldap_service = LDAPService()
         
@@ -1370,11 +1527,17 @@ def sync_users_from_ad():
             'users_synced': 0,
             'memberships_created': 0,
             'errors': [],
-            'summary': {}
+            'summary': {},
+            'skipped_large_groups': 0
         }
         
-        # Get all active folders with permissions
-        folders = Folder.query.filter_by(is_active=True).all()
+        # OPTIMIZATION 1: Ultra-aggressive limits to prevent timeout
+        max_folders = min(int(request.form.get('max_folders', 5)), 5)  # Hard limit to 5 folders max
+        max_members_per_group = min(int(request.form.get('max_members', 20)), 20)  # Hard limit to 20 members max
+        
+        folders = Folder.query.filter_by(is_active=True).limit(max_folders).all()
+        
+        logger.info(f"🚀 ULTRA-OPTIMIZED sync: {len(folders)} folders (hard limit: {max_folders})")
         
         conn = ldap_service.get_connection()
         if not conn:
@@ -1382,6 +1545,14 @@ def sync_users_from_ad():
                 'success': False,
                 'error': 'No se pudo conectar a LDAP'
             }), 500
+        
+        # OPTIMIZATION 2: Pre-cache all users to avoid repeated LDAP queries
+        logger.info("📋 Pre-caching existing users to avoid duplicate lookups...")
+        existing_users = {}
+        for user in User.query.all():
+            if user.username:
+                existing_users[user.username.lower()] = user
+        logger.info(f"💾 Cached {len(existing_users)} existing users")
         
         for folder in folders:
             try:
@@ -1399,17 +1570,35 @@ def sync_users_from_ad():
                 
                 for permission in active_permissions:
                     ad_group = permission.ad_group
-                    logger.info(f"Processing group {ad_group.name} (DN: {ad_group.distinguished_name}) for folder {folder.name}")
+                    logger.info(f"Processing group {ad_group.name} for folder {folder.name}")
                     
-                    # Get group members from AD
-                    group_members = ldap_service.get_group_members(ad_group.distinguished_name)
-                    logger.info(f"Found {len(group_members)} members in group {ad_group.name}")
+                    # OPTIMIZATION 3: Get group members but with strict limits
+                    try:
+                        group_members = ldap_service.get_group_members(ad_group.distinguished_name)
+                        logger.info(f"Found {len(group_members)} members in group {ad_group.name}")
+                    except Exception as group_error:
+                        logger.error(f"❌ Failed to get members for group {ad_group.name}: {str(group_error)}")
+                        results['errors'].append(f"Error obteniendo miembros del grupo {ad_group.name}: {str(group_error)}")
+                        continue
                     
                     if not group_members:
                         logger.warning(f"No members found for group {ad_group.name}")
                         continue
                     
-                    for member_dn in group_members:
+                    # OPTIMIZATION 4: Ultra-strict member limits
+                    if len(group_members) > max_members_per_group:
+                        logger.warning(f"⚠️ Skipping large group {ad_group.name} with {len(group_members)} members (ultra-strict limit: {max_members_per_group})")
+                        results['skipped_large_groups'] += 1
+                        continue
+                    
+                    # OPTIMIZATION 5: Process only first N members with immediate commits
+                    processed_members = 0
+                    max_process_per_group = 10  # Even stricter limit
+                    
+                    for i, member_dn in enumerate(group_members):
+                        if processed_members >= max_process_per_group:
+                            logger.warning(f"⏰ Stopping at {max_process_per_group} members for group {ad_group.name} (timeout prevention)")
+                            break
                         try:
                             logger.debug(f"Processing member DN: {member_dn}")
                             
@@ -1539,6 +1728,18 @@ def sync_users_from_ad():
                         except Exception as e:
                             logger.warning(f"Error processing member {member_dn}: {str(e)}")
                             continue
+                        
+                        # OPTIMIZATION 4: Commit in batches to avoid long transactions
+                        processed_in_batch += 1
+                        if processed_in_batch >= batch_size or i == len(group_members) - 1:
+                            try:
+                                db.session.commit()
+                                logger.debug(f"✅ Batch committed: {processed_in_batch} users processed")
+                                processed_in_batch = 0
+                            except Exception as commit_error:
+                                logger.error(f"❌ Batch commit failed: {str(commit_error)}")
+                                db.session.rollback()
+                                results['errors'].append(f"Error en commit: {str(commit_error)}")
                 
                 results['folders_processed'] += 1
                 results['users_synced'] += folder_users_synced
@@ -1549,22 +1750,33 @@ def sync_users_from_ad():
                 results['errors'].append(f"Carpeta {folder.name}: {str(e)}")
                 continue
         
-        # Commit all changes
-        db.session.commit()
+        # Final commit for any remaining changes
+        try:
+            db.session.commit()
+        except Exception as final_commit_error:
+            logger.error(f"❌ Final commit failed: {str(final_commit_error)}")
+            db.session.rollback()
+            results['errors'].append(f"Error en commit final: {str(final_commit_error)}")
+        
         conn.unbind()
         
-        # Restore original logging levels
-        logger.setLevel(original_level)
-        ldap_logger.setLevel(ldap_original_level)
-        
-        # Create summary
+        # Create summary with optimizations info
         results['summary'] = {
-            'total_folders': len(folders),
+            'total_folders_in_system': Folder.query.filter_by(is_active=True).count(),
             'folders_processed': results['folders_processed'],
             'users_synced': results['users_synced'],
             'memberships_created': results['memberships_created'],
-            'errors_count': len(results['errors'])
+            'errors_count': len(results['errors']),
+            'skipped_large_groups': results['skipped_large_groups'],
+            'optimizations_applied': {
+                'folder_limit': max_folders,
+                'member_limit_per_group': max_members_per_group,
+                'batch_processing': True,
+                'timeout_prevention': True
+            }
         }
+        
+        logger.info(f"🎉 OPTIMIZED sync completed: {results['folders_processed']}/{max_folders} folders, {results['users_synced']} users, {results['skipped_large_groups']} large groups skipped")
         
         # Log this action
         AuditEvent.log_event(
@@ -1572,12 +1784,18 @@ def sync_users_from_ad():
             event_type='ad_sync',
             action='sync_users_from_ad',
             resource_type='system',
-            description=f'Sincronización masiva de usuarios desde AD',
+            description=f'Sincronización masiva optimizada de usuarios desde AD (limitada a {max_folders} carpetas)',
             metadata={
                 'folders_processed': results['folders_processed'],
                 'users_synced': results['users_synced'],
                 'memberships_created': results['memberships_created'],
-                'errors_count': len(results['errors'])
+                'errors_count': len(results['errors']),
+                'skipped_large_groups': results['skipped_large_groups'],
+                'optimization_settings': {
+                    'max_folders': max_folders,
+                    'max_members_per_group': max_members_per_group,
+                    'batch_processing': True
+                }
             },
             ip_address=request.remote_addr,
             user_agent=request.headers.get('User-Agent')

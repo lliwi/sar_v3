@@ -268,8 +268,12 @@ class LDAPService:
             
             synced_count = 0
             current_time = datetime.utcnow()
+            batch_size = 100  # Process in batches of 100 groups
+            batch_count = 0
             
-            for entry in all_entries:
+            logger.info(f"Starting group sync: {len(all_entries)} groups to process")
+            
+            for i, entry in enumerate(all_entries):
                 group_name = str(entry.cn)
                 distinguished_name = str(entry.distinguishedName)
                 description = str(entry.description) if entry.description else None
@@ -302,17 +306,41 @@ class LDAPService:
                     db.session.add(ad_group)
                 
                 synced_count += 1
+                batch_count += 1
+                
+                # Commit in batches to avoid long transactions
+                if batch_count >= batch_size or i == len(all_entries) - 1:
+                    try:
+                        db.session.commit()
+                        logger.debug(f"Groups batch {(i//batch_size)+1} committed: {batch_count} groups")
+                        batch_count = 0
+                    except Exception as e:
+                        logger.error(f"Error committing groups batch: {str(e)}")
+                        db.session.rollback()
+                        raise e
             
-            # Mark groups not found in LDAP as inactive
-            old_groups = ADGroup.query.filter(
-                ADGroup.last_sync < current_time,
-                ADGroup.is_active == True
-            ).all()
-            
-            for group in old_groups:
-                group.is_active = False
-            
-            db.session.commit()
+            # Mark groups not found in LDAP as inactive (separate transaction)
+            try:
+                old_groups = ADGroup.query.filter(
+                    ADGroup.last_sync < current_time,
+                    ADGroup.is_active == True
+                ).all()
+                
+                inactive_count = 0
+                for group in old_groups:
+                    group.is_active = False
+                    inactive_count += 1
+                    
+                    if inactive_count % batch_size == 0:
+                        db.session.commit()
+                        logger.debug(f"Marked {inactive_count} groups as inactive")
+                
+                db.session.commit()
+                logger.info(f"Marked {len(old_groups)} old groups as inactive")
+                
+            except Exception as e:
+                logger.error(f"Error marking old groups as inactive: {str(e)}")
+                db.session.rollback()
             conn.unbind()
             
             logger.info(f"AD Groups sync completed. {synced_count} groups processed.")
@@ -449,6 +477,10 @@ class LDAPService:
             
             synced_count = 0
             current_time = datetime.utcnow()
+            batch_size = 50  # Process in smaller batches for users (more complex data)
+            batch_count = 0
+            
+            logger.info(f"Starting user sync: {len(all_entries)} users to process")
             
             # Get or create default user role
             user_role = Role.query.filter_by(name='user').first()
@@ -457,7 +489,7 @@ class LDAPService:
                 db.session.add(user_role)
                 db.session.flush()
             
-            for entry in all_entries:
+            for i, entry in enumerate(all_entries):
                 try:
                     # Extract user information
                     username = str(entry.sAMAccountName) if entry.sAMAccountName else None
@@ -514,22 +546,46 @@ class LDAPService:
                         db.session.add(user)
                     
                     synced_count += 1
+                    batch_count += 1
+                    
+                    # Commit in batches to avoid long transactions
+                    if batch_count >= batch_size or i == len(all_entries) - 1:
+                        try:
+                            db.session.commit()
+                            logger.debug(f"Users batch {(i//batch_size)+1} committed: {batch_count} users")
+                            batch_count = 0
+                        except Exception as e:
+                            logger.error(f"Error committing users batch: {str(e)}")
+                            db.session.rollback()
+                            raise e
                     
                 except Exception as e:
                     logger.warning(f"Error processing user entry: {str(e)}")
                     continue
             
-            # Mark users not found in LDAP as inactive (only those synced from LDAP)
-            old_users = User.query.filter(
-                User.last_sync < current_time,
-                User.is_active == True,
-                User.distinguished_name.isnot(None)  # Only users that came from LDAP
-            ).all()
-            
-            for user in old_users:
-                user.is_active = False
-            
-            db.session.commit()
+            # Mark users not found in LDAP as inactive (separate transaction)
+            try:
+                old_users = User.query.filter(
+                    User.last_sync < current_time,
+                    User.is_active == True,
+                    User.distinguished_name.isnot(None)  # Only users that came from LDAP
+                ).all()
+                
+                inactive_count = 0
+                for user in old_users:
+                    user.is_active = False
+                    inactive_count += 1
+                    
+                    if inactive_count % batch_size == 0:
+                        db.session.commit()
+                        logger.debug(f"Marked {inactive_count} users as inactive")
+                
+                db.session.commit()
+                logger.info(f"Marked {len(old_users)} old users as inactive")
+                
+            except Exception as e:
+                logger.error(f"Error marking old users as inactive: {str(e)}")
+                db.session.rollback()
             conn.unbind()
             
             logger.info(f"AD Users sync completed. {synced_count} users processed.")
