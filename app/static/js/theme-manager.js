@@ -11,7 +11,11 @@ class ThemeManager {
     }
     
     init() {
-        this.applyTheme(this.currentTheme);
+        // Check if theme is already applied in HTML to prevent FOUC
+        const currentDataTheme = document.documentElement.getAttribute('data-theme');
+        if (!currentDataTheme || currentDataTheme !== this.currentTheme) {
+            this.applyTheme(this.currentTheme);
+        }
     }
     
     /**
