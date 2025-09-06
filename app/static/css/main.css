@@ -555,12 +555,24 @@ body {
 
 .combobox-option:hover {
     background-color: #f8f9fa;
-    color: #16181b;
+    color: #212529;
+}
+
+.combobox-option:hover .folder-path {
+    color: #16181b !important;
+}
+
+.combobox-option:hover .folder-description {
+    color: #495057 !important;
+}
+
+.combobox-option:hover .folder-info {
+    background-color: #f8f9fa !important;
 }
 
 .combobox-option.selected {
-    background-color: #0d6efd;
-    color: white;
+    background-color: #e9ecef;
+    color: #212529;
 }
 
 .combobox-option:last-child {
@@ -573,11 +585,11 @@ body {
 }
 
 .combobox-option.selected .folder-icon {
-    color: white;
+    color: #6c757d;
 }
 
 .combobox-option.selected .folder-path {
-    color: white;
+    color: #212529;
 }
 
 .folder-info {
@@ -597,7 +609,11 @@ body {
 }
 
 .combobox-option.selected .folder-description {
-    color: rgba(255, 255, 255, 0.9);
+    color: #6c757d;
+}
+
+.combobox-option.selected .folder-info {
+    background-color: #e9ecef !important;
 }
 
 .no-results {
