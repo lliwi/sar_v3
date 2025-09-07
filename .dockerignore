@@ -148,7 +148,6 @@ _to delete/
 test_data/
 test_env/
 test_files/
-ansible/
 
 # Cookies and session files from testing
 cookies*.txt

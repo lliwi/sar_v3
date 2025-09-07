@@ -169,6 +169,102 @@ def cleanup_files(**context):
     logging.info("=== FIN: Limpieza completada ===")
     return True
 
+def run_remote_ansible_command(**context):
+    """
+    Función que ejecuta un playbook de Ansible via SSH para aplicar cambios de permisos
+    Obtiene el path de la carpeta de los parámetros del DAG
+    """
+    logging.info("=== INICIO: Ejecución de comando Ansible remoto ===")
+    
+    # Obtener parámetros de la tarea anterior via XCom
+    ti = context['task_instance']
+    change_file = ti.xcom_pull(key='change_file', task_ids='print_parameters')
+    triggered_by = ti.xcom_pull(key='triggered_by', task_ids='print_parameters')
+    
+    # Obtener configuración pasada via API para extraer folder_path
+    dag_run = context.get('dag_run')
+    conf = dag_run.conf or {} if dag_run else {}
+    folder_path = conf.get('folder_path', '')
+    
+    logging.info(f"📁 Ejecutando Ansible para carpeta: {folder_path}")
+    logging.info(f"👤 Solicitado por: {triggered_by}")
+    logging.info(f"📄 Basado en archivo: {change_file}")
+    
+    if not folder_path:
+        logging.error("❌ No se especificó folder_path en la configuración del DAG")
+        return False
+    
+    try:
+        # Definir el SSHHook
+        ssh_hook = SSHHook(ssh_conn_id='ssh_IGESBCNLSV00002', cmd_timeout=None)
+        
+        # Preparar el comando Ansible con el path de la carpeta como variable extra
+        ansible_command = (
+            'ANSIBLE_CONFIG=/opt/ansible/ansible.cfg '
+            '/usr/people/idg/tmomill-adm/.local/bin/ansible-playbook '
+            '-i /opt/ansible/hosts/inventory.yaml '
+            f'-e "target_folder_path={folder_path}" '
+            '/opt/ansible/playbooks/play-SARV3.yaml'
+        )
+        
+        logging.info(f"🔧 Comando Ansible a ejecutar: {ansible_command}")
+        
+        # Ejecutar el comando SSH
+        ssh_client = ssh_hook.get_conn()
+        stdin, stdout, stderr = ssh_client.exec_command(ansible_command)
+        exit_status = stdout.channel.recv_exit_status()
+        
+        # Capturar la salida y los errores
+        output = stdout.read().decode('utf-8')
+        error_output = stderr.read().decode('utf-8')
+        
+        logging.info(f"📊 Estado de salida: {exit_status}")
+        logging.info(f"📋 Salida del comando:")
+        logging.info(output)
+        
+        if error_output:
+            logging.warning(f"⚠️ Errores capturados:")
+            logging.warning(error_output)
+        
+        # Detectar errores de ansible analizando la salida
+        if exit_status != 0:
+            logging.error(f"❌ El comando Ansible falló con código de salida: {exit_status}")
+            return False
+            
+        lines = output.split('\n')
+        for line in lines:
+            if "failed=" in line:
+                # Extraer el nombre al inicio de la línea
+                name = line.split()[0] if line.split() else "unknown"
+                # Extraer el valor de failed
+                try:
+                    failed_part = line.split("failed=")[1]
+                    failed_count = int(failed_part.split()[0])
+                    if failed_count > 0:
+                        error_msg = f"❌ Ansible falló en host: {name} con {failed_count} errores"
+                        logging.error(error_msg)
+                        raise ValueError(error_msg)
+                except (IndexError, ValueError) as e:
+                    logging.warning(f"⚠️ Error parseando línea de fallos: {line} - {str(e)}")
+        
+        logging.info("✅ Comando Ansible ejecutado exitosamente")
+        
+        # Almacenar resultado en XCom para otras tareas
+        context['task_instance'].xcom_push(key='ansible_output', value=output)
+        context['task_instance'].xcom_push(key='ansible_exit_status', value=exit_status)
+        
+    except Exception as e:
+        logging.error(f"❌ Error ejecutando comando Ansible: {str(e)}")
+        return False
+    finally:
+        try:
+            ssh_client.close()
+        except:
+            pass
+    
+    logging.info("=== FIN: Ejecución de comando Ansible completada ===")
+    return True
+
 # Definición de tareas
 task_print_parameters = PythonOperator(
     task_id='print_parameters',
@@ -208,6 +304,25 @@ task_cleanup = PythonOperator(
     """
 )
 
+# Tarea SSH para ejecutar Ansible
+task_run_ansible = PythonOperator(
+    task_id='run_remote_ansible',
+    python_callable=run_remote_ansible_command,
+    dag=dag,
+    doc_md="""
+    ## Ejecutar Ansible Remoto
+    
+    Esta tarea ejecuta un playbook de Ansible via SSH para aplicar cambios de permisos en el servidor remoto.
+    
+    **Parámetros utilizados:**
+    - `folder_path`: Ruta de la carpeta donde aplicar cambios (pasada como variable extra a Ansible)
+    - `change_file`: Archivo CSV con los cambios procesados
+    - `triggered_by`: Usuario que inició la operación
+    
+    **Playbook ejecutado:** `/opt/ansible/playbooks/play-SARV3.yaml`
+    """
+)
+
 # Tarea adicional de verificación usando BashOperator
 task_health_check = BashOperator(
     task_id='health_check',
@@ -216,7 +331,7 @@ task_health_check = BashOperator(
 )
 
 # Definir dependencias
-task_print_parameters >> task_process_changes >> task_cleanup >> task_health_check
+task_print_parameters >> task_process_changes >> task_run_ansible >> task_cleanup >> task_health_check
 
 # Documentación del DAG
 dag.doc_md = """
@@ -232,7 +347,8 @@ El DAG espera recibir los siguientes parámetros en el campo `conf` al ser ejecu
 {
     "change_file": "/app/exports/permission_changes_20240101_120000.csv",
     "request_ids": [123, 124, 125],
-    "triggered_by": "admin.usuario"
+    "triggered_by": "admin.usuario",
+    "folder_path": "\\\\servidor\\carpeta\\subcarpeta"
 }
 ```
 
@@ -240,8 +356,9 @@ El DAG espera recibir los siguientes parámetros en el campo `conf` al ser ejecu
 
 1. **print_parameters**: Extrae y muestra los parámetros recibidos
 2. **process_permission_changes**: Procesa los cambios del archivo CSV
-3. **cleanup_files**: Mueve el archivo procesado a backup
-4. **health_check**: Verificación final de salud
+3. **run_remote_ansible**: Ejecuta playbook de Ansible para aplicar cambios en servidor remoto
+4. **cleanup_files**: Mueve el archivo procesado a backup
+5. **health_check**: Verificación final de salud
 
 ## Ejemplo de Uso desde SAR
 
@@ -250,7 +367,8 @@ El DAG espera recibir los siguientes parámetros en el campo `conf` al ser ejecu
 conf = {
     'change_file': '/app/exports/permission_changes_20240101_120000.csv',
     'request_ids': [123, 124, 125],
-    'triggered_by': 'sistema.sar'
+    'triggered_by': 'sistema.sar',
+    'folder_path': '\\\\servidor\\carpeta\\target'
 }
 success = airflow_service.trigger_dag(conf)
 ```
