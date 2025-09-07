@@ -1338,3 +1338,72 @@ def delete_user_permission_from_ad_group():
     
     return redirect(url_for('main.manage_resource', folder_id=folder_id))
 
+@main_bp.route('/manage-validators/<int:folder_id>', methods=['POST'])
+@login_required
+def manage_validators(folder_id):
+    """Add or remove validators for a folder (only for owners)"""
+    from flask import jsonify
+    
+    folder = Folder.query.get_or_404(folder_id)
+    
+    # Check if user is owner of this folder
+    if folder not in current_user.owned_folders:
+        return jsonify({'success': False, 'message': 'Solo los propietarios pueden gestionar validadores.'})
+    
+    user_id = request.form.get('user_id', type=int)
+    action = request.form.get('action')  # 'add' or 'remove'
+    
+    if not user_id or not action or action not in ['add', 'remove']:
+        return jsonify({'success': False, 'message': 'Datos de solicitud inválidos.'})
+    
+    target_user = User.query.get(user_id)
+    if not target_user:
+        return jsonify({'success': False, 'message': 'Usuario no encontrado.'})
+    
+    try:
+        if action == 'add':
+            # Check if user is already a validator
+            if target_user in folder.validators:
+                return jsonify({'success': False, 'message': 'El usuario ya es validador de esta carpeta.'})
+            
+            # Add as validator
+            folder.validators.append(target_user)
+            action_description = f'Validador {target_user.username} añadido'
+            
+        elif action == 'remove':
+            # Check if user is a validator
+            if target_user not in folder.validators:
+                return jsonify({'success': False, 'message': 'El usuario no es validador de esta carpeta.'})
+            
+            # Remove as validator
+            folder.validators.remove(target_user)
+            action_description = f'Validador {target_user.username} removido'
+        
+        db.session.commit()
+        
+        # Log audit event
+        AuditEvent.log_event(
+            user=current_user,
+            event_type='validator_management',
+            action=action,
+            resource_type='folder',
+            resource_id=folder.id,
+            description=action_description,
+            metadata={
+                'folder_path': folder.path,
+                'target_user': target_user.username,
+                'action': action
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent')
+        )
+        
+        return jsonify({
+            'success': True, 
+            'message': f'Validador {"añadido" if action == "add" else "removido"} exitosamente.'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': f'Error al procesar la solicitud: {str(e)}'})
+

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
+from airflow.providers.ssh.hooks.ssh import SSHHook
 import csv
 import logging
 import os
