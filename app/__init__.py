@@ -34,10 +34,26 @@ def create_app(config_name=None):
     # Set Flask app logger level
     app.logger.setLevel(getattr(logging, log_level))
     
-    # Configuration
-    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+    # Configuration - Security validation
+    secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+    
+    # Validate SECRET_KEY in production
+    if os.getenv('FLASK_ENV') == 'production' and secret_key == 'dev-secret-key-change-in-production':
+        raise ValueError("❌ CRITICAL: Must set a secure SECRET_KEY in production environment!")
+    
+    if len(secret_key) < 32:
+        app.logger.warning("⚠️  SECRET_KEY should be at least 32 characters for security")
+    
+    app.config['SECRET_KEY'] = secret_key
     app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///sar.db')
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    
+    # Session Security Configuration
+    app.config['SESSION_COOKIE_SECURE'] = os.getenv('FLASK_ENV', 'development') == 'production'
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Strict'
+    app.config['PERMANENT_SESSION_LIFETIME'] = int(os.getenv('SESSION_TIMEOUT', 3600))
+    app.config['WTF_CSRF_TIME_LIMIT'] = int(os.getenv('CSRF_TIMEOUT', 3600))
     
     # Celery configuration
     app.config['broker_url'] = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')

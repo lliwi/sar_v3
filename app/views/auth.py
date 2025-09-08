@@ -139,6 +139,11 @@ def login():
                 db.session.commit()
                 logger.info(f"User data committed to database for {username}")
                 
+                # Prevent session fixation by regenerating session ID
+                from flask import session
+                session.permanent = True
+                session.regenerate = True  # Mark for regeneration
+                
                 # Log the user in
                 login_user(user, remember=form.remember_me.data)
                 logger.info(f"User {username} logged in successfully")
@@ -213,6 +218,10 @@ def logout():
         ip_address=request.remote_addr,
         user_agent=request.headers.get('User-Agent')
     )
+    
+    # Clear session completely to prevent session reuse
+    from flask import session
+    session.clear()
     
     logout_user()
     flash('Has cerrado sesión correctamente.', 'info')
