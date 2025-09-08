@@ -1580,7 +1580,7 @@ def sync_users_from_ad_old():
             'memberships_created': 0,
             'errors': [],
             'summary': {},
-            'skipped_large_groups': 0
+            'large_groups_processed': 0
         }
         
         # OPTIMIZATION 1: Ultra-aggressive limits to prevent timeout
@@ -1637,20 +1637,16 @@ def sync_users_from_ad_old():
                         logger.warning(f"No members found for group {ad_group.name}")
                         continue
                     
-                    # OPTIMIZATION 4: Ultra-strict member limits
+                    # Log warning for large groups but PROCESS ALL MEMBERS (completeness over speed)
                     if len(group_members) > max_members_per_group:
-                        logger.warning(f"⚠️ Skipping large group {ad_group.name} with {len(group_members)} members (ultra-strict limit: {max_members_per_group})")
-                        results['skipped_large_groups'] += 1
-                        continue
+                        logger.warning(f"⚠️ Processing large group {ad_group.name} with {len(group_members)} members (above recommended limit of {max_members_per_group}, but processing ALL for completeness)")
+                        # Continue processing - no skip for 100% completion
                     
-                    # OPTIMIZATION 5: Process only first N members with immediate commits
+                    # Process ALL members for 100% completion (no artificial limits)
                     processed_members = 0
-                    max_process_per_group = 10  # Even stricter limit
                     
                     for i, member_dn in enumerate(group_members):
-                        if processed_members >= max_process_per_group:
-                            logger.warning(f"⏰ Stopping at {max_process_per_group} members for group {ad_group.name} (timeout prevention)")
-                            break
+                        # Process ALL members - no artificial limits for 100% completion
                         try:
                             logger.debug(f"Processing member DN: {member_dn}")
                             
@@ -1819,7 +1815,7 @@ def sync_users_from_ad_old():
             'users_synced': results['users_synced'],
             'memberships_created': results['memberships_created'],
             'errors_count': len(results['errors']),
-            'skipped_large_groups': results['skipped_large_groups'],
+            'large_groups_processed': results['large_groups_processed'],
             'optimizations_applied': {
                 'folder_limit': max_folders,
                 'member_limit_per_group': max_members_per_group,
@@ -1828,7 +1824,7 @@ def sync_users_from_ad_old():
             }
         }
         
-        logger.info(f"🎉 OPTIMIZED sync completed: {results['folders_processed']}/{max_folders} folders, {results['users_synced']} users, {results['skipped_large_groups']} large groups skipped")
+        logger.info(f"🎉 OPTIMIZED sync completed: {results['folders_processed']}/{max_folders} folders, {results['users_synced']} users, {results['large_groups_processed']} large groups skipped")
         
         # Log this action
         AuditEvent.log_event(
@@ -1842,7 +1838,7 @@ def sync_users_from_ad_old():
                 'users_synced': results['users_synced'],
                 'memberships_created': results['memberships_created'],
                 'errors_count': len(results['errors']),
-                'skipped_large_groups': results['skipped_large_groups'],
+                'large_groups_processed': results['large_groups_processed'],
                 'optimization_settings': {
                     'max_folders': max_folders,
                     'max_members_per_group': max_members_per_group,
