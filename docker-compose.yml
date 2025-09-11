@@ -71,7 +71,7 @@ services:
       - AIRFLOW_RETRY_ATTEMPTS=${AIRFLOW_RETRY_ATTEMPTS:-3}
       - AIRFLOW_RETRY_DELAY=${AIRFLOW_RETRY_DELAY:-60}
       # CSV Configuration
-      - CSV_OUTPUT_DIR=${CSV_OUTPUT_DIR:-/tmp/sar_csv_files}
+      - CSV_OUTPUT_DIR=${CSV_OUTPUT_DIR:-/app/sar_csv_files}
       - AD_DOMAIN_PREFIX=${AD_DOMAIN_PREFIX:-}
       - AD_TARGET_DOMAIN=${AD_TARGET_DOMAIN:-AUDI}
       # Application URLs
@@ -114,6 +114,7 @@ services:
       - ./exports:/app/exports
       - ./data:/app/data
       - ./backups:/app/backups
+      - ./csv_files:/app/sar_csv_files
       - /etc/localtime:/etc/localtime:ro
     restart: unless-stopped
     healthcheck:
@@ -209,7 +210,7 @@ services:
       - AIRFLOW_VERIFY_SSL=${AIRFLOW_VERIFY_SSL:-false}
       - AIRFLOW_DAG_NAME=${AIRFLOW_DAG_NAME:-SAR_V3}
       # CSV Configuration
-      - CSV_OUTPUT_DIR=${CSV_OUTPUT_DIR:-/tmp/sar_csv_files}
+      - CSV_OUTPUT_DIR=${CSV_OUTPUT_DIR:-/app/sar_csv_files}
       - AD_DOMAIN_PREFIX=${AD_DOMAIN_PREFIX:-}
       - AD_TARGET_DOMAIN=${AD_TARGET_DOMAIN:-AUDI}
       # Background Sync Configuration - Batch Processing
@@ -227,6 +228,7 @@ services:
       - ./logs:/app/logs
       - ./exports:/app/exports
       - ./data:/app/data
+      - ./csv_files:/app/sar_csv_files
       - /etc/localtime:/etc/localtime:ro
     restart: unless-stopped
     healthcheck:
@@ -314,7 +316,7 @@ services:
       - AIRFLOW_VERIFY_SSL=${AIRFLOW_VERIFY_SSL:-false}
       - AIRFLOW_DAG_NAME=${AIRFLOW_DAG_NAME:-SAR_V3}
       # CSV Configuration
-      - CSV_OUTPUT_DIR=${CSV_OUTPUT_DIR:-/tmp/sar_csv_files}
+      - CSV_OUTPUT_DIR=${CSV_OUTPUT_DIR:-/app/sar_csv_files}
       - AD_DOMAIN_PREFIX=${AD_DOMAIN_PREFIX:-}
       - AD_TARGET_DOMAIN=${AD_TARGET_DOMAIN:-AUDI}
       - LDAP_HOST=${LDAP_HOST}
@@ -330,6 +332,7 @@ services:
     volumes:
       - ./app:/app/app:ro
       - ./logs:/app/logs
+      - ./csv_files:/app/sar_csv_files
       - /etc/localtime:/etc/localtime:ro
     restart: unless-stopped
 

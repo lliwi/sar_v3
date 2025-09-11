@@ -777,7 +777,7 @@ def update_folder_validators(folder_id):
 @main_bp.route('/assign-user-permission/<int:folder_id>', methods=['POST'])
 @login_required
 def assign_user_permission(folder_id):
-    """Assign direct permission to a user for a folder"""
+    """Assign permission to a user for a folder with automatic approval"""
     folder = Folder.query.get_or_404(folder_id)
     
     # Check if user can manage this folder
@@ -798,68 +798,136 @@ def assign_user_permission(folder_id):
         flash('Usuario no encontrado o inactivo.', 'error')
         return redirect(url_for('main.manage_resource', folder_id=folder_id))
     
-    # Check if permission already exists
-    existing_permission = UserFolderPermission.query.filter_by(
-        user_id=user_id,
-        folder_id=folder_id,
-        permission_type=permission_type,
-        is_active=True
-    ).first()
+    # Check for existing permissions (manual and AD-sync)
+    existing_permission_check = PermissionRequest.check_existing_permissions(
+        user_id, 
+        folder_id, 
+        permission_type
+    )
     
-    if existing_permission:
-        flash(f'El usuario ya tiene permiso de {permission_type} para esta carpeta.', 'warning')
+    # Handle different scenarios
+    if existing_permission_check['action'] == 'error':
+        flash(existing_permission_check['message'], 'error')
         return redirect(url_for('main.manage_resource', folder_id=folder_id))
     
-    # Create new user permission (no expiration date)
-    expires_at = None  # Define the variable for use in metadata
-    new_permission = UserFolderPermission(
-        user_id=user_id,
-        folder_id=folder_id,
-        permission_type=permission_type,
-        granted_by_id=current_user.id,
-        expires_at=expires_at,
-        notes=notes,
-        is_active=True
-    )
+    elif existing_permission_check['action'] == 'duplicate':
+        # Permission already exists - warn user and don't proceed
+        flash(existing_permission_check['message'], 'warning')
+        return redirect(url_for('main.manage_resource', folder_id=folder_id))
     
-    db.session.add(new_permission)
+    elif existing_permission_check['action'] == 'change':
+        # Different permission type exists - create change request with automatic approval
+        
+        # Cancel any pending request first
+        if existing_permission_check.get('existing_source') == 'pending':
+            existing_request = existing_permission_check.get('existing_request')
+            if existing_request:
+                existing_request.cancel(current_user, "Cancelada para cambio de tipo de permiso")
+                db.session.commit()
+        
+        # Create permission change request
+        permission_request = PermissionRequest.create_permission_change_request(
+            requester=user,
+            folder_id=folder_id,
+            validator_id=current_user.id,
+            new_permission_type=permission_type,
+            business_need=notes or f"Permiso asignado directamente por {current_user.full_name}",
+            existing_permission_info=existing_permission_check
+        )
+        
+        # Check if there are applicable groups for the new permission type
+        applicable_groups = permission_request.get_applicable_groups()
+        if not applicable_groups:
+            flash(f'No hay grupos configurados para permisos de {permission_type} en esta carpeta. Contacte al administrador.', 'error')
+            return redirect(url_for('main.manage_resource', folder_id=folder_id))
+        
+        # Assign groups automatically before saving
+        permission_request.assign_groups_automatically()
+        
+        db.session.add(permission_request)
+        db.session.flush()  # Get the permission request ID
+        
+        # Automatically approve the permission request
+        permission_request.approve(current_user, f"Aprobado automáticamente por propietario/validador. {notes}" if notes else "Aprobado automáticamente por propietario/validador.")
+        db.session.commit()
+        
+        # Log audit event for automatic approval
+        AuditEvent.log_event(
+            user=current_user,
+            event_type='permission_change_request',
+            action='auto_approve',
+            resource_type='permission_request',
+            resource_id=permission_request.id,
+            description=f'Aprobación automática de cambio de permiso: {existing_permission_check["existing_permission_type"]} → {permission_type} para usuario {user.username} en carpeta {folder.path}',
+            metadata={
+                'folder_path': folder.path,
+                'target_username': user.username,
+                'old_permission_type': existing_permission_check['existing_permission_type'],
+                'new_permission_type': permission_type,
+                'existing_source': existing_permission_check['existing_source'],
+                'applicable_groups': [g.name for g in applicable_groups],
+                'is_change_request': True,
+                'auto_approved': True,
+                'notes': notes
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent')
+        )
+        
+        flash(f'Cambio de permiso aprobado automáticamente: {existing_permission_check["existing_permission_type"]} → {permission_type} para usuario {user.username}.', 'success')
+        return redirect(url_for('main.manage_resource', folder_id=folder_id))
     
-    # Create task for applying changes
-    from app.services.task_service import create_user_permission_task
-    task = create_user_permission_task(
-        action='grant',
-        folder=folder,
-        user=user,
-        permission_type=permission_type,
-        created_by=current_user,
-        notes=notes,
-        expires_at=None
-    )
-    
-    db.session.commit()
-    
-    # Log audit event
-    AuditEvent.log_event(
-        user=current_user,
-        event_type='user_permission_grant',
-        action='grant',
-        resource_type='user_folder_permission',
-        resource_id=new_permission.id,
-        description=f'Otorgado permiso {permission_type} al usuario {user.username} para carpeta {folder.path}',
-        metadata={
-            'folder_path': folder.path,
-            'target_username': user.username,
-            'permission_type': permission_type,
-            'expires_at': expires_at,
-            'notes': notes,
-            'task_id': task.id if task else None
-        },
-        ip_address=request.remote_addr,
-        user_agent=request.headers.get('User-Agent')
-    )
-    
-    flash(f'Permiso de {permission_type} otorgado al usuario {user.username}. Tarea creada para aplicar cambios.', 'success')
-    return redirect(url_for('main.manage_resource', folder_id=folder_id))
+    else:  # action == 'new'
+        # Create new permission request with automatic approval
+        permission_request = PermissionRequest(
+            requester=user,
+            folder_id=folder_id,
+            validator_id=current_user.id,
+            permission_type=permission_type,
+            justification=notes or f"Permiso asignado directamente por {current_user.full_name}",
+            business_need=notes or f"Permiso asignado directamente por {current_user.full_name}",
+            expires_at=None
+        )
+        
+        # Check if there are applicable groups for this folder and permission type
+        applicable_groups = permission_request.get_applicable_groups()
+        if not applicable_groups:
+            flash(f'No hay grupos configurados para permisos de {permission_type} en esta carpeta. Contacte al administrador.', 'error')
+            return redirect(url_for('main.manage_resource', folder_id=folder_id))
+        
+        # Assign groups automatically before saving
+        permission_request.assign_groups_automatically()
+        
+        db.session.add(permission_request)
+        db.session.flush()  # Get the permission request ID
+        
+        # Automatically approve the permission request
+        permission_request.approve(current_user, f"Aprobado automáticamente por propietario/validador. {notes}" if notes else "Aprobado automáticamente por propietario/validador.")
+        db.session.commit()
+        
+        # Log audit event for automatic approval
+        AuditEvent.log_event(
+            user=current_user,
+            event_type='permission_request',
+            action='auto_approve',
+            resource_type='permission_request',
+            resource_id=permission_request.id,
+            description=f'Aprobación automática de permiso {permission_type} para usuario {user.username} en carpeta {folder.path}',
+            metadata={
+                'folder_path': folder.path,
+                'folder_description': folder.description,
+                'target_username': user.username,
+                'applicable_groups': [g.name for g in applicable_groups],
+                'permission_type': permission_type,
+                'auto_approved': True,
+                'notes': notes
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent')
+        )
+        
+        flash(f'Permiso de {permission_type} aprobado automáticamente para usuario {user.username}.', 'success')
+        return redirect(url_for('main.manage_resource', folder_id=folder_id))
 
 @main_bp.route('/revoke-user-permission/<int:permission_id>', methods=['POST'])
 @login_required

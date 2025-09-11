@@ -1,4 +1,5 @@
 from datetime import datetime
+import os
 from app import db
 
 class PermissionRequest(db.Model):
@@ -73,10 +74,18 @@ class PermissionRequest(db.Model):
         csv_file_path = None
         try:
             csv_file_path = self.generate_csv_file('add')
+            # Verify CSV file was created successfully
+            if csv_file_path and os.path.exists(csv_file_path):
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"CSV file created successfully: {csv_file_path} for request {self.id}")
+            else:
+                raise FileNotFoundError(f"CSV file was not created at expected path: {csv_file_path}")
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
             logger.error(f"Failed to generate CSV for request {self.id}: {str(e)}")
+            csv_file_path = None
         
         # Create automation tasks after approval
         try:
@@ -396,10 +405,18 @@ class PermissionRequest(db.Model):
         csv_file_path = None
         try:
             csv_file_path = self.generate_csv_file('remove')
+            # Verify CSV file was created successfully
+            if csv_file_path and os.path.exists(csv_file_path):
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"Removal CSV file created successfully: {csv_file_path} for request {self.id}")
+            else:
+                raise FileNotFoundError(f"Removal CSV file was not created at expected path: {csv_file_path}")
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
             logger.error(f"Failed to generate removal CSV for request {self.id}: {str(e)}")
+            csv_file_path = None
         
         # Update status
         self.status = 'revoked'

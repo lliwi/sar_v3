@@ -26,15 +26,17 @@ class TaskService:
         }
     
     def cleanup_csv_file(self, task):
-        """Clean up CSV file associated with a task"""
+        """Clean up CSV file associated with a task after AD verification completes or is cancelled"""
         try:
             task_data = task.get_task_data()
             csv_file_path = task_data.get('csv_file_path')
             
             if csv_file_path and os.path.exists(csv_file_path):
                 os.remove(csv_file_path)
-                logger.info(f"Cleaned up CSV file {csv_file_path} for task {task.id}")
+                logger.info(f"Cleaned up CSV file {csv_file_path} for task {task.id} after AD verification completion")
                 return True
+            elif csv_file_path:
+                logger.debug(f"CSV file {csv_file_path} not found for cleanup (task {task.id})")
             return False
             
         except Exception as e:
@@ -77,6 +79,7 @@ class TaskService:
             # Link tasks - verification task references airflow task
             verification_data = verification_task.get_task_data()
             verification_data['depends_on_task_id'] = airflow_task.id
+            verification_data['csv_file_path'] = csv_file_path  # Add CSV path for cleanup
             verification_task.set_task_data(verification_data)
             
             db.session.commit()
@@ -121,6 +124,7 @@ class TaskService:
             # Link tasks - verification task references airflow task
             verification_data = verification_task.get_task_data()
             verification_data['depends_on_task_id'] = airflow_task.id
+            verification_data['csv_file_path'] = csv_file_path  # Add CSV path for cleanup
             verification_task.set_task_data(verification_data)
             
             db.session.commit()
@@ -379,8 +383,7 @@ class TaskService:
                 
                 if not retry_scheduled:
                     task.mark_as_failed(error_msg)
-                    # Clean up CSV file after permanent failure
-                    self.cleanup_csv_file(task)
+                    # Note: CSV cleanup is handled by AD verification task
                 
                 logger.error(f"Airflow task {task.id} failed: {error_msg}")
                 return False
@@ -391,8 +394,7 @@ class TaskService:
             
             if not retry_scheduled:
                 task.mark_as_failed(error_msg)
-                # Clean up CSV file after permanent failure
-                self.cleanup_csv_file(task)
+                # Note: CSV cleanup is handled by AD verification task
             
             logger.error(error_msg)
             return False
@@ -464,7 +466,7 @@ class TaskService:
                         'last_error': verification_result['error'],
                         'verification_time': datetime.utcnow().isoformat()
                     })
-                    # Clean up CSV file after permanent failure
+                    # Clean up CSV file after permanent AD verification failure
                     self.cleanup_csv_file(task)
                 
                 logger.warning(f"AD verification task {task.id} failed attempt {task.attempt_count}")
@@ -476,7 +478,7 @@ class TaskService:
             
             if not retry_scheduled:
                 task.mark_as_failed(error_msg)
-                # Clean up CSV file after permanent failure
+                # Clean up CSV file after permanent AD verification failure
                 self.cleanup_csv_file(task)
             
             logger.error(error_msg)
@@ -660,7 +662,7 @@ class TaskService:
                         logger.error(f"Unknown task type: {task.task_type}")
                         task.mark_as_failed(f"Unknown task type: {task.task_type}")
                         
-                        # Clean up CSV file for AD verification tasks even when unknown type
+                        # Clean up CSV file when AD verification task has unknown type
                         if task.task_type == 'ad_verification':
                             self.cleanup_csv_file(task)
                         
@@ -672,7 +674,7 @@ class TaskService:
                     logger.error(f"Error processing task {task.id}: {str(e)}")
                     task.mark_as_failed(str(e))
                     
-                    # Clean up CSV file for AD verification tasks on unexpected error
+                    # Clean up CSV file when AD verification task has unexpected error
                     if task.task_type == 'ad_verification':
                         self.cleanup_csv_file(task)
                     
@@ -717,9 +719,11 @@ class TaskService:
                 }
                 task.mark_as_completed(result_data)
                 logger.info(f"Airflow task {task.id} completed successfully")
+                # Note: CSV cleanup is handled by AD verification task
             else:
                 task.mark_as_failed("Failed to trigger Airflow DAG")
                 logger.error(f"Airflow task {task.id} failed to trigger DAG")
+                # Note: CSV cleanup is handled by AD verification task
             
             db.session.commit()
             return success
@@ -782,7 +786,7 @@ class TaskService:
                 task.mark_as_completed(result_data)
                 logger.info(f"AD verification task {task.id} completed successfully")
                 
-                # Clean up CSV file after successful completion
+                # Clean up CSV file after successful AD verification
                 self.cleanup_csv_file(task)
                 
                 success = True
@@ -791,7 +795,7 @@ class TaskService:
                 task.mark_as_failed(f"AD verification failed: {error_msg}", result_data)
                 logger.error(f"AD verification task {task.id} failed: {error_msg}")
                 
-                # Clean up CSV file after permanent failure
+                # Clean up CSV file after permanent AD verification failure
                 self.cleanup_csv_file(task)
                 
                 success = False
@@ -803,7 +807,7 @@ class TaskService:
             logger.error(f"Error executing AD verification task {task.id}: {str(e)}")
             task.mark_as_failed(str(e))
             
-            # Clean up CSV file after error
+            # Clean up CSV file after AD verification error
             self.cleanup_csv_file(task)
             
             db.session.commit()
@@ -996,7 +1000,7 @@ class TaskService:
             # Cancel the task
             task.cancel(cancelled_by=cancelled_by, reason=reason)
             
-            # Clean up CSV file for AD verification tasks when cancelled
+            # Clean up CSV file when AD verification task is cancelled
             if task.task_type == 'ad_verification':
                 self.cleanup_csv_file(task)
             
@@ -1039,7 +1043,7 @@ class TaskService:
                 if task.can_be_cancelled():
                     task.cancel(cancelled_by=cancelled_by, reason=reason)
                     
-                    # Clean up CSV file for AD verification tasks when cancelled
+                    # Clean up CSV file when AD verification task is cancelled
                     if task.task_type == 'ad_verification':
                         self.cleanup_csv_file(task)
                     
