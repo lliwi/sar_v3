@@ -1583,13 +1583,16 @@ def sync_users_from_ad_old():
             'large_groups_processed': 0
         }
         
-        # OPTIMIZATION 1: Ultra-aggressive limits to prevent timeout
-        max_folders = min(int(request.form.get('max_folders', 5)), 5)  # Hard limit to 5 folders max
-        max_members_per_group = min(int(request.form.get('max_members', 20)), 20)  # Hard limit to 20 members max
+        # OPTIMIZATION 1: Configurable limits to prevent timeout
+        max_folders = int(request.form.get('max_folders', 0))  # 0 means no limit
+        max_members_per_group = int(request.form.get('max_members', 0))  # 0 means no limit
         
-        folders = Folder.query.filter_by(is_active=True).limit(max_folders).all()
+        if max_folders > 0:
+            folders = Folder.query.filter_by(is_active=True).limit(max_folders).all()
+        else:
+            folders = Folder.query.filter_by(is_active=True).all()
         
-        logger.info(f"🚀 ULTRA-OPTIMIZED sync: {len(folders)} folders (hard limit: {max_folders})")
+        logger.info(f"🚀 OPTIMIZED sync: {len(folders)} folders (limit: {'no limit' if max_folders == 0 else max_folders})")
         
         conn = ldap_service.get_connection()
         if not conn:
@@ -1606,6 +1609,10 @@ def sync_users_from_ad_old():
                 existing_users[user.username.lower()] = user
         logger.info(f"💾 Cached {len(existing_users)} existing users")
         
+        # OPTIMIZATION 3: Define batch processing variables
+        batch_size = 50  # Process users in batches to avoid long transactions
+        processed_in_batch = 0
+        
         for folder in folders:
             try:
                 folder_users_synced = 0
@@ -1618,6 +1625,8 @@ def sync_users_from_ad_old():
                 
                 if not active_permissions:
                     logger.warning(f"No active permissions found for folder {folder.name}")
+                    # Count folder as processed even if skipped
+                    results['folders_processed'] += 1
                     continue
                 
                 for permission in active_permissions:
@@ -1637,18 +1646,27 @@ def sync_users_from_ad_old():
                         logger.warning(f"No members found for group {ad_group.name}")
                         continue
                     
-                    # Log warning for large groups but PROCESS ALL MEMBERS (completeness over speed)
-                    if len(group_members) > max_members_per_group:
+                    # Log info for large groups - PROCESS ALL MEMBERS (completeness over speed)
+                    if max_members_per_group > 0 and len(group_members) > max_members_per_group:
                         logger.warning(f"⚠️ Processing large group {ad_group.name} with {len(group_members)} members (above recommended limit of {max_members_per_group}, but processing ALL for completeness)")
+                    elif len(group_members) > 50:  # Just informative log for large groups
+                        logger.info(f"📋 Processing group {ad_group.name} with {len(group_members)} members")
                         # Continue processing - no skip for 100% completion
                     
                     # Process ALL members for 100% completion (no artificial limits)
                     processed_members = 0
+                    processed_in_batch = 0  # Reset batch counter for each group
                     
                     for i, member_dn in enumerate(group_members):
                         # Process ALL members - no artificial limits for 100% completion
                         try:
                             logger.debug(f"Processing member DN: {member_dn}")
+                            
+                            # Skip Foreign Security Principals (FSPs) - these are system SIDs, not users
+                            if 'ForeignSecurityPrincipals' in member_dn or 'S-1-5-' in member_dn:
+                                logger.warning(f"Found FSP in group '{ad_group.name}' for folder '{folder.name}': {member_dn}")
+                                logger.info(f"💡 Recommendation: Remove system SIDs from AD group '{ad_group.name}' and use specific user groups instead")
+                                continue
                             
                             # Instead of trying to extract username from DN, 
                             # search directly by DN to get the actual user details
@@ -1817,14 +1835,15 @@ def sync_users_from_ad_old():
             'errors_count': len(results['errors']),
             'large_groups_processed': results['large_groups_processed'],
             'optimizations_applied': {
-                'folder_limit': max_folders,
-                'member_limit_per_group': max_members_per_group,
+                'folder_limit': 'no limit' if max_folders == 0 else max_folders,
+                'member_limit_per_group': 'no limit' if max_members_per_group == 0 else max_members_per_group,
                 'batch_processing': True,
                 'timeout_prevention': True
             }
         }
         
-        logger.info(f"🎉 OPTIMIZED sync completed: {results['folders_processed']}/{max_folders} folders, {results['users_synced']} users, {results['large_groups_processed']} large groups skipped")
+        folder_limit_text = 'all' if max_folders == 0 else f"{results['folders_processed']}/{max_folders}"
+        logger.info(f"🎉 OPTIMIZED sync completed: {folder_limit_text} folders processed (including skipped), {results['users_synced']} users, {results['large_groups_processed']} large groups processed")
         
         # Log this action
         AuditEvent.log_event(
@@ -1840,8 +1859,8 @@ def sync_users_from_ad_old():
                 'errors_count': len(results['errors']),
                 'large_groups_processed': results['large_groups_processed'],
                 'optimization_settings': {
-                    'max_folders': max_folders,
-                    'max_members_per_group': max_members_per_group,
+                    'max_folders': 'no limit' if max_folders == 0 else max_folders,
+                    'max_members_per_group': 'no limit' if max_members_per_group == 0 else max_members_per_group,
                     'batch_processing': True
                 }
             },
