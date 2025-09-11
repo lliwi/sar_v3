@@ -1020,79 +1020,98 @@ def active_permissions_report():
             permissions_by_user[user_id]['folders'][folder_id_key]['permissions'].append(permission)
             all_permissions.append(permission)
         
-        # STEP 2: Get AD memberships
-        memberships = UserADGroupMembership.query.filter_by(is_active=True).all()
+        # STEP 2: Get AD memberships with optimized JOIN query
+        from app.models import ADGroup, User
         
-        for membership in memberships:
-            if not membership.user or not membership.ad_group:
-                continue
+        # Build optimized query with single JOIN instead of N+1 queries
+        membership_permissions_query = db.session.query(
+            UserADGroupMembership,
+            FolderPermission,
+            User,
+            ADGroup,
+            Folder
+        ).join(
+            ADGroup, UserADGroupMembership.ad_group_id == ADGroup.id
+        ).join(
+            FolderPermission, ADGroup.id == FolderPermission.ad_group_id
+        ).join(
+            User, UserADGroupMembership.user_id == User.id
+        ).join(
+            Folder, FolderPermission.folder_id == Folder.id
+        ).filter(
+            UserADGroupMembership.is_active == True,
+            FolderPermission.is_active == True,
+            Folder.is_active == True
+        )
+        
+        # Apply filters at database level
+        if folder_id and folder_id.isdigit():
+            membership_permissions_query = membership_permissions_query.filter(
+                Folder.id == int(folder_id)
+            )
+        
+        if permission_type and permission_type != 'all':
+            membership_permissions_query = membership_permissions_query.filter(
+                FolderPermission.permission_type == permission_type
+            )
+        
+        if user_search:
+            search_term = f"%{user_search.lower()}%"
+            membership_permissions_query = membership_permissions_query.filter(
+                db.or_(
+                    User.username.ilike(search_term),
+                    User.full_name.ilike(search_term)
+                )
+            )
+        
+        # Execute single optimized query
+        membership_permissions = membership_permissions_query.all()
+        
+        # Process results from optimized query
+        for membership, fp, user, ad_group, folder in membership_permissions:
+            user_id = user.id
+            folder_id_key = folder.id
             
-            # Apply user search filter
-            if user_search:
-                if not (user_search.lower() in membership.user.username.lower() or 
-                       user_search.lower() in (membership.user.full_name or '').lower()):
-                    continue
+            # Initialize user entry if not exists
+            if user_id not in permissions_by_user:
+                permissions_by_user[user_id] = {
+                    'user': user,
+                    'folders': {}
+                }
             
-            # Get folder permissions for this AD group
-            folder_perms = FolderPermission.query.filter_by(
-                ad_group_id=membership.ad_group.id,
-                is_active=True
-            ).all()
+            # Initialize folder entry if not exists
+            if folder_id_key not in permissions_by_user[user_id]['folders']:
+                permissions_by_user[user_id]['folders'][folder_id_key] = {
+                    'folder': folder,
+                    'permissions': []
+                }
             
-            for fp in folder_perms:
-                if not fp.folder or not fp.folder.is_active:
-                    continue
+            # Check if this permission already exists (avoid duplicates)
+            exists = False
+            for existing in permissions_by_user[user_id]['folders'][folder_id_key]['permissions']:
+                if (hasattr(existing, 'permission_type') and 
+                    existing.permission_type == fp.permission_type):
+                    exists = True
+                    break
+            
+            if not exists:
+                # Create virtual permission
+                class VirtualPermission:
+                    def __init__(self, membership, folder_permission, user, ad_group):
+                        self.id = f"sync_{membership.id}_{folder_permission.id}"
+                        self.folder_id = folder_permission.folder_id
+                        self.folder = folder_permission.folder
+                        self.permission_type = folder_permission.permission_type
+                        self.ad_group = ad_group
+                        self.validator = None
+                        self.validated_at = None
+                        self.requester_id = user.id
+                        self.requester = user
+                        self.source = 'ad_sync'
                 
-                # Apply filters
-                if folder_id and folder_id.isdigit() and fp.folder.id != int(folder_id):
-                    continue
-                
-                if permission_type and permission_type != 'all' and fp.permission_type != permission_type:
-                    continue
-                
-                user_id = membership.user.id
-                folder_id_key = fp.folder.id
-                
-                # Initialize user entry if not exists
-                if user_id not in permissions_by_user:
-                    permissions_by_user[user_id] = {
-                        'user': membership.user,
-                        'folders': {}
-                    }
-                
-                # Initialize folder entry if not exists
-                if folder_id_key not in permissions_by_user[user_id]['folders']:
-                    permissions_by_user[user_id]['folders'][folder_id_key] = {
-                        'folder': fp.folder,
-                        'permissions': []
-                    }
-                
-                # Check if this permission already exists (avoid duplicates)
-                exists = False
-                for existing in permissions_by_user[user_id]['folders'][folder_id_key]['permissions']:
-                    if (hasattr(existing, 'permission_type') and 
-                        existing.permission_type == fp.permission_type):
-                        exists = True
-                        break
-                
-                if not exists:
-                    # Create virtual permission
-                    class VirtualPermission:
-                        def __init__(self, membership, folder_permission):
-                            self.id = f"sync_{membership.id}_{folder_permission.id}"
-                            self.folder_id = folder_permission.folder.id
-                            self.folder = folder_permission.folder
-                            self.permission_type = folder_permission.permission_type
-                            self.ad_group = membership.ad_group
-                            self.validator = None
-                            self.validated_at = None
-                            self.requester_id = membership.user.id
-                            self.requester = membership.user
-                            self.source = 'ad_sync'
-                    
-                    virtual_perm = VirtualPermission(membership, fp)
-                    permissions_by_user[user_id]['folders'][folder_id_key]['permissions'].append(virtual_perm)
-                    all_permissions.append(virtual_perm)
+                virtual_perm = VirtualPermission(membership, fp, user, ad_group)
+                permissions_by_user[user_id]['folders'][folder_id_key]['permissions'].append(virtual_perm)
+                all_permissions.append(virtual_perm)
         
         # Get all folders for filter dropdown
         all_folders = Folder.query.filter_by(is_active=True).order_by(Folder.name).all()
