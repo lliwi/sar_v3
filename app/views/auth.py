@@ -32,7 +32,8 @@ def login():
             logger.debug(f"LDAP authentication result for {username}: {'Success' if user_data else 'Failed'}")
             
             if user_data:
-                logger.info(f"LDAP authentication successful for {username}. Data: {user_data}")
+                logger.info(f"LDAP authentication successful for {username}")
+                logger.debug(f"LDAP user data for {username}: {user_data}")
             else:
                 logger.warning(f"LDAP authentication failed for {username}")
                 
@@ -108,13 +109,11 @@ def login():
                 from app.models import Role
                 from flask import current_app
                 user_groups = user_data.get('groups', [])
-                logger.debug(f"User {username} groups: {user_groups}")
                 
                 # Get admin groups from configuration
                 admin_groups = current_app.config.get('LDAP_ADMIN_GROUPS', ['Domain Admins', 'Administrators', 'Enterprise Admins'])
                 # Strip whitespace from group names
                 admin_groups = [group.strip() for group in admin_groups]
-                logger.debug(f"Admin groups configured: {admin_groups}")
                 
                 # Check if user is in admin groups
                 # Extract group names from DNs (format: CN=GroupName,OU=...)
@@ -125,10 +124,13 @@ def login():
                         group_name = group_dn.split(',')[0][3:]  # Remove 'CN=' prefix
                         user_group_names.append(group_name)
                 
-                logger.debug(f"Extracted group names for {username}: {user_group_names}")
-                
                 is_domain_admin = any(group_name in admin_groups for group_name in user_group_names)
-                logger.debug(f"User {username} is admin: {is_domain_admin}")
+                
+                # Log group info at INFO level only for admin users or essential security events
+                if is_domain_admin:
+                    logger.info(f"Admin user {username} logged in - groups: {len(user_groups)} total")
+                else:
+                    logger.debug(f"User {username} group membership processed - {len(user_groups)} groups")
                 
                 if is_domain_admin:
                     admin_role = Role.query.filter_by(name='Administrador').first()
