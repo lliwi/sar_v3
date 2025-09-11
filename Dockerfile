@@ -29,4 +29,4 @@ USER appuser
 EXPOSE 8080
 
 # Run the application
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "4", "--timeout", "120", "--keep-alive", "2", "--max-requests", "1000", "--max-requests-jitter", "50", "wsgi:app"]
+CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:8080 --workers 4 --timeout ${GUNICORN_TIMEOUT:-300} --keep-alive 2 --max-requests 1000 --max-requests-jitter 50 wsgi:app"]

@@ -17,6 +17,8 @@ services:
       - FLASK_DEBUG=${FLASK_DEBUG:-True}
       - SECRET_KEY=${SECRET_KEY}
       - DATABASE_URL=${DATABASE_URL}
+      # Gunicorn Configuration
+      - GUNICORN_TIMEOUT=${GUNICORN_TIMEOUT:-300}
       # Session and Security
       - SESSION_TIMEOUT=${SESSION_TIMEOUT:-3600}
       - CSRF_TIMEOUT=${CSRF_TIMEOUT:-3600}
