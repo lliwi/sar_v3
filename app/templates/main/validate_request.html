@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+
+{% block page_title %}Validar Solicitud{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="card-title">{{ title }}</h4>
+                    <p class="card-text text-muted">Revisar y procesar la solicitud de permiso.</p>
+                </div>
+                <div class="card-body">
+                    <!-- Información de la solicitud -->
+                    <div class="alert alert-info mb-4">
+                        <h5><i class="fas fa-info-circle me-2"></i>Detalles de la Solicitud</h5>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <p><strong>Solicitante:</strong> {{ request.requester.full_name }} ({{ request.requester.username }})</p>
+                                <p><strong>Departamento:</strong> {{ request.requester.department or 'No especificado' }}</p>
+                                <p><strong>Email:</strong> {{ request.requester.email }}</p>
+                            </div>
+                            <div class="col-md-6">
+                                <p><strong>Carpeta:</strong> {{ request.folder.path }}</p>
+                                <p><strong>Descripción:</strong> {{ request.folder.description or 'Sin descripción' }}</p>
+                                <p><strong>Tipo de Permiso:</strong> 
+                                    <span class="badge bg-{{ 'warning' if request.permission_type == 'write' else 'info' }}">
+                                        {{ 'Escritura' if request.permission_type == 'write' else 'Lectura' }}
+                                    </span>
+                                </p>
+                            </div>
+                        </div>
+                        <div class="row mt-3">
+                            <div class="col-12">
+                                <p><strong>Justificación:</strong></p>
+                                <div class="bg-light p-3 rounded">
+                                    {{ request.business_need }}
+                                </div>
+                            </div>
+                        </div>
+                        {% if request.expires_at %}
+                        <div class="row mt-2">
+                            <div class="col-12">
+                                <p><strong>Fecha de Expiración:</strong> {{ request.expires_at.strftime('%d/%m/%Y %H:%M') }}</p>
+                            </div>
+                        </div>
+                        {% endif %}
+                        <div class="row mt-2">
+                            <div class="col-12">
+                                <p><strong>Fecha de Solicitud:</strong> {{ request.created_at.strftime('%d/%m/%Y %H:%M') }}</p>
+                                {% if request.ad_group %}
+                                <p><strong>Grupo AD Asignado:</strong> 
+                                    <span class="badge bg-secondary">{{ request.ad_group.name }}</span>
+                                </p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Formulario de validación -->
+                    <form method="POST" action="{{ url_for('main.validate_request', request_id=request.id) }}">
+                        {{ form.hidden_tag() }}
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    {{ form.action.label(class="form-label") }}
+                                    {{ form.action(class="form-select") }}
+                                    {% if form.action.errors %}
+                                        <div class="text-danger">
+                                            {% for error in form.action.errors %}
+                                                <small>{{ error }}</small>
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    {{ form.validator_id.label(class="form-label") }}
+                                    {{ form.validator_id(class="form-select") }}
+                                    {% if form.validator_id.errors %}
+                                        <div class="text-danger">
+                                            {% for error in form.validator_id.errors %}
+                                                <small>{{ error }}</small>
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                    <small class="form-text text-muted">Seleccione el validador que procesará esta solicitud.</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            {{ form.validation_comment.label(class="form-label") }}
+                            {{ form.validation_comment(class="form-control", rows="4", placeholder="Agregue un comentario explicando la decisión (opcional)...") }}
+                            {% if form.validation_comment.errors %}
+                                <div class="text-danger">
+                                    {% for error in form.validation_comment.errors %}
+                                        <small>{{ error }}</small>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                            <small class="form-text text-muted">Los comentarios son opcionales pero recomendados para justificar la decisión.</small>
+                        </div>
+                        
+                        <div class="d-flex justify-content-between">
+                            <a href="{{ url_for('main.pending_validations') }}" class="btn btn-secondary">
+                                <i class="fas fa-arrow-left"></i> Volver a Validaciones Pendientes
+                            </a>
+                            {{ form.submit(class="btn btn-primary") }}
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Auto-resize textareas
+    const textareas = document.querySelectorAll('textarea');
+    textareas.forEach(function(textarea) {
+        textarea.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = this.scrollHeight + 'px';
+        });
+    });
+    
+    // Confirmation for reject action
+    const actionSelect = document.getElementById('action');
+    const form = document.querySelector('form');
+    
+    if (actionSelect && form) {
+        form.addEventListener('submit', function(e) {
+            const action = actionSelect.value;
+            if (action === 'reject') {
+                if (!confirm('¿Está seguro de que desea rechazar esta solicitud?')) {
+                    e.preventDefault();
+                }
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

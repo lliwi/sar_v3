@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block page_title %}Auditoría del Sistema{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2><i class="fas fa-clipboard-list me-2"></i>{{ title }}</h2>
+                <a href="{{ url_for('admin.admin_dashboard') }}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left me-2"></i>Volver al Panel
+                </a>
+            </div>
+
+            <!-- Filters -->
+            <div class="card mb-4">
+                <div class="card-body">
+                    <form method="GET" class="row g-3">
+                        <div class="col-md-4">
+                            <label for="event_type" class="form-label">Tipo de Evento</label>
+                            <select name="event_type" id="event_type" class="form-select">
+                                <option value="">Todos los eventos</option>
+                                {% for event_type in event_types %}
+                                <option value="{{ event_type }}" 
+                                    {% if event_type == selected_event_type %}selected{% endif %}>
+                                    {{ event_type }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="user_search" class="form-label">Usuario</label>
+                            <div class="position-relative">
+                                <input type="text" name="user_search" id="user_search" class="form-control" 
+                                       value="{{ user_search or '' }}" placeholder="Buscar por nombre de usuario...">
+                                <i class="fas fa-user position-absolute top-50 end-0 translate-middle-y me-3 text-muted"></i>
+                            </div>
+                        </div>
+                        <div class="col-md-4 d-flex align-items-end">
+                            <button type="submit" class="btn btn-primary me-2">
+                                <i class="fas fa-filter me-2"></i>Filtrar
+                            </button>
+                            <a href="{{ url_for('admin.audit') }}" class="btn btn-outline-secondary">
+                                <i class="fas fa-times me-2"></i>Limpiar
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Audit Events Table -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-history me-2"></i>Eventos de Auditoría
+                        <span class="badge bg-secondary ms-2">{{ events.total }} eventos</span>
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if events.items %}
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>Fecha/Hora</th>
+                                    <th>Usuario</th>
+                                    <th>Evento</th>
+                                    <th>Acción</th>
+                                    <th>Recurso</th>
+                                    <th>Descripción</th>
+                                    <th>IP</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for event in events.items %}
+                                <tr>
+                                    <td>
+                                        <small>{{ event.created_at.strftime('%d/%m/%Y %H:%M:%S') }}</small>
+                                    </td>
+                                    <td>
+                                        {% if event.user %}
+                                            <span class="badge bg-info">{{ event.user.username }}</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">Sistema</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-primary">{{ event.event_type }}</span>
+                                    </td>
+                                    <td>
+                                        {% if event.action == 'success' %}
+                                            <span class="badge bg-success">{{ event.action }}</span>
+                                        {% elif event.action == 'failed' %}
+                                            <span class="badge bg-danger">{{ event.action }}</span>
+                                        {% else %}
+                                            <span class="badge bg-warning">{{ event.action }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if event.resource_type and event.resource_id %}
+                                            <small>{{ event.resource_type }}:{{ event.resource_id }}</small>
+                                        {% else %}
+                                            <span class="text-muted">-</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <small>{{ event.description }}</small>
+                                    </td>
+                                    <td>
+                                        <small>{{ event.ip_address or '-' }}</small>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Pagination -->
+                    {% if events.pages > 1 %}
+                    <nav aria-label="Navegación de eventos de auditoría">
+                        <ul class="pagination justify-content-center">
+                            {% if events.has_prev %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('admin.audit', page=events.prev_num, event_type=selected_event_type, user_search=user_search) }}">
+                                    <i class="fas fa-chevron-left"></i>
+                                </a>
+                            </li>
+                            {% endif %}
+
+                            {% for page_num in events.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
+                                {% if page_num %}
+                                    {% if page_num != events.page %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('admin.audit', page=page_num, event_type=selected_event_type, user_search=user_search) }}">{{ page_num }}</a>
+                                    </li>
+                                    {% else %}
+                                    <li class="page-item active">
+                                        <span class="page-link">{{ page_num }}</span>
+                                    </li>
+                                    {% endif %}
+                                {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">…</span>
+                                </li>
+                                {% endif %}
+                            {% endfor %}
+
+                            {% if events.has_next %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('admin.audit', page=events.next_num, event_type=selected_event_type, user_search=user_search) }}">
+                                    <i class="fas fa-chevron-right"></i>
+                                </a>
+                            </li>
+                            {% endif %}
+                        </ul>
+                    </nav>
+                    {% endif %}
+
+                    {% else %}
+                    <div class="text-center py-4">
+                        <i class="fas fa-search fa-3x text-muted mb-3"></i>
+                        <h5 class="text-muted">No se encontraron eventos de auditoría</h5>
+                        <p class="text-muted">No hay eventos que coincidan con los filtros seleccionados.</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

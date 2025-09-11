@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+
+{% block page_title %}{{ title }}{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <h2><i class="fas fa-user me-2"></i>{{ title }}</h2>
+                <a href="{{ url_for('admin.users') }}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left me-2"></i>Volver a Usuarios
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Form -->
+    <div class="row">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-edit me-2"></i>{{ "Editar" if user else "Nuevo" }} Usuario
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST">
+                        {{ form.hidden_tag() }}
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    {{ form.username.label(class="form-label") }}
+                                    {{ form.username(class="form-control" + (" is-invalid" if form.username.errors else "")) }}
+                                    {% if form.username.errors %}
+                                        <div class="invalid-feedback">
+                                            {{ form.username.errors[0] }}
+                                        </div>
+                                    {% endif %}
+                                    <div class="form-text">Nombre de usuario para autenticación</div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    {{ form.email.label(class="form-label") }}
+                                    {{ form.email(class="form-control" + (" is-invalid" if form.email.errors else "")) }}
+                                    {% if form.email.errors %}
+                                        <div class="invalid-feedback">
+                                            {{ form.email.errors[0] }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="mb-3">
+                                    {{ form.full_name.label(class="form-label") }}
+                                    {{ form.full_name(class="form-control" + (" is-invalid" if form.full_name.errors else "")) }}
+                                    {% if form.full_name.errors %}
+                                        <div class="invalid-feedback">
+                                            {{ form.full_name.errors[0] }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    {{ form.department.label(class="form-label") }}
+                                    {{ form.department(class="form-control" + (" is-invalid" if form.department.errors else "")) }}
+                                    {% if form.department.errors %}
+                                        <div class="invalid-feedback">
+                                            {{ form.department.errors[0] }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            {{ form.roles.label(class="form-label") }}
+                            {{ form.roles(class="form-select" + (" is-invalid" if form.roles.errors else ""), multiple=true, size="4") }}
+                            {% if form.roles.errors %}
+                                <div class="invalid-feedback">
+                                    {{ form.roles.errors[0] }}
+                                </div>
+                            {% endif %}
+                            <div class="form-text">Mantén Ctrl presionado para seleccionar múltiples roles</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <div class="form-check">
+                                {{ form.is_active(class="form-check-input") }}
+                                {{ form.is_active.label(class="form-check-label") }}
+                            </div>
+                        </div>
+
+                        <div class="d-flex gap-2">
+                            {{ form.submit(class="btn btn-primary") }}
+                            <a href="{{ url_for('admin.users') }}" class="btn btn-outline-secondary">Cancelar</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Side Panel -->
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="card-title mb-0">
+                        <i class="fas fa-info-circle me-2"></i>Información
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <h6>Roles Disponibles</h6>
+                    <ul class="small text-muted">
+                        <li><strong>Administrador:</strong> Acceso completo al sistema</li>
+                        <li><strong>Propietario:</strong> Gestión de carpetas asignadas</li>
+                        <li><strong>Validador:</strong> Aprobación de solicitudes</li>
+                        <li><strong>Usuario:</strong> Solicitud de permisos</li>
+                    </ul>
+                    
+                    <h6>Estado</h6>
+                    <p class="small text-muted">Los usuarios inactivos no pueden acceder al sistema pero mantienen su información histórica.</p>
+                    
+                    {% if user %}
+                    <h6>Información del Sistema</h6>
+                    <p class="small text-muted">
+                        <strong>Creado:</strong> {{ user.created_at.strftime('%d/%m/%Y %H:%M') if user.created_at else 'N/A' }}<br>
+                        <strong>Última actualización:</strong> {{ user.updated_at.strftime('%d/%m/%Y %H:%M') if user.updated_at else 'N/A' }}
+                    </p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

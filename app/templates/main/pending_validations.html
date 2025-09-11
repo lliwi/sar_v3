@@ -1,0 +1,408 @@
+{% extends "base.html" %}
+
+{% block page_title %}Validaciones Pendientes{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="card-title">{{ title }}</h4>
+                    <p class="card-text text-muted">
+                        {% if current_user.is_admin() %}
+                            Todas las solicitudes pendientes de validación en el sistema.
+                        {% else %}
+                            Solicitudes pendientes asignadas específicamente a ti como validador.
+                        {% endif %}
+                    </p>
+                </div>
+                <div class="card-body">
+                    {% if requests.items %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Solicitante</th>
+                                        <th>Carpeta</th>
+                                        <th>Grupo AD</th>
+                                        <th>Permiso</th>
+                                        <th>Fecha Solicitud</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for req in requests.items %}
+                                    <tr>
+                                        <td>
+                                            <span class="badge bg-secondary">#{{ req.id }}</span>
+                                        </td>
+                                        <td>
+                                            <div class="d-flex align-items-center">
+                                                <div class="avatar avatar-sm me-2">
+                                                    <span class="avatar-initial rounded-circle bg-primary">
+                                                        {{ req.requester.username[0].upper() }}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <strong>{{ req.requester.username }}</strong><br>
+                                                    <small class="text-muted">{{ req.requester.email or 'Sin email' }}</small>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <div>
+                                                <strong>{{ req.folder.name }}</strong><br>
+                                                <small class="text-muted">{{ req.folder.path }}</small>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-info">{{ req.ad_group.name }}</span>
+                                        </td>
+                                        <td>
+                                            {% if req.permission_type == 'read' %}
+                                                <span class="badge bg-success">
+                                                    <i class="fas fa-eye"></i> Lectura
+                                                </span>
+                                            {% else %}
+                                                <span class="badge bg-warning">
+                                                    <i class="fas fa-edit"></i> Escritura
+                                                </span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <small>{{ req.created_at.strftime('%d/%m/%Y %H:%M') }}</small>
+                                        </td>
+                                        <td>
+                                            <div class="btn-group btn-group-sm" role="group">
+                                                <!-- Detalles button - always visible -->
+                                                <button type="button" class="btn btn-outline-info" 
+                                                        data-bs-toggle="modal" 
+                                                        data-bs-target="#detailModal{{ req.id }}"
+                                                        title="Ver detalles de la solicitud">
+                                                    <i class="fas fa-eye"></i> Detalles
+                                                </button>
+                                                
+                                                <!-- Approve and Reject buttons - now always visible for all users -->
+                                                <button type="button" class="btn btn-outline-success" 
+                                                        onclick="approveRequest({{ req.id }})"
+                                                        title="Aprobar solicitud"
+                                                        {% if not (current_user.is_admin() or (req.validator_id and req.validator_id == current_user.id) or (not req.validator_id and current_user in req.folder.owners) or (not req.validator_id and current_user in req.folder.validators)) %}
+                                                        data-no-permission="true"
+                                                        {% endif %}>
+                                                    <i class="fas fa-check"></i> Aprobar
+                                                </button>
+                                                <button type="button" class="btn btn-outline-danger" 
+                                                        onclick="rejectRequest({{ req.id }})"
+                                                        title="Rechazar solicitud"
+                                                        {% if not (current_user.is_admin() or (req.validator_id and req.validator_id == current_user.id) or (not req.validator_id and current_user in req.folder.owners) or (not req.validator_id and current_user in req.folder.validators)) %}
+                                                        data-no-permission="true"
+                                                        {% endif %}>
+                                                    <i class="fas fa-times"></i> Rechazar
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <!-- Pagination -->
+                        {% if requests.pages > 1 %}
+                        <nav aria-label="Navegación de validaciones">
+                            <ul class="pagination justify-content-center">
+                                {% if requests.has_prev %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('main.pending_validations', page=requests.prev_num) }}">
+                                            <i class="fas fa-chevron-left"></i>
+                                        </a>
+                                    </li>
+                                {% endif %}
+                                
+                                {% for page_num in requests.iter_pages() %}
+                                    {% if page_num %}
+                                        {% if page_num != requests.page %}
+                                            <li class="page-item">
+                                                <a class="page-link" href="{{ url_for('main.pending_validations', page=page_num) }}">{{ page_num }}</a>
+                                            </li>
+                                        {% else %}
+                                            <li class="page-item active">
+                                                <span class="page-link">{{ page_num }}</span>
+                                            </li>
+                                        {% endif %}
+                                    {% else %}
+                                        <li class="page-item disabled">
+                                            <span class="page-link">...</span>
+                                        </li>
+                                    {% endif %}
+                                {% endfor %}
+                                
+                                {% if requests.has_next %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('main.pending_validations', page=requests.next_num) }}">
+                                            <i class="fas fa-chevron-right"></i>
+                                        </a>
+                                    </li>
+                                {% endif %}
+                            </ul>
+                        </nav>
+                        {% endif %}
+                        
+                    {% else %}
+                        <div class="text-center py-5">
+                            <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
+                            <h5 class="text-muted">No hay validaciones pendientes</h5>
+                            <p class="text-muted">
+                                {% if current_user.is_admin() %}
+                                    Todas las solicitudes han sido procesadas.
+                                {% else %}
+                                    No tienes solicitudes pendientes de validar para las carpetas bajo tu responsabilidad.
+                                {% endif %}
+                            </p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Detail Modals -->
+{% for req in requests.items %}
+<div class="modal fade" id="detailModal{{ req.id }}" tabindex="-1" aria-labelledby="detailModalLabel{{ req.id }}" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="detailModalLabel{{ req.id }}">
+                    Solicitud #{{ req.id }} - {{ req.requester.username }}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Solicitante:</strong>
+                        <p class="text-muted">{{ req.requester.username }} ({{ req.requester.email or 'Sin email' }})</p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Fecha de Solicitud:</strong>
+                        <p class="text-muted">{{ req.created_at.strftime('%d/%m/%Y %H:%M:%S') }}</p>
+                    </div>
+                </div>
+                
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Carpeta:</strong>
+                        <p class="text-muted">{{ req.folder.path }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Grupo AD:</strong>
+                        <p class="text-muted">{{ req.ad_group.name }}</p>
+                    </div>
+                </div>
+                
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Tipo de Permiso:</strong>
+                        <p class="text-muted">
+                            {% if req.permission_type == 'read' %}
+                                <i class="fas fa-eye text-success"></i> Lectura
+                            {% else %}
+                                <i class="fas fa-edit text-warning"></i> Escritura
+                            {% endif %}
+                        </p>
+                    </div>
+                    {% if req.expires_at %}
+                    <div class="col-md-6">
+                        <strong>Fecha de Expiración:</strong>
+                        <p class="text-muted">{{ req.expires_at.strftime('%d/%m/%Y') }}</p>
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Validador Asignado:</strong>
+                        <p class="text-muted">
+                            {% if req.validator %}
+                                <div class="d-flex align-items-center">
+                                    <div class="avatar avatar-sm me-2">
+                                        <span class="avatar-initial rounded-circle bg-warning">
+                                            {{ req.validator.username[0].upper() }}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <strong>{{ req.validator.full_name or req.validator.username }}</strong><br>
+                                        <small class="text-muted">{{ req.validator.email or 'Sin email' }}</small>
+                                    </div>
+                                </div>
+                            {% else %}
+                                <span class="text-warning"><i class="fas fa-exclamation-triangle"></i> Sin validador asignado</span>
+                            {% endif %}
+                        </p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Estado:</strong>
+                        <p class="text-muted">
+                            {% if req.status == 'pending' %}
+                                <span class="badge bg-warning">
+                                    <i class="fas fa-clock"></i> Pendiente
+                                </span>
+                            {% elif req.status == 'approved' %}
+                                <span class="badge bg-success">
+                                    <i class="fas fa-check"></i> Aprobada
+                                </span>
+                            {% elif req.status == 'rejected' %}
+                                <span class="badge bg-danger">
+                                    <i class="fas fa-times"></i> Rechazada
+                                </span>
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+                
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <strong>Justificación:</strong>
+                        <div class="border rounded p-3 bg-light">
+                            {{ req.justification }}
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <strong>Necesidad de Negocio:</strong>
+                        <div class="border rounded p-3 bg-light">
+                            {{ req.business_need }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                
+                <!-- Action buttons - now always visible for all users -->
+                <button type="button" class="btn btn-success" 
+                        onclick="approveRequest({{ req.id }})"
+                        {% if not (current_user.is_admin() or (req.validator_id and req.validator_id == current_user.id) or (not req.validator_id and current_user in req.folder.owners) or (not req.validator_id and current_user in req.folder.validators)) %}
+                        data-no-permission="true"
+                        {% endif %}>
+                    <i class="fas fa-check"></i> Aprobar
+                </button>
+                <button type="button" class="btn btn-danger" 
+                        onclick="rejectRequest({{ req.id }})"
+                        {% if not (current_user.is_admin() or (req.validator_id and req.validator_id == current_user.id) or (not req.validator_id and current_user in req.folder.owners) or (not req.validator_id and current_user in req.folder.validators)) %}
+                        data-no-permission="true"
+                        {% endif %}>
+                    <i class="fas fa-times"></i> Rechazar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+<script>
+function approveRequest(requestId) {
+    // Check if user has permission to approve
+    const button = event.target.closest('button');
+    if (button && button.getAttribute('data-no-permission') === 'true') {
+        alert('No tienes permisos para aprobar esta solicitud. Solo los propietarios, validadores autorizados o administradores pueden aprobar solicitudes.');
+        return;
+    }
+    
+    // Show loading state
+    const targetButton = document.querySelector(`button[onclick="approveRequest(${requestId})"]`);
+    const originalText = targetButton.innerHTML;
+    targetButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando...';
+    targetButton.disabled = true;
+    
+    fetch(`/api/validate-request/${requestId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token() }}'
+        },
+        body: JSON.stringify({
+            action: 'approve',
+            comment: ''
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Solicitud aprobada exitosamente');
+            location.reload();
+        } else {
+            alert('Error: ' + data.message);
+            targetButton.innerHTML = originalText;
+            targetButton.disabled = false;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error al procesar la solicitud');
+        targetButton.innerHTML = originalText;
+        targetButton.disabled = false;
+    });
+}
+
+function rejectRequest(requestId) {
+    // Check if user has permission to reject
+    const button = event.target.closest('button');
+    if (button && button.getAttribute('data-no-permission') === 'true') {
+        alert('No tienes permisos para rechazar esta solicitud. Solo los propietarios, validadores autorizados o administradores pueden rechazar solicitudes.');
+        return;
+    }
+    
+    if (!confirm('¿Estás seguro de que deseas rechazar esta solicitud?')) {
+        return;
+    }
+    
+    // Show loading state
+    const targetButton = document.querySelector(`button[onclick="rejectRequest(${requestId})"]`);
+    const originalText = targetButton.innerHTML;
+    targetButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando...';
+    targetButton.disabled = true;
+    
+    fetch(`/api/validate-request/${requestId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token() }}'
+        },
+        body: JSON.stringify({
+            action: 'reject',
+            comment: ''
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Solicitud rechazada exitosamente');
+            location.reload();
+        } else {
+            alert('Error: ' + data.message);
+            targetButton.innerHTML = originalText;
+            targetButton.disabled = false;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error al procesar la solicitud');
+        targetButton.innerHTML = originalText;
+        targetButton.disabled = false;
+    });
+}
+
+// Auto-refresh every 30 seconds for pending validations
+setInterval(function() {
+    if (document.querySelectorAll('tbody tr').length > 0) {
+        location.reload();
+    }
+}, 30000);
+</script>
+{% endblock %}

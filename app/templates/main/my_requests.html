@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+
+{% block page_title %}Mis Solicitudes{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div>
+                        <h4 class="card-title">{{ title }}</h4>
+                        <p class="card-text text-muted">Historial de tus solicitudes de permisos.</p>
+                    </div>
+                    <a href="{{ url_for('main.request_permission') }}" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Nueva Solicitud
+                    </a>
+                </div>
+                <div class="card-body">
+                    {% if requests.items %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Carpeta</th>
+                                        <th>Grupo AD</th>
+                                        <th>Permiso</th>
+                                        <th>Estado</th>
+                                        <th>Fecha Solicitud</th>
+                                        <th>Validador</th>
+                                        <th>Expira</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for req in requests.items %}
+                                    <tr>
+                                        <td>
+                                            <span class="badge bg-secondary">#{{ req.id }}</span>
+                                        </td>
+                                        <td>
+                                            <small class="text-muted">{{ req.folder.path }}</small>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-info">{{ req.ad_group.name }}</span>
+                                        </td>
+                                        <td>
+                                            {% if req.permission_type == 'read' %}
+                                                <span class="badge bg-success">
+                                                    <i class="fas fa-eye"></i> Lectura
+                                                </span>
+                                            {% else %}
+                                                <span class="badge bg-warning">
+                                                    <i class="fas fa-edit"></i> Escritura
+                                                </span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if req.status == 'pending' %}
+                                                <span class="badge bg-warning">
+                                                    <i class="fas fa-clock"></i> Pendiente
+                                                </span>
+                                            {% elif req.status == 'approved' %}
+                                                <span class="badge bg-success">
+                                                    <i class="fas fa-check"></i> Aprobado
+                                                </span>
+                                            {% elif req.status == 'rejected' %}
+                                                <span class="badge bg-danger">
+                                                    <i class="fas fa-times"></i> Rechazado
+                                                </span>
+                                            {% elif req.status == 'canceled' %}
+                                                <span class="badge bg-secondary">
+                                                    <i class="fas fa-ban"></i> Cancelado
+                                                </span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <small>{{ req.created_at.strftime('%d/%m/%Y %H:%M') }}</small>
+                                        </td>
+                                        <td>
+                                            {% if req.validator %}
+                                                <small>{{ req.validator.username }}</small>
+                                            {% else %}
+                                                <small class="text-muted">Sin validar</small>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if req.expires_at %}
+                                                <small>{{ req.expires_at.strftime('%d/%m/%Y') }}</small>
+                                            {% else %}
+                                                <small class="text-muted">Sin expiración</small>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <div class="btn-group btn-group-sm" role="group">
+                                                <button type="button" class="btn btn-outline-info" 
+                                                        data-bs-toggle="modal" 
+                                                        data-bs-target="#detailModal{{ req.id }}">
+                                                    <i class="fas fa-eye"></i>
+                                                </button>
+                                                {% if req.status == 'pending' %}
+                                                <button type="button" class="btn btn-outline-danger"
+                                                        onclick="cancelRequest({{ req.id }})">
+                                                    <i class="fas fa-times"></i>
+                                                </button>
+                                                {% endif %}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <!-- Pagination -->
+                        {% if requests.pages > 1 %}
+                        <nav aria-label="Navegación de solicitudes">
+                            <ul class="pagination justify-content-center">
+                                {% if requests.has_prev %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('main.my_requests', page=requests.prev_num) }}">
+                                            <i class="fas fa-chevron-left"></i>
+                                        </a>
+                                    </li>
+                                {% endif %}
+                                
+                                {% for page_num in requests.iter_pages() %}
+                                    {% if page_num %}
+                                        {% if page_num != requests.page %}
+                                            <li class="page-item">
+                                                <a class="page-link" href="{{ url_for('main.my_requests', page=page_num) }}">{{ page_num }}</a>
+                                            </li>
+                                        {% else %}
+                                            <li class="page-item active">
+                                                <span class="page-link">{{ page_num }}</span>
+                                            </li>
+                                        {% endif %}
+                                    {% else %}
+                                        <li class="page-item disabled">
+                                            <span class="page-link">...</span>
+                                        </li>
+                                    {% endif %}
+                                {% endfor %}
+                                
+                                {% if requests.has_next %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('main.my_requests', page=requests.next_num) }}">
+                                            <i class="fas fa-chevron-right"></i>
+                                        </a>
+                                    </li>
+                                {% endif %}
+                            </ul>
+                        </nav>
+                        {% endif %}
+                        
+                    {% else %}
+                        <div class="text-center py-5">
+                            <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
+                            <h5 class="text-muted">No tienes solicitudes</h5>
+                            <p class="text-muted">Cuando realices solicitudes de permisos aparecerán aquí.</p>
+                            <a href="{{ url_for('main.request_permission') }}" class="btn btn-primary">
+                                <i class="fas fa-plus"></i> Hacer mi primera solicitud
+                            </a>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Detail Modals -->
+{% for req in requests.items %}
+<div class="modal fade" id="detailModal{{ req.id }}" tabindex="-1" aria-labelledby="detailModalLabel{{ req.id }}" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="detailModalLabel{{ req.id }}">
+                    Detalles de Solicitud #{{ req.id }}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-dark">
+                <div class="row">
+                    <div class="col-md-6">
+                        <strong class="text-dark">Carpeta:</strong>
+                        <p class="text-secondary">{{ req.folder.path }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong class="text-dark">Grupo AD:</strong>
+                        <p class="text-secondary">{{ req.ad_group.name }}</p>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <strong class="text-dark">Tipo de Permiso:</strong>
+                        <p class="text-secondary">
+                            {% if req.permission_type == 'read' %}
+                                <i class="fas fa-eye text-success"></i> Lectura
+                            {% else %}
+                                <i class="fas fa-edit text-warning"></i> Escritura
+                            {% endif %}
+                        </p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong class="text-dark">Estado:</strong>
+                        <p class="text-secondary">
+                            {% if req.status == 'pending' %}
+                                <span class="badge bg-warning">Pendiente</span>
+                            {% elif req.status == 'approved' %}
+                                <span class="badge bg-success">Aprobado</span>
+                            {% elif req.status == 'rejected' %}
+                                <span class="badge bg-danger">Rechazado</span>
+                            {% elif req.status == 'canceled' %}
+                                <span class="badge bg-secondary">Cancelado</span>
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-12">
+                        <strong class="text-dark">Justificación:</strong>
+                        <p class="text-secondary">{{ req.justification }}</p>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-12">
+                        <strong class="text-dark">Necesidad de Negocio:</strong>
+                        <p class="text-secondary">{{ req.business_need }}</p>
+                    </div>
+                </div>
+                
+                {% if req.validation_comment %}
+                <div class="row">
+                    <div class="col-12">
+                        <strong class="text-dark">Comentario del Validador:</strong>
+                        <p class="text-secondary">{{ req.validation_comment }}</p>
+                    </div>
+                </div>
+                {% endif %}
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <strong class="text-dark">Fecha de Solicitud:</strong>
+                        <p class="text-secondary">{{ req.created_at.strftime('%d/%m/%Y %H:%M:%S') }}</p>
+                    </div>
+                    {% if req.validated_at %}
+                    <div class="col-md-6">
+                        <strong class="text-dark">Fecha de Validación:</strong>
+                        <p class="text-secondary">{{ req.validated_at.strftime('%d/%m/%Y %H:%M:%S') }}</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+<script>
+function cancelRequest(requestId) {
+    if (confirm('¿Estás seguro de que deseas cancelar esta solicitud?')) {
+        fetch(`/api/cancel-request/${requestId}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Error al cancelar la solicitud: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error al cancelar la solicitud');
+        });
+    }
+}
+</script>
+{% endblock %}

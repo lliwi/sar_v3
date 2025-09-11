@@ -1,0 +1,604 @@
+{% extends "base.html" %}
+
+{% block page_title %}Gestión de Carpetas{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h2 class="mb-0">{{ title }}</h2>
+                    <p class="text-muted">Administrar carpetas del sistema</p>
+                </div>
+                <div>
+                    <a href="{{ url_for('admin.admin_dashboard') }}" class="btn btn-outline-secondary me-2">
+                        <i class="fas fa-arrow-left"></i> Volver al Panel
+                    </a>
+                    <div class="btn-group me-2" role="group">
+                        <a href="{{ url_for('admin.export_folders') }}" class="btn btn-success">
+                            <i class="fas fa-download"></i> Exportación
+                        </a>
+                        <a href="#" class="btn btn-info" data-bs-toggle="modal" data-bs-target="#importModal">
+                            <i class="fas fa-upload"></i> Importación
+                        </a>
+                    </div>
+                    <a href="{{ url_for('admin.new_folder') }}" class="btn btn-primary">
+                        <i class="fas fa-folder-plus"></i> Nueva Carpeta
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search and Filters -->
+    <div class="row mb-3">
+        <div class="col-md-6">
+            <form method="GET" class="d-flex">
+                <input type="text" name="search" class="form-control me-2" 
+                       placeholder="Buscar por nombre o ruta..." 
+                       value="{{ search }}">
+                <button type="submit" class="btn btn-outline-primary">
+                    <i class="fas fa-search"></i>
+                </button>
+                {% if search %}
+                <a href="{{ url_for('admin.folders') }}" class="btn btn-outline-secondary ms-2">
+                    <i class="fas fa-times"></i>
+                </a>
+                {% endif %}
+            </form>
+        </div>
+        <div class="col-md-6 text-end">
+            <span class="text-muted">
+                {{ folders.total }} carpeta(s) encontrada(s)
+            </span>
+        </div>
+    </div>
+
+    <!-- Folders Table -->
+    <div class="card">
+        <div class="card-body">
+            {% if folders.items %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Nombre</th>
+                                <th>Ruta</th>
+                                <th>Propietarios</th>
+                                <th>Validadores</th>
+                                <th>Permisos</th>
+                                <th>Estado</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for folder in folders.items %}
+                            <tr>
+                                <td>
+                                    <span class="badge bg-secondary">#{{ folder.id }}</span>
+                                </td>
+                                <td>
+                                    <strong>{{ folder.name }}</strong>
+                                    {% if folder.description %}
+                                    <br><small class="text-muted">{{ folder.description[:50] }}{% if folder.description|length > 50 %}...{% endif %}</small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <code>{{ folder.path }}</code>
+                                </td>
+                                <td>
+                                    {% if folder.owners %}
+                                        {% for owner in folder.owners[:3] %}
+                                            <span class="badge bg-primary me-1">{{ owner.username }}</span>
+                                        {% endfor %}
+                                        {% if folder.owners|length > 3 %}
+                                            <span class="badge bg-light text-dark">+{{ folder.owners|length - 3 }}</span>
+                                        {% endif %}
+                                    {% else %}
+                                        <small class="text-muted">Sin propietarios</small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if folder.validators %}
+                                        {% for validator in folder.validators[:3] %}
+                                            <span class="badge bg-success me-1">{{ validator.username }}</span>
+                                        {% endfor %}
+                                        {% if folder.validators|length > 3 %}
+                                            <span class="badge bg-light text-dark">+{{ folder.validators|length - 3 }}</span>
+                                        {% endif %}
+                                    {% else %}
+                                        <small class="text-muted">Sin validadores</small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span class="badge bg-info">
+                                        {{ folder.permissions|selectattr('is_active')|list|length }} activos
+                                    </span>
+                                </td>
+                                <td>
+                                    {% if folder.is_active %}
+                                        <span class="badge bg-success">Activa</span>
+                                    {% else %}
+                                        <span class="badge bg-danger">Inactiva</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button type="button" class="btn btn-outline-info" 
+                                                data-bs-toggle="modal" 
+                                                data-bs-target="#detailModal{{ folder.id }}">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                        <a href="{{ url_for('admin.edit_folder', folder_id=folder.id) }}" 
+                                           class="btn btn-outline-primary">
+                                            <i class="fas fa-edit"></i>
+                                        </a>
+                                        <button type="button" class="btn btn-outline-warning" 
+                                                title="Obtener permisos AD"
+                                                onclick="getADPermissions({{ folder.id }})">
+                                            <i class="fas fa-server"></i>
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger"
+                                                onclick="toggleFolderStatus({{ folder.id }}, {{ folder.is_active|lower }})">
+                                            {% if folder.is_active %}
+                                                <i class="fas fa-ban"></i>
+                                            {% else %}
+                                                <i class="fas fa-check"></i>
+                                            {% endif %}
+                                        </button>
+                                        <button type="button" class="btn btn-danger"
+                                                title="Eliminar carpeta"
+                                                onclick="deleteFolder({{ folder.id }}, '{{ folder.name }}')">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Pagination -->
+                {% if folders.pages > 1 %}
+                <nav aria-label="Navegación de carpetas" class="mt-3">
+                    <ul class="pagination justify-content-center">
+                        {% if folders.has_prev %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('admin.folders', page=folders.prev_num, search=search) }}">
+                                    <i class="fas fa-chevron-left"></i>
+                                </a>
+                            </li>
+                        {% endif %}
+                        
+                        {% for page_num in folders.iter_pages() %}
+                            {% if page_num %}
+                                {% if page_num != folders.page %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('admin.folders', page=page_num, search=search) }}">{{ page_num }}</a>
+                                    </li>
+                                {% else %}
+                                    <li class="page-item active">
+                                        <span class="page-link">{{ page_num }}</span>
+                                    </li>
+                                {% endif %}
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">...</span>
+                                </li>
+                            {% endif %}
+                        {% endfor %}
+                        
+                        {% if folders.has_next %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('admin.folders', page=folders.next_num, search=search) }}">
+                                    <i class="fas fa-chevron-right"></i>
+                                </a>
+                            </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+                {% endif %}
+                
+            {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-folder fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">No se encontraron carpetas</h5>
+                    {% if search %}
+                        <p class="text-muted">No hay carpetas que coincidan con "{{ search }}"</p>
+                        <a href="{{ url_for('admin.folders') }}" class="btn btn-outline-primary">
+                            Ver todas las carpetas
+                        </a>
+                    {% else %}
+                        <p class="text-muted">Crea la primera carpeta del sistema</p>
+                        <a href="{{ url_for('admin.new_folder') }}" class="btn btn-primary">
+                            <i class="fas fa-folder-plus"></i> Nueva Carpeta
+                        </a>
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Detail Modals -->
+{% for folder in folders.items %}
+<div class="modal fade" id="detailModal{{ folder.id }}" tabindex="-1" aria-labelledby="detailModalLabel{{ folder.id }}" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="detailModalLabel{{ folder.id }}">
+                    {{ folder.name }}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Nombre:</strong>
+                        <p class="text-muted">{{ folder.name }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Estado:</strong>
+                        <p class="text-muted">
+                            {% if folder.is_active %}
+                                <span class="badge bg-success">Activa</span>
+                            {% else %}
+                                <span class="badge bg-danger">Inactiva</span>
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+                
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <strong>Ruta:</strong>
+                        <p class="text-muted"><code>{{ folder.path }}</code></p>
+                    </div>
+                </div>
+                
+                {% if folder.description %}
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <strong>Descripción:</strong>
+                        <p class="text-muted">{{ folder.description }}</p>
+                    </div>
+                </div>
+                {% endif %}
+                
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Propietarios:</strong>
+                        {% if folder.owners %}
+                            <ul class="list-unstyled">
+                                {% for owner in folder.owners %}
+                                <li><span class="badge bg-primary">{{ owner.username }}</span></li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p class="text-muted">Sin propietarios asignados</p>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Validadores:</strong>
+                        {% if folder.validators %}
+                            <ul class="list-unstyled">
+                                {% for validator in folder.validators %}
+                                <li><span class="badge bg-success">{{ validator.username }}</span></li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p class="text-muted">Sin validadores asignados</p>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-12">
+                        <strong>Permisos configurados:</strong>
+                        {% set active_permissions = folder.permissions|selectattr('is_active')|list %}
+                        {% if active_permissions %}
+                            <ul class="list-unstyled">
+                                {% for permission in active_permissions %}
+                                <li class="mb-1">
+                                    <span class="badge bg-info">{{ permission.ad_group.name }}</span>
+                                    -
+                                    {% if permission.permission_type == 'read' %}
+                                        <span class="badge bg-success">Lectura</span>
+                                    {% else %}
+                                        <span class="badge bg-warning">Escritura</span>
+                                    {% endif %}
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p class="text-muted">Sin permisos asignados</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                <a href="{{ url_for('admin.edit_folder', folder_id=folder.id) }}" class="btn btn-primary">
+                    <i class="fas fa-edit"></i> Editar
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+<script>
+function toggleFolderStatus(folderId, isActive) {
+    const action = isActive ? 'desactivar' : 'activar';
+    if (confirm(`¿Estás seguro de que deseas ${action} esta carpeta?`)) {
+        fetch(`/admin/folders/${folderId}/toggle`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Error al cambiar el estado: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error al cambiar el estado de la carpeta');
+        });
+    }
+}
+
+function deleteFolder(folderId, folderName) {
+    if (confirm(`¿Estás seguro de que deseas eliminar la carpeta "${folderName}"?\\n\\nEsta acción NO SE PUEDE DESHACER y eliminará:\\n- La carpeta y su configuración\\n- Todos los permisos asociados\\n- Todas las solicitudes relacionadas\\n\\n¿Continuar?`)) {
+        fetch(`/admin/folders/${folderId}/delete`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Show success message and redirect
+                alert('Carpeta eliminada exitosamente');
+                location.reload();
+            } else {
+                alert('Error al eliminar la carpeta: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error al eliminar la carpeta');
+        });
+    }
+}
+
+function getADPermissions(folderId) {
+    // Show loading state
+    const button = event.target.closest('button');
+    const originalContent = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    button.disabled = true;
+    
+    fetch(`/admin/folders/${folderId}/get-ad-permissions`)
+        .then(response => response.json())
+        .then(data => {
+            // Restore button
+            button.innerHTML = originalContent;
+            button.disabled = false;
+            
+            if (data.success) {
+                showADPermissionsModal(data);
+            } else {
+                alert('Error al obtener permisos AD: ' + (data.error || 'Error desconocido'));
+            }
+        })
+        .catch(error => {
+            // Restore button
+            button.innerHTML = originalContent;
+            button.disabled = false;
+            console.error('Error:', error);
+            alert('Error al obtener permisos AD');
+        });
+}
+
+function showADPermissionsModal(data) {
+    const folder = data.folder;
+    const summary = data.summary;
+    
+    let modalContent = `
+        <div class="modal fade" id="adPermissionsModal" tabindex="-1" aria-labelledby="adPermissionsModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="adPermissionsModalLabel">
+                            <i class="fas fa-server"></i> Permisos AD - ${folder.name}
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row mb-3">
+                            <div class="col-md-12">
+                                <h6><strong>Carpeta:</strong> <code>${folder.path}</code></h6>
+                            </div>
+                        </div>
+                        
+                        <div class="row mb-4">
+                            <div class="col-md-4">
+                                <div class="card bg-primary text-white">
+                                    <div class="card-body text-center">
+                                        <h5>${summary.total_permissions_in_db}</h5>
+                                        <small>Permisos en BD</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card bg-success text-white">
+                                    <div class="card-body text-center">
+                                        <h5>${summary.groups_verified_in_ad}</h5>
+                                        <small>Grupos verificados</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card bg-warning text-white">
+                                    <div class="card-body text-center">
+                                        <h5>${summary.groups_not_found_in_ad}</h5>
+                                        <small>Grupos no encontrados</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+    `;
+    
+    // Database permissions
+    if (data.database_permissions && data.database_permissions.length > 0) {
+        modalContent += `
+            <h6><i class="fas fa-database"></i> Permisos en Base de Datos</h6>
+            <div class="table-responsive mb-4">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>Grupo AD</th>
+                            <th>Permiso</th>
+                            <th>Otorgado por</th>
+                            <th>Fecha</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+        
+        data.database_permissions.forEach(perm => {
+            const permissionBadge = perm.permission_type === 'read' ? 'bg-success' : 'bg-warning';
+            const permissionText = perm.permission_type === 'read' ? 'Lectura' : 'Escritura';
+            modalContent += `
+                <tr>
+                    <td><code>${perm.group_name}</code></td>
+                    <td><span class="badge ${permissionBadge}">${permissionText}</span></td>
+                    <td>${perm.granted_by || 'N/A'}</td>
+                    <td>${perm.granted_at || 'N/A'}</td>
+                </tr>
+            `;
+        });
+        
+        modalContent += '</tbody></table></div>';
+    }
+    
+    // AD groups status
+    if (data.ad_groups_status && data.ad_groups_status.length > 0) {
+        modalContent += `
+            <h6><i class="fas fa-server"></i> Estado de Grupos en AD</h6>
+            <div class="table-responsive mb-4">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>Grupo AD</th>
+                            <th>Permiso</th>
+                            <th>Existe en AD</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+        
+        data.ad_groups_status.forEach(status => {
+            const existsBadge = status.exists_in_ad ? 'bg-success' : 'bg-danger';
+            const existsText = status.exists_in_ad ? 'Sí' : 'No';
+            const permissionBadge = status.permission_type === 'read' ? 'bg-success' : 'bg-warning';
+            const permissionText = status.permission_type === 'read' ? 'Lectura' : 'Escritura';
+            
+            modalContent += `
+                <tr>
+                    <td><code>${status.group_name}</code></td>
+                    <td><span class="badge ${permissionBadge}">${permissionText}</span></td>
+                    <td><span class="badge ${existsBadge}">${existsText}</span></td>
+                </tr>
+            `;
+        });
+        
+        modalContent += '</tbody></table></div>';
+    }
+    
+    modalContent += `
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Remove existing modal if any
+    const existingModal = document.getElementById('adPermissionsModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
+    // Add modal to body
+    document.body.insertAdjacentHTML('beforeend', modalContent);
+    
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('adPermissionsModal'));
+    modal.show();
+    
+    // Clean up modal after it's hidden
+    document.getElementById('adPermissionsModal').addEventListener('hidden.bs.modal', function() {
+        this.remove();
+    });
+}
+
+</script>
+
+<!-- Modal de Importación de Carpetas -->
+<div class="modal fade" id="importModal" tabindex="-1" aria-labelledby="importModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="importModalLabel">Importar Carpetas desde CSV</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="{{ url_for('admin.import_folders') }}" method="post" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="csvFile" class="form-label">Archivo CSV</label>
+                        <input type="file" class="form-control" id="csvFile" name="csvFile" accept=".csv" required>
+                        <div class="form-text">
+                            El archivo CSV debe contener las columnas: nombre, descripcion, ruta, propietario_username, validadores_usernames, grupo_lectura, grupo_escritura
+                        </div>
+                    </div>
+                    <div class="alert alert-info">
+                        <h6><i class="fas fa-info-circle"></i> Formato del CSV:</h6>
+                        <ul class="mb-0">
+                            <li><strong>nombre:</strong> Nombre descriptivo de la carpeta</li>
+                            <li><strong>descripcion:</strong> Descripción de la carpeta</li>
+                            <li><strong>ruta:</strong> Ruta completa de la carpeta (ej: \\\\servidor\\compartida\\carpeta)</li>
+                            <li><strong>propietario_username:</strong> Usuario propietario</li>
+                            <li><strong>validadores_usernames:</strong> Lista de validadores separados por ;</li>
+                            <li><strong>grupo_lectura:</strong> Nombre del grupo AD para lectura</li>
+                            <li><strong>grupo_escritura:</strong> Nombre del grupo AD para escritura</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-info">
+                        <i class="fas fa-upload"></i> Importar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

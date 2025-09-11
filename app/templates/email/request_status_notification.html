@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Estado de Solicitud de Permiso</title>
+    <style>
+        /* Reset styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f8f9fa;
+        }
+        
+        .email-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            padding: 30px 25px;
+            text-align: center;
+            color: white;
+        }
+        
+        .header-approved {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        }
+        
+        .header-rejected {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+        }
+        
+        .header-pending {
+            background: linear-gradient(135deg, #ffc107 0%, #e0a800 100%);
+            color: #212529;
+        }
+        
+        .status-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+            display: block;
+        }
+        
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        
+        .header p {
+            font-size: 16px;
+            opacity: 0.9;
+        }
+        
+        .content {
+            padding: 30px 25px;
+        }
+        
+        .greeting {
+            font-size: 16px;
+            margin-bottom: 20px;
+            color: #495057;
+        }
+        
+        .status-summary {
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .status-approved {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        
+        .status-rejected {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        
+        .status-pending {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+        
+        .status-message {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        
+        .status-description {
+            font-size: 14px;
+            opacity: 0.8;
+        }
+        
+        .request-details {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .detail-row {
+            display: flex;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+        
+        .detail-row:last-child {
+            margin-bottom: 0;
+        }
+        
+        .detail-label {
+            font-weight: 600;
+            color: #495057;
+            min-width: 140px;
+            margin-bottom: 4px;
+        }
+        
+        .detail-value {
+            color: #212529;
+            flex: 1;
+        }
+        
+        .validation-info {
+            background-color: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .validation-comment {
+            background-color: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 15px;
+            white-space: pre-wrap;
+            line-height: 1.5;
+        }
+        
+        .next-steps {
+            background-color: #e8f5e8;
+            border: 1px solid #c3e6cb;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .next-steps-rejected {
+            background-color: #f8e8e8;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .next-steps h3 {
+            color: #155724;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        
+        .next-steps-rejected h3 {
+            color: #721c24;
+        }
+        
+        .next-steps ul {
+            margin-left: 20px;
+            color: #495057;
+        }
+        
+        .next-steps li {
+            margin-bottom: 8px;
+        }
+        
+        .timeline {
+            border-left: 3px solid #007bff;
+            padding-left: 20px;
+            margin: 20px 0;
+        }
+        
+        .timeline-item {
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .timeline-item:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        
+        .timeline-date {
+            font-size: 12px;
+            color: #6c757d;
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        
+        .timeline-event {
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        .action-button {
+            text-align: center;
+            margin: 30px 0;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 14px 28px;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 16px;
+            text-align: center;
+            background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+            color: white;
+            border: 2px solid #007bff;
+            transition: all 0.3s ease;
+        }
+        
+        .btn:hover {
+            background: linear-gradient(135deg, #0056b3 0%, #004085 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0, 123, 255, 0.3);
+        }
+        
+        .footer {
+            background-color: #f8f9fa;
+            padding: 20px 25px;
+            border-top: 1px solid #e9ecef;
+            text-align: center;
+        }
+        
+        .footer p {
+            font-size: 12px;
+            color: #6c757d;
+            margin-bottom: 8px;
+        }
+        
+        .footer p:last-child {
+            margin-bottom: 0;
+        }
+        
+        .company-logo {
+            font-size: 20px;
+            font-weight: 700;
+            color: #007bff;
+            margin-bottom: 10px;
+        }
+        
+        /* Responsive design */
+        @media (max-width: 600px) {
+            .email-container {
+                margin: 10px;
+                width: calc(100% - 20px);
+            }
+            
+            .header, .content, .footer {
+                padding: 20px 15px;
+            }
+            
+            .detail-row {
+                flex-direction: column;
+            }
+            
+            .detail-label {
+                min-width: auto;
+                margin-bottom: 4px;
+            }
+            
+            .status-icon {
+                font-size: 36px;
+            }
+            
+            .header h1 {
+                font-size: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <!-- Header -->
+        <div class="header {% if status == 'approved' %}header-approved{% elif status == 'rejected' %}header-rejected{% else %}header-pending{% endif %}">
+            <div class="status-icon">
+                {% if status == 'approved' %}
+                ✅
+                {% elif status == 'rejected' %}
+                ❌
+                {% else %}
+                ⏳
+                {% endif %}
+            </div>
+            <h1>
+                {% if status == 'approved' %}
+                Solicitud Aprobada
+                {% elif status == 'rejected' %}
+                Solicitud Rechazada
+                {% else %}
+                Solicitud en Proceso
+                {% endif %}
+            </h1>
+            <p>
+                {% if status == 'approved' %}
+                Su permiso ha sido aprobado exitosamente
+                {% elif status == 'rejected' %}
+                Su solicitud no pudo ser aprobada
+                {% else %}
+                Su solicitud está siendo procesada
+                {% endif %}
+            </p>
+        </div>
+        
+        <!-- Content -->
+        <div class="content">
+            <div class="greeting">
+                Estimado/a <strong>{{ permission_request.requester.full_name }}</strong>,
+            </div>
+            
+            <!-- Status Summary -->
+            <div class="status-summary {% if status == 'approved' %}status-approved{% elif status == 'rejected' %}status-rejected{% else %}status-pending{% endif %}">
+                <div class="status-message">
+                    {% if status == 'approved' %}
+                    ¡Felicitaciones! Su solicitud de permiso ha sido aprobada.
+                    {% elif status == 'rejected' %}
+                    Su solicitud de permiso ha sido rechazada.
+                    {% else %}
+                    Su solicitud está siendo procesada por el equipo correspondiente.
+                    {% endif %}
+                </div>
+                <div class="status-description">
+                    {% if status == 'approved' %}
+                    Los cambios serán aplicados en Active Directory y tendrá acceso en breve.
+                    {% elif status == 'rejected' %}
+                    Si tiene dudas sobre esta decisión, puede contactar al validador o solicitar una nueva evaluación.
+                    {% else %}
+                    Le notificaremos tan pronto como se tome una decisión sobre su solicitud.
+                    {% endif %}
+                </div>
+            </div>
+            
+            <!-- Request Details -->
+            <div class="request-details">
+                <div class="detail-row">
+                    <div class="detail-label">Carpeta Solicitada:</div>
+                    <div class="detail-value">
+                        <strong>{{ permission_request.folder.path }}</strong>
+                        {% if permission_request.folder.description %}
+                        <br><small style="color: #6c757d;">{{ permission_request.folder.description }}</small>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="detail-row">
+                    <div class="detail-label">Grupo AD:</div>
+                    <div class="detail-value">
+                        <strong>{{ permission_request.ad_group.name }}</strong>
+                        {% if permission_request.ad_group.description %}
+                        <br><small style="color: #6c757d;">{{ permission_request.ad_group.description }}</small>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="detail-row">
+                    <div class="detail-label">Tipo de Permiso:</div>
+                    <div class="detail-value">
+                        <strong>{{ permission_request.permission_type.title() }}</strong>
+                        {% if permission_request.permission_type == 'read' %}
+                        <span style="color: #17a2b8;">(Solo Lectura)</span>
+                        {% else %}
+                        <span style="color: #fd7e14;">(Lectura y Escritura)</span>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="detail-row">
+                    <div class="detail-label">Fecha de Solicitud:</div>
+                    <div class="detail-value">{{ permission_request.created_at.strftime('%d/%m/%Y a las %H:%M') }}</div>
+                </div>
+                
+                {% if permission_request.expires_at %}
+                <div class="detail-row">
+                    <div class="detail-label">Fecha de Expiración:</div>
+                    <div class="detail-value">{{ permission_request.expires_at.strftime('%d/%m/%Y a las %H:%M') }}</div>
+                </div>
+                {% endif %}
+            </div>
+            
+            <!-- Validation Information -->
+            {% if status in ['approved', 'rejected'] %}
+            <div class="validation-info">
+                <div class="detail-row">
+                    <div class="detail-label">Validado por:</div>
+                    <div class="detail-value">
+                        <strong>{{ permission_request.validator.full_name if permission_request.validator else 'Sistema Automático' }}</strong>
+                        {% if permission_request.validator and permission_request.validator.department %}
+                        <br><small style="color: #6c757d;">{{ permission_request.validator.department }}</small>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="detail-row">
+                    <div class="detail-label">Fecha de Validación:</div>
+                    <div class="detail-value">
+                        {{ permission_request.validation_date.strftime('%d/%m/%Y a las %H:%M') if permission_request.validation_date else 'No disponible' }}
+                    </div>
+                </div>
+                
+                {% if permission_request.validation_comment %}
+                <div style="margin-top: 15px;">
+                    <div class="detail-label">Comentarios del Validador:</div>
+                    <div class="validation-comment">{{ permission_request.validation_comment }}</div>
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+            
+            <!-- Timeline -->
+            <div class="timeline">
+                <div class="timeline-item">
+                    <div class="timeline-date">{{ permission_request.created_at.strftime('%d/%m/%Y %H:%M') }}</div>
+                    <div class="timeline-event">Solicitud enviada</div>
+                </div>
+                
+                {% if status in ['approved', 'rejected'] and permission_request.validation_date %}
+                <div class="timeline-item">
+                    <div class="timeline-date">{{ permission_request.validation_date.strftime('%d/%m/%Y %H:%M') }}</div>
+                    <div class="timeline-event">
+                        Solicitud {{ 'aprobada' if status == 'approved' else 'rechazada' }}
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if status == 'approved' %}
+                <div class="timeline-item">
+                    <div class="timeline-date">Próximamente</div>
+                    <div class="timeline-event">Aplicación de cambios en Active Directory</div>
+                </div>
+                {% endif %}
+            </div>
+            
+            <!-- Next Steps -->
+            <div class="next-steps {% if status == 'rejected' %}next-steps-rejected{% endif %}">
+                <h3>
+                    {% if status == 'approved' %}
+                    🎯 Próximos Pasos
+                    {% elif status == 'rejected' %}
+                    📋 Opciones Disponibles
+                    {% else %}
+                    ⏳ Mientras Tanto
+                    {% endif %}
+                </h3>
+                
+                <ul>
+                    {% if status == 'approved' %}
+                    <li>Los cambios se aplicarán automáticamente en Active Directory en los próximos minutos.</li>
+                    <li>Recibirá una confirmación adicional una vez que los permisos estén activos.</li>
+                    <li>Si no puede acceder después de 30 minutos, contacte al soporte técnico.</li>
+                    <li>Recuerde usar estos permisos de manera responsable según las políticas de la empresa.</li>
+                    {% elif status == 'rejected' %}
+                    <li>Puede solicitar una explicación adicional contactando directamente al validador.</li>
+                    <li>Si cree que hay un error, puede enviar una nueva solicitud con información adicional.</li>
+                    <li>Considere solicitar permisos de solo lectura como alternativa si es apropiado.</li>
+                    <li>Para dudas sobre políticas de permisos, contacte al administrador del sistema.</li>
+                    {% else %}
+                    <li>No se requiere ninguna acción de su parte en este momento.</li>
+                    <li>Recibirá una notificación tan pronto como se tome una decisión.</li>
+                    <li>Puede verificar el estado de su solicitud en el sistema web en cualquier momento.</li>
+                    <li>Si es urgente, puede contactar directamente al validador asignado.</li>
+                    {% endif %}
+                </ul>
+            </div>
+            
+            <!-- Action Button -->
+            <div class="action-button">
+                <a href="{{ base_url }}/my-requests" class="btn">
+                    📊 Ver Todas Mis Solicitudes
+                </a>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <div class="footer">
+            <div class="company-logo">SAR - Sistema de Gestión de Permisos</div>
+            <p>Este correo fue generado automáticamente por el Sistema de Gestión de Permisos de Carpetas.</p>
+            <p><strong>Por favor, no responda a este correo electrónico.</strong></p>
+            <p style="margin-top: 10px;">
+                Para soporte técnico, contacte al administrador del sistema.
+            </p>
+        </div>
+    </div>
+</body>
+</html>

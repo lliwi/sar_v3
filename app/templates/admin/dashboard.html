@@ -1,0 +1,418 @@
+{% extends "base.html" %}
+
+{% block page_title %}Panel de Administración{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <!-- Admin Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h2 class="mb-0">Panel de Administración</h2>
+                    <p class="text-muted">Gestión de recursos del sistema SAR</p>
+                </div>
+                <div class="btn-group" role="group">
+                    <a href="{{ url_for('admin.users') }}" class="btn btn-outline-primary">
+                        <i class="fas fa-users"></i> Usuarios
+                    </a>
+                    <a href="{{ url_for('admin.folders') }}" class="btn btn-outline-success">
+                        <i class="fas fa-folder"></i> Carpetas
+                    </a>
+                    <a href="{{ url_for('admin.ad_groups') }}" class="btn btn-outline-info">
+                        <i class="fas fa-users-cog"></i> Grupos AD
+                    </a>
+                    <a href="{{ url_for('admin.audit') }}" class="btn btn-outline-warning">
+                        <i class="fas fa-file-alt"></i> Auditoría
+                    </a>
+                    <a href="{{ url_for('admin.task_monitor') }}" class="btn btn-outline-secondary">
+                        <i class="fas fa-tasks"></i> Tareas
+                    </a>
+                    <a href="{{ url_for('admin.backup_page') }}" class="btn btn-outline-success">
+                        <i class="fas fa-download"></i> Backup
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="row mb-4">
+        <div class="col-md-2-4">
+            <div class="card text-white bg-primary">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ stats.total_users }}</h4>
+                            <p class="mb-0">Usuarios Activos</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-users fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <a href="{{ url_for('admin.users') }}" class="text-white">
+                        <small><i class="fas fa-arrow-circle-right"></i> Ver todos</small>
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-2-4">
+            <div class="card text-white bg-success">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ stats.total_folders }}</h4>
+                            <p class="mb-0">Carpetas</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-folder fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <a href="{{ url_for('admin.folders') }}" class="text-white">
+                        <small><i class="fas fa-arrow-circle-right"></i> Gestionar</small>
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-2-4">
+            <div class="card text-white bg-info">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ stats.total_ad_groups }}</h4>
+                            <p class="mb-0">Grupos AD</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-users-cog fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <a href="{{ url_for('admin.ad_groups') }}" class="text-white">
+                        <small><i class="fas fa-arrow-circle-right"></i> Sincronizar</small>
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-2-4">
+            <div class="card text-white bg-warning">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ stats.pending_requests }}</h4>
+                            <p class="mb-0">Solicitudes Pendientes</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-clock fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <a href="{{ url_for('main.pending_validations') }}" class="text-white">
+                        <small><i class="fas fa-arrow-circle-right"></i> Validar</small>
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-2-4">
+            <div class="card text-white bg-secondary">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ stats.total_permissions }}</h4>
+                            <p class="mb-0">Informe carpetas</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-key fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <a href="{{ url_for('admin.permissions_report') }}" class="text-white">
+                        <small><i class="fas fa-arrow-circle-right"></i> Reporte</small>
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-2-4">
+            <div class="card text-white bg-dark">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ stats.active_permissions or 0 }}</h4>
+                            <p class="mb-0">Permisos activos</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-users fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <a href="{{ url_for('admin.active_permissions_report') }}" class="text-white">
+                        <small><i class="fas fa-arrow-circle-right"></i> Ver activos</small>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Second Row of Statistics Cards -->
+    <div class="row mb-4">
+        <div class="col-md-2-4">
+            <div class="card text-white bg-danger">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ stats.total_tasks or 0 }}</h4>
+                            <p class="mb-0">Total Tareas</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-tasks fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <a href="{{ url_for('admin.task_monitor') }}" class="text-white">
+                        <small><i class="fas fa-arrow-circle-right"></i> Monitor</small>
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-2-4">
+            <div class="card text-white bg-warning">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ stats.pending_tasks or 0 }}</h4>
+                            <p class="mb-0">Tareas Pendientes</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-clock fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <a href="{{ url_for('admin.task_monitor') }}" class="text-white">
+                        <small><i class="fas fa-arrow-circle-right"></i> Procesar</small>
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-2-4">
+            <div class="card text-white bg-info">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ stats.running_tasks or 0 }}</h4>
+                            <p class="mb-0">Tareas Ejecutando</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-spinner fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <a href="{{ url_for('admin.task_monitor') }}" class="text-white">
+                        <small><i class="fas fa-arrow-circle-right"></i> Ver estado</small>
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-2-4">
+            <div class="card text-white bg-danger">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ stats.failed_tasks or 0 }}</h4>
+                            <p class="mb-0">Tareas Fallidas</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-times fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <a href="{{ url_for('admin.task_monitor') }}" class="text-white">
+                        <small><i class="fas fa-arrow-circle-right"></i> Reintentar</small>
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-2-4">
+            <div class="card text-white bg-success">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ stats.completed_tasks or 0 }}</h4>
+                            <p class="mb-0">Tareas Completadas</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-check fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <a href="{{ url_for('admin.task_monitor') }}" class="text-white">
+                        <small><i class="fas fa-arrow-circle-right"></i> Historial</small>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fas fa-bolt me-2"></i>Acciones Rápidas</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-2-4">
+                            <a href="{{ url_for('admin.sync_users') }}" class="btn btn-outline-primary w-100 mb-2">
+                                <i class="fas fa-sync-alt me-2"></i>Sincronizar Usuarios
+                            </a>
+                        </div>
+                        <div class="col-md-2-4">
+                            <a href="{{ url_for('admin.new_folder') }}" class="btn btn-outline-success w-100 mb-2">
+                                <i class="fas fa-folder-plus me-2"></i>Nueva Carpeta
+                            </a>
+                        </div>
+                        <div class="col-md-2-4">
+                            <a href="{{ url_for('admin.sync_ad_groups') }}" class="btn btn-outline-info w-100 mb-2">
+                                <i class="fas fa-sync me-2"></i>Sincronizar AD
+                            </a>
+                        </div>
+                        <div class="col-md-2-4">
+                            <a href="{{ url_for('admin.permissions_report') }}" class="btn btn-outline-warning w-100 mb-2">
+                                <i class="fas fa-chart-bar me-2"></i>Informe carpetas
+                            </a>
+                        </div>
+                        <div class="col-md-2-4">
+                            <a href="{{ url_for('admin.active_permissions_report') }}" class="btn btn-outline-danger w-100 mb-2">
+                                <i class="fas fa-users me-2"></i>Permisos activos
+                            </a>
+                        </div>
+                        <div class="col-md-2-4">
+                            <a href="{{ url_for('admin.task_monitor') }}" class="btn btn-outline-secondary w-100 mb-2">
+                                <i class="fas fa-tasks me-2"></i>Monitor de Tareas
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="row">
+        <!-- Recent Permission Requests -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-clock me-2"></i>Solicitudes Recientes</h5>
+                    <a href="{{ url_for('main.pending_validations') }}" class="btn btn-sm btn-outline-primary">
+                        Ver todas
+                    </a>
+                </div>
+                <div class="card-body">
+                    {% if recent_requests %}
+                        <div class="list-group list-group-flush">
+                            {% for req in recent_requests %}
+                            <div class="list-group-item d-flex justify-content-between align-items-start">
+                                <div class="ms-2 me-auto">
+                                    <div class="fw-bold">{{ req.requester.username }}</div>
+                                    <small class="text-muted">{{ req.folder.path }}</small>
+                                    <br>
+                                    <small class="text-muted">{{ req.created_at.strftime('%d/%m/%Y %H:%M') }}</small>
+                                </div>
+                                <div>
+                                    {% if req.status == 'pending' %}
+                                        <span class="badge bg-warning">Pendiente</span>
+                                    {% elif req.status == 'approved' %}
+                                        <span class="badge bg-success">Aprobado</span>
+                                    {% elif req.status == 'rejected' %}
+                                        <span class="badge bg-danger">Rechazado</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="text-muted text-center py-3">No hay solicitudes recientes</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Audit Events -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-history me-2"></i>Actividad del Sistema</h5>
+                    <a href="{{ url_for('admin.audit') }}" class="btn btn-sm btn-outline-primary">
+                        Ver auditoría
+                    </a>
+                </div>
+                <div class="card-body">
+                    {% if recent_events %}
+                        <div class="list-group list-group-flush">
+                            {% for event in recent_events %}
+                            <div class="list-group-item">
+                                <div class="d-flex w-100 justify-content-between">
+                                    <div>
+                                        <h6 class="mb-1">{{ event.action.title() }}</h6>
+                                        <p class="mb-1">{{ event.description }}</p>
+                                        <small class="text-muted">{{ event.user.username if event.user else 'Sistema' }}</small>
+                                    </div>
+                                    <small class="text-muted">{{ event.created_at.strftime('%d/%m %H:%M') }}</small>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="text-muted text-center py-3">No hay eventos recientes</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.col-md-2-4 {
+    flex: 0 0 16.66%;
+    max-width: 16.66%;
+}
+
+@media (max-width: 1200px) {
+    .col-md-2-4 {
+        flex: 0 0 33.33%;
+        max-width: 33.33%;
+        margin-bottom: 1rem;
+    }
+}
+
+@media (max-width: 768px) {
+    .col-md-2-4 {
+        flex: 0 0 50%;
+        max-width: 50%;
+        margin-bottom: 1rem;
+    }
+}
+</style>
+{% endblock %}

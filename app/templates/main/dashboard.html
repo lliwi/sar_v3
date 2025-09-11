@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+
+{% block page_title %}Dashboard{% endblock %}
+
+{% block main_content %}
+<!-- Stats Cards -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-white bg-primary">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h5 class="card-title">Solicitudes Pendientes</h5>
+                        <h2 class="mb-0">{{ stats.pending_requests }}</h2>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="fas fa-clock fa-2x"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card text-white bg-warning">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h5 class="card-title">Para Validar</h5>
+                        <h2 class="mb-0">{{ stats.validation_requests }}</h2>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="fas fa-check-circle fa-2x"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card text-white bg-success">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h5 class="card-title">Total Carpetas</h5>
+                        <h2 class="mb-0">{{ stats.total_folders }}</h2>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="fas fa-folder fa-2x"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card text-white bg-info">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h5 class="card-title">Mis Permisos</h5>
+                        <h2 class="mb-0">{{ stats.user_permissions }}</h2>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="fas fa-key fa-2x"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Pending Requests -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-clock me-2"></i>Mis Solicitudes Pendientes</h5>
+                <a href="{{ url_for('main.my_requests') }}" class="btn btn-sm btn-outline-primary">Ver Todas</a>
+            </div>
+            <div class="card-body">
+                {% if pending_requests %}
+                    {% for request in pending_requests %}
+                    <div class="border-bottom pb-2 mb-2">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <strong>{{ request.folder.path }}</strong>
+                                {% if request.folder.description %}
+                                    <br><small class="text-info">{{ request.folder.description }}</small>
+                                {% endif %}
+                                <br>
+                                <small class="text-muted">
+                                    {% if request.ad_group %}
+                                        {{ request.ad_group.name }} - {{ request.permission_type.title() }}
+                                    {% else %}
+                                        Asignación automática - {{ request.permission_type.title() }}
+                                    {% endif %}
+                                </small>
+                            </div>
+                            <div class="text-end">
+                                <span class="badge bg-warning">Pendiente</span>
+                                <br>
+                                <small class="text-muted">{{ request.created_at.strftime('%d/%m/%Y') }}</small>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-muted mb-0">No tienes solicitudes pendientes.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Validation Requests -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-check-circle me-2"></i>Solicitudes para Validar</h5>
+                <a href="{{ url_for('main.pending_validations') }}" class="btn btn-sm btn-outline-warning">Ver Todas</a>
+            </div>
+            <div class="card-body">
+                {% if validation_requests %}
+                    {% for request in validation_requests %}
+                    <div class="border-bottom pb-2 mb-2">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <strong>{{ request.folder.path }}</strong>
+                                <br>
+                                <small class="text-muted">
+                                    Por: {{ request.requester.full_name }} - {{ request.permission_type.title() }}
+                                </small>
+                            </div>
+                            <div class="text-end">
+                                <small class="text-muted">{{ request.created_at.strftime('%d/%m/%Y') }}</small>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-muted mb-0">No hay solicitudes pendientes de validación.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Activity -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-history me-2"></i>Actividad Reciente</h5>
+            </div>
+            <div class="card-body">
+                {% if recent_events %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Acción</th>
+                                    <th>Descripción</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for event in recent_events %}
+                                <tr>
+                                    <td>{{ event.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+                                    <td>
+                                        <span class="badge bg-secondary">{{ event.event_type }}</span>
+                                    </td>
+                                    <td>{{ event.description }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="text-muted mb-0">No hay actividad reciente.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-bolt me-2"></i>Acciones Rápidas</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3">
+                        <a href="{{ url_for('main.request_permission') }}" class="btn btn-outline-primary btn-lg w-100 mb-2">
+                            <i class="fas fa-plus-circle me-2"></i>
+                            Solicitar Permiso
+                        </a>
+                    </div>
+                    <div class="col-md-3">
+                        <a href="{{ url_for('main.my_requests') }}" class="btn btn-outline-info btn-lg w-100 mb-2">
+                            <i class="fas fa-list me-2"></i>
+                            Ver Mis Solicitudes
+                        </a>
+                    </div>
+                    <div class="col-md-3">
+                        {% if stats.validation_requests > 0 %}
+                        <a href="{{ url_for('main.pending_validations') }}" class="btn btn-outline-warning btn-lg w-100 mb-2">
+                            <i class="fas fa-check-circle me-2"></i>
+                            Validar Solicitudes
+                            <span class="badge bg-danger ms-2">{{ stats.validation_requests }}</span>
+                        </a>
+                        {% else %}
+                        <button class="btn btn-outline-secondary btn-lg w-100 mb-2" disabled>
+                            <i class="fas fa-check-circle me-2"></i>
+                            Sin Validaciones
+                        </button>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-3">
+                        {% if current_user.is_admin() %}
+                        <a href="{{ url_for('admin.admin_dashboard') }}" class="btn btn-outline-danger btn-lg w-100 mb-2">
+                            <i class="fas fa-cogs me-2"></i>
+                            Administración
+                        </a>
+                        {% else %}
+                        <button class="btn btn-outline-light btn-lg w-100 mb-2" disabled>
+                            <i class="fas fa-lock me-2"></i>
+                            Solo Administradores
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

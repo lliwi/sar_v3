@@ -1,0 +1,716 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} - SAR{% endblock %}
+
+{% block page_title %}{{ title }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Stats cards matching Dashboard style exactly */
+    .dashboard-style-card {
+        border: none;
+        border-radius: var(--border-radius-lg);
+        box-shadow: var(--shadow);
+        transition: all var(--transition-normal);
+        color: white;
+    }
+    
+    .dashboard-style-card:hover {
+        box-shadow: var(--shadow-lg);
+        transform: translateY(-2px);
+    }
+    
+    .dashboard-style-card.bg-success-custom {
+        background-color: #28a745 !important; /* Bootstrap green */
+        color: #212529 !important; /* Dark text like warning widget */
+    }
+    
+    .dashboard-style-card.bg-warning-custom {
+        background-color: #ffc107 !important; /* Bootstrap yellow */
+        color: #212529 !important; /* Dark text for better contrast on yellow background */
+    }
+    
+    .dashboard-style-card.bg-info-custom {
+        background-color: #17a2b8 !important; /* Bootstrap blue */
+        color: #212529 !important; /* Dark text like warning widget */
+    }
+    
+    .dashboard-style-card .card-body {
+        padding: var(--spacing-lg);
+    }
+    
+    .dashboard-style-card .card-title {
+        font-size: var(--font-size-base);
+        font-weight: 500;
+        margin-bottom: var(--spacing-sm);
+    }
+    
+    .dashboard-style-card .stats-number {
+        font-size: var(--font-size-xxl);
+        font-weight: 700;
+        margin-bottom: 0;
+        line-height: 1;
+    }
+    
+    .dashboard-style-card .stats-icon {
+        font-size: 2rem;
+        opacity: 0.9;
+        transition: all var(--transition-fast);
+    }
+    
+    .dashboard-style-card:hover .stats-icon {
+        transform: scale(1.1);
+        opacity: 1;
+    }
+    
+    .dashboard-style-card.bg-success-custom .card-title,
+    .dashboard-style-card.bg-success-custom .stats-number,
+    .dashboard-style-card.bg-success-custom .stats-icon {
+        color: #212529 !important; /* Dark text like warning widget */
+    }
+    
+    .dashboard-style-card.bg-warning-custom .card-title,
+    .dashboard-style-card.bg-warning-custom .stats-number,
+    .dashboard-style-card.bg-warning-custom .stats-icon {
+        color: #212529 !important; /* Dark text for better contrast on yellow background */
+    }
+    
+    .dashboard-style-card.bg-info-custom .card-title,
+    .dashboard-style-card.bg-info-custom .stats-number,
+    .dashboard-style-card.bg-info-custom .stats-icon {
+        color: #212529 !important; /* Dark text like warning widget */
+    }
+    
+    .permission-badge {
+        font-size: var(--font-size-xs);
+        padding: var(--spacing-xs) var(--spacing-sm);
+        margin: 0.1rem;
+        border-radius: var(--border-radius);
+        font-weight: 500;
+        transition: all var(--transition-fast);
+    }
+    
+    .permission-badge:hover {
+        transform: scale(1.05);
+        box-shadow: var(--shadow-sm);
+    }
+    
+    .empty-state {
+        text-align: center;
+        padding: var(--spacing-xl);
+        color: var(--text-secondary);
+        background-color: var(--bg-primary);
+        border-radius: var(--border-radius-lg);
+        border: 1px solid var(--border-light);
+        box-shadow: var(--shadow-sm);
+    }
+    
+    .empty-state i {
+        font-size: 3rem;
+        margin-bottom: var(--spacing-md);
+        opacity: 0.3;
+        color: var(--text-muted);
+    }
+    
+    .empty-state h4 {
+        color: var(--text-primary);
+        margin-bottom: var(--spacing-sm);
+        font-weight: 600;
+    }
+    
+    .empty-state p {
+        color: var(--text-secondary);
+        margin-bottom: var(--spacing-lg);
+    }
+    
+    
+    
+    
+    .no-results {
+        text-align: center;
+        padding: var(--spacing-xl);
+        color: var(--text-secondary);
+        background-color: var(--bg-primary);
+        border-radius: var(--border-radius-lg);
+        margin-top: var(--spacing-lg);
+    }
+    
+    .no-results i {
+        color: var(--text-muted);
+        margin-bottom: var(--spacing-sm);
+        opacity: 0.5;
+    }
+    
+    .no-results h5 {
+        color: var(--text-primary);
+        margin-bottom: var(--spacing-sm);
+        font-weight: 600;
+    }
+    
+    .no-results p {
+        margin-bottom: 0;
+        color: var(--text-secondary);
+    }
+</style>
+{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <!-- Screen reader announcements -->
+    <div id="search-cleared" class="sr-only">Búsqueda borrada</div>
+    <div id="filter-applied" class="sr-only">Filtros aplicados</div>
+    <!-- Header with statistics - Dashboard style -->
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card dashboard-style-card bg-success-custom text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h5 class="card-title">Solicitudes Aprobadas</h5>
+                            <h2 class="stats-number mb-0">{{ approved_requests.total }}</h2>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-check-circle stats-icon" aria-hidden="true"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card dashboard-style-card bg-warning-custom">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h5 class="card-title">Carpetas Accesibles</h5>
+                            <h2 class="stats-number mb-0">{{ permissions_by_folder|length }}</h2>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-folder stats-icon" aria-hidden="true"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card dashboard-style-card bg-info-custom text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h5 class="card-title">Grupos AD Asignados</h5>
+                            <h2 class="stats-number mb-0">
+                                {% set total_groups = [] %}
+                                {% for folder_data in permissions_by_folder.values() %}
+                                    {% for group in folder_data.read_groups + folder_data.write_groups %}
+                                        {% if group not in total_groups %}
+                                            {% set _ = total_groups.append(group) %}
+                                        {% endif %}
+                                    {% endfor %}
+                                {% endfor %}
+                                {{ total_groups|length }}
+                            </h2>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-users stats-icon" aria-hidden="true"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tabs -->
+    <ul class="nav nav-tabs mb-4" id="permissionsTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="folders-tab" data-bs-toggle="tab" 
+                    data-bs-target="#folders" type="button" role="tab">
+                <i class="fas fa-folder me-2"></i>Permisos por Carpeta
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="requests-tab" data-bs-toggle="tab" 
+                    data-bs-target="#requests" type="button" role="tab">
+                <i class="fas fa-history me-2"></i>Solicitudes Aprobadas
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="permissionsTabsContent">
+        <!-- Folders Tab -->
+        <div class="tab-pane fade show active" id="folders" role="tabpanel">
+            {% if permissions_by_folder %}
+                <!-- Search and Filter Section -->
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="row align-items-center">
+                            <div class="col-md-6">
+                                <div class="position-relative">
+                                    <input type="text" id="folderSearch" class="form-control" 
+                                           placeholder="Buscar por nombre de carpeta, ruta o grupo..."
+                                           aria-label="Buscar carpetas">
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <select id="roleFilter" class="form-select" aria-label="Filtrar por rol">
+                                    <option value="">Todos los roles</option>
+                                    <option value="owner">Propietario</option>
+                                    <option value="validator">Validador</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <select id="permissionFilter" class="form-select" aria-label="Filtrar por permisos">
+                                    <option value="">Todos los permisos</option>
+                                    <option value="read">Con permisos de lectura</option>
+                                    <option value="write">Con permisos de escritura</option>
+                                    <option value="both">Con ambos permisos</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="row mt-2">
+                            <div class="col-12">
+                                <small class="text-muted">
+                                    Mostrando <span id="resultsCount">{{ permissions_by_folder|length }}</span> carpeta(s) de {{ permissions_by_folder|length }} total
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Permissions Table -->
+                <div class="table-responsive">
+                    <table class="table table-hover" id="permissionsTable">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Carpeta</th>
+                                <th>Ruta</th>
+                                <th>Grupos de Lectura</th>
+                                <th>Grupos de Escritura</th>
+                                <th>Mi Rol</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="permissionsTableBody">
+                            {% for folder_id, folder_data in permissions_by_folder.items() %}
+                            <tr class="permission-row" data-folder-name="{{ folder_data.folder.name|lower }}" 
+                                data-folder-path="{{ folder_data.folder.path|lower }}"
+                                data-description="{{ (folder_data.folder.description or '')|lower }}"
+                                data-read-groups="{{ folder_data.read_groups|map(attribute='name')|join(' ')|lower }}"
+                                data-write-groups="{{ folder_data.write_groups|map(attribute='name')|join(' ')|lower }}"
+                                data-role="{% if current_user in folder_data.folder.owners %}owner{% elif current_user in folder_data.folder.validators %}validator{% endif %}"
+                                data-has-read="{{ 'true' if folder_data.read_groups else 'false' }}"
+                                data-has-write="{{ 'true' if folder_data.write_groups else 'false' }}">
+                                
+                                <td>
+                                    <div>
+                                        <strong>{{ folder_data.folder.name }}</strong>
+                                        {% if folder_data.folder.description %}
+                                        <br>
+                                        <small class="text-muted">{{ folder_data.folder.description }}</small>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                                
+                                <td>
+                                    <small class="text-muted">{{ folder_data.folder.path }}</small>
+                                </td>
+                                
+                                <td>
+                                    {% if folder_data.read_groups %}
+                                        {% for group in folder_data.read_groups %}
+                                            {% if not loop.first %}, {% endif %}
+                                            <span class="badge bg-success">{{ group.name }}</span>
+                                        {% endfor %}
+                                    {% else %}
+                                        <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
+                                
+                                <td>
+                                    {% if folder_data.write_groups %}
+                                        {% for group in folder_data.write_groups %}
+                                            {% if not loop.first %}, {% endif %}
+                                            <span class="badge bg-warning">{{ group.name }}</span>
+                                        {% endfor %}
+                                    {% else %}
+                                        <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
+                                
+                                <td>
+                                    {% if current_user in folder_data.folder.owners %}
+                                        <span class="badge bg-primary">Propietario</span>
+                                    {% elif current_user in folder_data.folder.validators %}
+                                        <span class="badge bg-info">Validador</span>
+                                    {% else %}
+                                        <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
+                                
+                                <td>
+                                    <div class="btn-group" role="group" aria-label="Acciones de permiso">
+                                        {% if folder_data.read_groups or folder_data.write_groups %}
+                                            <div class="btn-group" role="group">
+                                                <button type="button" class="btn btn-sm btn-outline-danger dropdown-toggle" 
+                                                        data-bs-toggle="dropdown" aria-expanded="false" title="Eliminar permisos">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                                <ul class="dropdown-menu">
+                                                    {% for group in folder_data.read_groups %}
+                                                        <li>
+                                                            <form action="{{ url_for('main.delete_user_permission') }}" 
+                                                                  method="POST" class="dropdown-item-form">
+                                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                                                <input type="hidden" name="folder_id" value="{{ folder_data.folder.id }}"/>
+                                                                <input type="hidden" name="ad_group_id" value="{{ group.id }}"/>
+                                                                <input type="hidden" name="permission_type" value="read"/>
+                                                                <button type="submit" class="dropdown-item text-danger"
+                                                                        onclick="return confirm('¿Estás seguro de que deseas eliminar tu permiso de lectura del grupo {{ group.name }}?')">
+                                                                    <i class="fas fa-trash me-2"></i>
+                                                                    Eliminar Lectura ({{ group.name }})
+                                                                </button>
+                                                            </form>
+                                                        </li>
+                                                    {% endfor %}
+                                                    {% for group in folder_data.write_groups %}
+                                                        <li>
+                                                            <form action="{{ url_for('main.delete_user_permission') }}" 
+                                                                  method="POST" class="dropdown-item-form">
+                                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                                                <input type="hidden" name="folder_id" value="{{ folder_data.folder.id }}"/>
+                                                                <input type="hidden" name="ad_group_id" value="{{ group.id }}"/>
+                                                                <input type="hidden" name="permission_type" value="write"/>
+                                                                <button type="submit" class="dropdown-item text-danger"
+                                                                        onclick="return confirm('¿Estás seguro de que deseas eliminar tu permiso de escritura del grupo {{ group.name }}?')">
+                                                                    <i class="fas fa-trash me-2"></i>
+                                                                    Eliminar Escritura ({{ group.name }})
+                                                                </button>
+                                                            </form>
+                                                        </li>
+                                                    {% endfor %}
+                                                </ul>
+                                            </div>
+                                        {% else %}
+                                            <span class="btn btn-sm btn-outline-secondary" title="Sin permisos activos" disabled>
+                                                <i class="fas fa-info-circle"></i>
+                                            </span>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- No results message -->
+                <div id="noResults" class="no-results" style="display: none;">
+                    <i class="fas fa-search fa-2x mb-3 text-muted"></i>
+                    <h5>No se encontraron carpetas</h5>
+                    <p class="mb-0">No hay carpetas que coincidan con los filtros seleccionados.</p>
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <i class="fas fa-folder-open"></i>
+                    <h4>Sin carpetas accesibles</h4>
+                    <p>No tienes permisos para gestionar ninguna carpeta actualmente.</p>
+                    <a href="{{ url_for('main.request_permission') }}" class="btn btn-primary">
+                        <i class="fas fa-plus me-1"></i>
+                        Solicitar Permiso
+                    </a>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Requests Tab -->
+        <div class="tab-pane fade" id="requests" role="tabpanel">
+            {% if approved_requests.items %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Fecha Aprobación</th>
+                                <th>Carpeta</th>
+                                <th>Tipo de Permiso</th>
+                                <th>Grupo AD Asignado</th>
+                                <th>Validador</th>
+                                <th>Estado</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for request in approved_requests.items %}
+                            <tr>
+                                <td>
+                                    {{ request.validated_at.strftime('%d/%m/%Y %H:%M') if request.validated_at else 'N/A' }}
+                                </td>
+                                <td>
+                                    <div>
+                                        <strong>{{ request.folder.name }}</strong>
+                                        <br>
+                                        <small class="text-muted">{{ request.folder.path }}</small>
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="badge bg-{% if request.permission_type == 'read' %}success{% else %}warning{% endif %}">
+                                        {% if request.permission_type == 'read' %}
+                                            <i class="fas fa-eye me-1"></i>Lectura
+                                        {% else %}
+                                            <i class="fas fa-edit me-1"></i>Escritura
+                                        {% endif %}
+                                    </span>
+                                </td>
+                                <td>
+                                    {% if request.ad_group %}
+                                        <span class="badge bg-info">{{ request.ad_group.name }}</span>
+                                    {% else %}
+                                        <span class="text-muted">Sin grupo</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if request.validator %}
+                                        {{ request.validator.full_name }}
+                                    {% else %}
+                                        <span class="text-muted">Sistema</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span class="badge bg-success">
+                                        <i class="fas fa-check me-1"></i>
+                                        Aprobado
+                                    </span>
+                                </td>
+                                <td>
+                                    {% if request.ad_group %}
+                                        <form action="{{ url_for('main.delete_user_permission_by_request') }}" 
+                                              method="POST" style="display: inline;">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                            <input type="hidden" name="permission_request_id" value="{{ request.id }}"/>
+                                            <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar permiso"
+                                                    onclick="return confirm('¿Estás seguro de que deseas eliminar tu permiso de {{ request.permission_type }} para {{ request.folder.name }}?')">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </form>
+                                    {% else %}
+                                        <span class="btn btn-sm btn-outline-secondary" title="Sin grupo AD asignado" disabled>
+                                            <i class="fas fa-info-circle"></i>
+                                        </span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                {% if approved_requests.pages > 1 %}
+                <nav aria-label="Navegación de páginas">
+                    <ul class="pagination justify-content-center">
+                        {% if approved_requests.has_prev %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('main.my_permissions', page=approved_requests.prev_num) }}">
+                                    <i class="fas fa-chevron-left"></i>
+                                </a>
+                            </li>
+                        {% endif %}
+                        
+                        {% for page_num in approved_requests.iter_pages() %}
+                            {% if page_num %}
+                                {% if page_num != approved_requests.page %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('main.my_permissions', page=page_num) }}">{{ page_num }}</a>
+                                    </li>
+                                {% else %}
+                                    <li class="page-item active">
+                                        <span class="page-link">{{ page_num }}</span>
+                                    </li>
+                                {% endif %}
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">...</span>
+                                </li>
+                            {% endif %}
+                        {% endfor %}
+                        
+                        {% if approved_requests.has_next %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('main.my_permissions', page=approved_requests.next_num) }}">
+                                    <i class="fas fa-chevron-right"></i>
+                                </a>
+                            </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+                {% endif %}
+            {% else %}
+                <div class="empty-state">
+                    <i class="fas fa-history"></i>
+                    <h4>Sin solicitudes aprobadas</h4>
+                    <p>No tienes solicitudes de permisos aprobadas aún.</p>
+                    <a href="{{ url_for('main.request_permission') }}" class="btn btn-primary">
+                        <i class="fas fa-plus me-1"></i>
+                        Solicitar Permiso
+                    </a>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize Bootstrap tabs
+    var triggerTabList = [].slice.call(document.querySelectorAll('#permissionsTabs button'))
+    triggerTabList.forEach(function (triggerEl) {
+        var tabTrigger = new bootstrap.Tab(triggerEl)
+        
+        triggerEl.addEventListener('click', function (event) {
+            event.preventDefault()
+            tabTrigger.show()
+        })
+    })
+    
+    // Search and filter functionality
+    const searchInput = document.getElementById('folderSearch');
+    const roleFilter = document.getElementById('roleFilter');
+    const permissionFilter = document.getElementById('permissionFilter');
+    const resultsCount = document.getElementById('resultsCount');
+    const noResults = document.getElementById('noResults');
+    const permissionsTable = document.getElementById('permissionsTable');
+    const permissionRows = document.querySelectorAll('.permission-row');
+    const totalRows = permissionRows.length;
+    
+    function updateResultsCount(visibleCount) {
+        if (resultsCount) {
+            resultsCount.textContent = visibleCount;
+        }
+    }
+    
+    function toggleNoResults(show) {
+        if (noResults && permissionsTable) {
+            if (show) {
+                noResults.style.display = 'block';
+                permissionsTable.style.display = 'none';
+            } else {
+                noResults.style.display = 'none';
+                permissionsTable.style.display = 'table';
+            }
+        }
+    }
+    
+    function filterTable() {
+        const searchTerm = searchInput ? searchInput.value.toLowerCase().trim() : '';
+        const selectedRole = roleFilter ? roleFilter.value : '';
+        const selectedPermission = permissionFilter ? permissionFilter.value : '';
+        
+        let visibleCount = 0;
+        
+        permissionRows.forEach(row => {
+            let shouldShow = true;
+            
+            // Text search filter
+            if (searchTerm) {
+                const folderName = row.dataset.folderName || '';
+                const folderPath = row.dataset.folderPath || '';
+                const description = row.dataset.description || '';
+                const readGroups = row.dataset.readGroups || '';
+                const writeGroups = row.dataset.writeGroups || '';
+                
+                const searchableText = `${folderName} ${folderPath} ${description} ${readGroups} ${writeGroups}`;
+                
+                if (!searchableText.includes(searchTerm)) {
+                    shouldShow = false;
+                }
+            }
+            
+            // Role filter
+            if (shouldShow && selectedRole) {
+                const rowRole = row.dataset.role || '';
+                if (rowRole !== selectedRole) {
+                    shouldShow = false;
+                }
+            }
+            
+            // Permission filter
+            if (shouldShow && selectedPermission) {
+                const hasRead = row.dataset.hasRead === 'true';
+                const hasWrite = row.dataset.hasWrite === 'true';
+                
+                switch (selectedPermission) {
+                    case 'read':
+                        if (!hasRead) shouldShow = false;
+                        break;
+                    case 'write':
+                        if (!hasWrite) shouldShow = false;
+                        break;
+                    case 'both':
+                        if (!hasRead || !hasWrite) shouldShow = false;
+                        break;
+                }
+            }
+            
+            // Show/hide row
+            if (shouldShow) {
+                row.style.display = '';
+                visibleCount++;
+            } else {
+                row.style.display = 'none';
+            }
+        });
+        
+        // Update results count and show/hide no results message
+        updateResultsCount(visibleCount);
+        toggleNoResults(visibleCount === 0);
+    }
+    
+    // Attach event listeners
+    if (searchInput) {
+        searchInput.addEventListener('input', filterTable);
+    }
+    
+    if (roleFilter) {
+        roleFilter.addEventListener('change', filterTable);
+    }
+    
+    if (permissionFilter) {
+        permissionFilter.addEventListener('change', filterTable);
+    }
+    
+    // Clear search on Escape key and announce to screen readers
+    if (searchInput) {
+        searchInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                this.value = '';
+                filterTable();
+                // Announce to screen readers
+                this.setAttribute('aria-describedby', 'search-cleared');
+                setTimeout(() => {
+                    this.removeAttribute('aria-describedby');
+                }, 1000);
+            }
+        });
+    }
+    
+    // Auto-refresh badge counts periodically
+    function updateCounts() {
+        // This could be enhanced with AJAX to update counts without page reload
+        // For now, we'll just add some visual feedback
+        const badges = document.querySelectorAll('.permission-badge');
+        badges.forEach(badge => {
+            badge.addEventListener('mouseenter', function() {
+                this.style.transform = 'scale(1.1)';
+            });
+            badge.addEventListener('mouseleave', function() {
+                this.style.transform = 'scale(1)';
+            });
+        });
+    }
+    
+    updateCounts();
+    
+    // Initialize filter on page load
+    filterTable();
+});
+</script>
+{% endblock %}

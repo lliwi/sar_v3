@@ -1,0 +1,912 @@
+{% extends "base.html" %}
+
+{% block page_title %}{{ title }}{% endblock %}
+
+{% block extra_css %}
+<style>
+
+/* Multi-select Combobox Styles */
+.multi-combobox-container {
+    position: relative;
+    width: 100%;
+    border: 2px solid #dee2e6;
+    border-radius: 0.5rem;
+    background-color: #fff;
+    min-height: 120px;
+    padding: 12px;
+    transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.multi-combobox-container:focus-within {
+    border-color: #0d6efd;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.15), 0 2px 8px rgba(0, 0, 0, 0.15);
+    transform: translateY(-1px);
+}
+
+.multi-combobox-container.is-invalid {
+    border-color: #dc3545;
+}
+
+.multi-combobox-selected {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+    min-height: 32px;
+}
+
+.selected-item {
+    display: inline-flex;
+    align-items: center;
+    background: linear-gradient(135deg, #e7f3ff 0%, #f0f8ff 100%);
+    border: 1px solid #b6d7ff;
+    border-radius: 18px;
+    padding: 6px 10px 6px 14px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #0a58ca;
+    gap: 8px;
+    box-shadow: 0 1px 3px rgba(13, 110, 253, 0.1);
+    transition: all 0.2s ease;
+}
+
+.selected-item .remove-btn {
+    background: none;
+    border: none;
+    color: #0a58ca;
+    cursor: pointer;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    transition: background-color 0.15s ease;
+}
+
+.selected-item .remove-btn:hover {
+    background-color: rgba(220, 53, 69, 0.1);
+    color: #dc3545;
+}
+
+.selected-item:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(13, 110, 253, 0.2);
+}
+
+.multi-combobox-input {
+    width: 100%;
+    border: 1px solid #ced4da;
+    border-radius: 0.25rem;
+    padding: 6px 12px;
+    font-size: 0.875rem;
+    outline: none;
+    transition: border-color 0.15s ease-in-out;
+}
+
+.multi-combobox-input:focus {
+    border-color: #86b7fe;
+    box-shadow: 0 0 0 0.1rem rgba(13, 110, 253, 0.25);
+}
+
+.multi-combobox-dropdown {
+    position: absolute;
+    top: 100%;
+    left: -2px;
+    right: -2px;
+    z-index: 9999;
+    background: #fff;
+    border: 2px solid #86b7fe;
+    border-top: none;
+    border-radius: 0 0 0.375rem 0.375rem;
+    max-height: 300px;
+    overflow-y: auto;
+    display: none;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+/* Owners and validators section with higher z-index */
+.owners-validators-container .multi-combobox-dropdown {
+    z-index: 10000;
+}
+
+/* AD groups section with standard z-index */
+.ad-groups-container .multi-combobox-dropdown {
+    z-index: 9999;
+}
+
+.multi-combobox-dropdown.show {
+    display: block;
+}
+
+.multi-combobox-option {
+    padding: 12px 16px;
+    cursor: pointer;
+    border-bottom: 1px solid #f1f3f5;
+    transition: all 0.2s ease;
+    font-size: 0.875rem;
+    margin: 2px 4px;
+    border-radius: 6px;
+}
+
+.multi-combobox-option:hover {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    transform: translateX(4px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.multi-combobox-option.selected {
+    background-color: #e7f3ff;
+    color: #0a58ca;
+}
+
+.multi-combobox-option.disabled {
+    color: #6c757d;
+    cursor: not-allowed;
+    background-color: #f8f9fa;
+}
+
+.option-details {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.option-main {
+    font-weight: 600;
+    color: #212529;
+    margin-bottom: 2px;
+}
+
+.option-secondary {
+    font-size: 0.75rem;
+    color: #6c757d;
+    font-style: italic;
+    opacity: 0.8;
+}
+
+.no-results {
+    padding: 16px 12px;
+    text-align: center;
+    color: #6c757d;
+    font-style: italic;
+}
+
+/* Loading state */
+.multi-combobox-loading {
+    padding: 16px 12px;
+    text-align: center;
+    color: #6c757d;
+}
+
+.multi-combobox-loading::before {
+    content: "🔄 ";
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Enhanced readability styles */
+.card-header {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-bottom: 2px solid #dee2e6;
+}
+
+.card-body {
+    background: linear-gradient(180deg, #ffffff 0%, #fafbfc 100%);
+}
+
+.form-label {
+    font-weight: 600;
+    color: #495057;
+    margin-bottom: 8px;
+    font-size: 0.95rem;
+}
+
+.form-text {
+    font-size: 0.8rem;
+    color: #6c757d;
+    font-style: italic;
+    margin-top: 4px;
+}
+
+/* Improved form control styling */
+.form-control:focus {
+    border-color: #0d6efd;
+    box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.15);
+    transform: translateY(-1px);
+}
+
+/* Button enhancements */
+.btn {
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* Info panel improvements */
+.card:last-child .card-body {
+    background: linear-gradient(135deg, #f8f9ff 0%, #ffffff 100%);
+}
+
+/* Animated loading state */
+.multi-combobox-loading {
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 0.6; }
+    50% { opacity: 1; }
+    100% { opacity: 0.6; }
+}
+</style>
+{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <h2><i class="fas fa-folder me-2"></i>{{ title }}</h2>
+                <a href="{{ url_for('admin.folders') }}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left me-2"></i>Volver a Carpetas
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Form -->
+    <div class="row">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-edit me-2"></i>{{ "Editar" if folder else "Nueva" }} Carpeta
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST" id="folderForm">
+                        {{ form.hidden_tag() }}
+                        
+                        <!-- Basic Information -->
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    {{ form.name.label(class="form-label") }}
+                                    {{ form.name(class="form-control" + (" is-invalid" if form.name.errors else "")) }}
+                                    {% if form.name.errors %}
+                                        <div class="invalid-feedback">
+                                            {{ form.name.errors[0] }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    {{ form.path.label(class="form-label") }}
+                                    {{ form.path(class="form-control" + (" is-invalid" if form.path.errors else "")) }}
+                                    {% if form.path.errors %}
+                                        <div class="invalid-feedback">
+                                            {{ form.path.errors[0] }}
+                                        </div>
+                                    {% endif %}
+                                    <div class="form-text">Ruta completa de la carpeta (ej: \\servidor\carpeta)</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            {{ form.description.label(class="form-label") }}
+                            {{ form.description(class="form-control" + (" is-invalid" if form.description.errors else ""), rows="3") }}
+                            {% if form.description.errors %}
+                                <div class="invalid-feedback">
+                                    {{ form.description.errors[0] }}
+                                </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Owners and Validators with Filtered Comboboxes -->
+                        <div class="row owners-validators-container">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    {{ form.owners.label(class="form-label") }}
+                                    <div class="multi-combobox-container" id="ownersCombobox">
+                                        <div class="multi-combobox-selected" id="ownersSelected"></div>
+                                        <input type="text" class="multi-combobox-input" id="ownersInput" placeholder="🔍 Buscar propietario...">
+                                        <div class="multi-combobox-dropdown" id="ownersDropdown">
+                                            <div class="multi-combobox-loading" id="ownersLoading">Cargando usuarios...</div>
+                                        </div>
+                                    </div>
+                                    {% if form.owners.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {{ form.owners.errors[0] }}
+                                        </div>
+                                    {% endif %}
+                                    <div class="form-text">Seleccionar un único propietario principal (máximo 1)</div>
+                                    <!-- Hidden inputs for form submission -->
+                                    <div id="ownersHiddenInputs"></div>
+                                    <!-- Original select element for pre-population (hidden) -->
+                                    {{ form.owners(class="d-none", id="ownersOriginal") }}
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    {{ form.validators.label(class="form-label") }}
+                                    <div class="multi-combobox-container" id="validatorsCombobox">
+                                        <div class="multi-combobox-selected" id="validatorsSelected"></div>
+                                        <input type="text" class="multi-combobox-input" id="validatorsInput" placeholder="🔍 Buscar validadores...">
+                                        <div class="multi-combobox-dropdown" id="validatorsDropdown">
+                                            <div class="multi-combobox-loading" id="validatorsLoading">Cargando usuarios...</div>
+                                        </div>
+                                    </div>
+                                    {% if form.validators.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {{ form.validators.errors[0] }}
+                                        </div>
+                                    {% endif %}
+                                    <div class="form-text">Usuarios que pueden aprobar solicitudes</div>
+                                    <!-- Hidden inputs for form submission -->
+                                    <div id="validatorsHiddenInputs"></div>
+                                    <!-- Original select element for pre-population (hidden) -->
+                                    {{ form.validators(class="d-none", id="validatorsOriginal") }}
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- AD Groups with Filtered Comboboxes -->
+                        <div class="card border-primary mb-3 ad-groups-container">
+                            <div class="card-header bg-primary text-white">
+                                <h6 class="mb-0"><i class="fas fa-users me-2"></i>Permisos de Grupos AD</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            {{ form.read_groups.label(class="form-label") }}
+                                            <div class="multi-combobox-container" id="readGroupsCombobox">
+                                                <div class="multi-combobox-selected" id="readGroupsSelected"></div>
+                                                <input type="text" class="multi-combobox-input" id="readGroupsInput" placeholder="🔍 Buscar grupos de lectura...">
+                                                <div class="multi-combobox-dropdown" id="readGroupsDropdown">
+                                                    <div class="multi-combobox-loading" id="readGroupsLoading">Cargando grupos AD...</div>
+                                                </div>
+                                            </div>
+                                            {% if form.read_groups.errors %}
+                                                <div class="invalid-feedback d-block">
+                                                    {{ form.read_groups.errors[0] }}
+                                                </div>
+                                            {% endif %}
+                                            <div class="form-text">Grupos con permisos de lectura en la carpeta</div>
+                                            <!-- Hidden inputs for form submission -->
+                                            <div id="readGroupsHiddenInputs"></div>
+                                            <!-- Original select element for pre-population (hidden) -->
+                                            {{ form.read_groups(class="d-none", id="read_groupsOriginal") }}
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            {{ form.write_groups.label(class="form-label") }}
+                                            <div class="multi-combobox-container" id="writeGroupsCombobox">
+                                                <div class="multi-combobox-selected" id="writeGroupsSelected"></div>
+                                                <input type="text" class="multi-combobox-input" id="writeGroupsInput" placeholder="🔍 Buscar grupos de escritura...">
+                                                <div class="multi-combobox-dropdown" id="writeGroupsDropdown">
+                                                    <div class="multi-combobox-loading" id="writeGroupsLoading">Cargando grupos AD...</div>
+                                                </div>
+                                            </div>
+                                            {% if form.write_groups.errors %}
+                                                <div class="invalid-feedback d-block">
+                                                    {{ form.write_groups.errors[0] }}
+                                                </div>
+                                            {% endif %}
+                                            <div class="form-text">Grupos con permisos de escritura en la carpeta</div>
+                                            <!-- Hidden inputs for form submission -->
+                                            <div id="writeGroupsHiddenInputs"></div>
+                                            <!-- Original select element for pre-population (hidden) -->
+                                            {{ form.write_groups(class="d-none", id="write_groupsOriginal") }}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <div class="form-check">
+                                {{ form.is_active(class="form-check-input") }}
+                                {{ form.is_active.label(class="form-check-label") }}
+                            </div>
+                        </div>
+
+                        <div class="d-flex gap-2">
+                            {{ form.submit(class="btn btn-primary") }}
+                            <a href="{{ url_for('admin.folders') }}" class="btn btn-outline-secondary">Cancelar</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Side Panel -->
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="card-title mb-0">
+                        <i class="fas fa-info-circle me-2"></i>Información
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <div class="border-bottom pb-3 mb-3">
+                        <h6 class="text-primary"><i class="fas fa-search me-2"></i>Filtrado Mejorado</h6>
+                        <p class="small text-muted mb-0">Utiliza los campos de búsqueda para encontrar rápidamente usuarios y grupos. Puedes buscar por nombre, departamento o cualquier parte del texto.</p>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <h6 class="text-success"><i class="fas fa-crown me-2"></i>Propietario</h6>
+                        <p class="small text-muted mb-0">Selecciona un único propietario principal. Usar el mismo selector que validadores pero limitado a 1 selección.</p>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <h6 class="text-warning"><i class="fas fa-user-check me-2"></i>Validadores</h6>
+                        <p class="small text-muted mb-0">Pueden aprobar/rechazar solicitudes sin otros privilegios administrativos.</p>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <h6 class="text-info"><i class="fas fa-eye me-2"></i>Grupos de Lectura</h6>
+                        <p class="small text-muted mb-0">Grupos de Active Directory con permisos de solo lectura.</p>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <h6 class="text-danger"><i class="fas fa-edit me-2"></i>Grupos de Escritura</h6>
+                        <p class="small text-muted mb-0">Grupos con permisos de escritura (incluye automáticamente lectura).</p>
+                    </div>
+                    
+                    <div class="border-top pt-3">
+                        <h6 class="text-secondary"><i class="fas fa-lightbulb me-2"></i>Consejos de Uso</h6>
+                        <ul class="small text-muted mb-0">
+                            <li><i class="fas fa-mouse-pointer text-primary me-1"></i>Clic en las etiquetas para eliminar selecciones</li>
+                            <li><i class="fas fa-keyboard text-success me-1"></i>Escribe para filtrar opciones en tiempo real</li>
+                            <li><i class="fas fa-ban text-muted me-1"></i>Los elementos seleccionados aparecen deshabilitados</li>
+                            <li><i class="fas fa-save text-info me-1"></i>Las selecciones se guardan automáticamente</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+
+    // Multi-select Combobox Class
+    class MultiSelectCombobox {
+        constructor(config) {
+            this.container = document.getElementById(config.containerId);
+            this.input = document.getElementById(config.inputId);
+            this.dropdown = document.getElementById(config.dropdownId);
+            this.selectedContainer = document.getElementById(config.selectedId);
+            this.hiddenInputsContainer = document.getElementById(config.hiddenInputsId);
+            this.loading = document.getElementById(config.loadingId);
+            this.fieldName = config.fieldName;
+            this.dataUrl = config.dataUrl;
+            this.placeholder = config.placeholder;
+            this.searchPlaceholder = config.searchPlaceholder;
+            this.maxSelections = config.maxSelections || null; // null means unlimited
+            
+            this.allItems = [];
+            this.selectedItems = new Map();
+            this.isOpen = false;
+            
+            this.init();
+        }
+        
+        async init() {
+            await this.loadData();
+            this.setupEvents();
+            this.loadPreselectedValues();
+        }
+        
+        async loadData() {
+            try {
+                const response = await fetch(this.dataUrl);
+                const data = await response.json();
+                
+                if (data.success) {
+                    this.allItems = data.items;
+                    this.renderDropdown();
+                    this.loading.style.display = 'none';
+                } else {
+                    this.showError('Error al cargar datos');
+                }
+            } catch (error) {
+                console.error('Error loading data:', error);
+                this.showError('Error de conexión');
+            }
+        }
+        
+        setupEvents() {
+            // Input events
+            this.input.addEventListener('input', () => this.handleInput());
+            this.input.addEventListener('focus', () => this.openDropdown());
+            this.input.addEventListener('keydown', (e) => this.handleKeyDown(e));
+            
+            // Click outside to close
+            document.addEventListener('click', (e) => {
+                if (!this.container.contains(e.target)) {
+                    this.closeDropdown();
+                }
+            });
+        }
+        
+        handleInput() {
+            const searchTerm = this.input.value.toLowerCase();
+            this.filterItems(searchTerm);
+            if (!this.isOpen) this.openDropdown();
+        }
+        
+        handleKeyDown(e) {
+            if (e.key === 'Escape') {
+                this.closeDropdown();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                const highlighted = this.dropdown.querySelector('.multi-combobox-option:hover');
+                if (highlighted && !highlighted.classList.contains('disabled')) {
+                    this.selectItem(highlighted.dataset.value);
+                }
+            }
+        }
+        
+        openDropdown() {
+            this.isOpen = true;
+            this.dropdown.classList.add('show');
+            this.filterItems(this.input.value.toLowerCase());
+        }
+        
+        closeDropdown() {
+            this.isOpen = false;
+            this.dropdown.classList.remove('show');
+            this.input.value = '';
+        }
+        
+        filterItems(searchTerm) {
+            const options = this.dropdown.querySelectorAll('.multi-combobox-option');
+            let visibleCount = 0;
+            
+            options.forEach(option => {
+                const text = option.textContent.toLowerCase();
+                const matches = text.includes(searchTerm);
+                option.style.display = matches ? 'block' : 'none';
+                if (matches) visibleCount++;
+            });
+            
+            // Show/hide no results message
+            const noResults = this.dropdown.querySelector('.no-results');
+            if (noResults) noResults.remove();
+            
+            // Contar elementos disponibles (no seleccionados)
+            const availableItems = this.allItems.filter(item => 
+                !this.selectedItems.has(item.id.toString())
+            );
+            
+            if (visibleCount === 0 && availableItems.length > 0) {
+                const noResultsDiv = document.createElement('div');
+                noResultsDiv.className = 'no-results';
+                noResultsDiv.textContent = 'No se encontraron resultados';
+                this.dropdown.appendChild(noResultsDiv);
+            } else if (visibleCount === 0 && availableItems.length === 0) {
+                const noResultsDiv = document.createElement('div');
+                noResultsDiv.className = 'no-results';
+                if (this.maxSelections === 1) {
+                    noResultsDiv.textContent = 'Ya hay un elemento seleccionado (máximo 1)';
+                } else {
+                    noResultsDiv.textContent = 'Todos los elementos disponibles ya están seleccionados';
+                }
+                this.dropdown.appendChild(noResultsDiv);
+            }
+        }
+        
+        renderDropdown() {
+            this.dropdown.innerHTML = '';
+            
+            // Filtrar solo los elementos no seleccionados
+            const availableItems = this.allItems.filter(item => 
+                !this.selectedItems.has(item.id.toString())
+            );
+            
+            availableItems.forEach(item => {
+                const option = document.createElement('div');
+                option.className = 'multi-combobox-option';
+                option.dataset.value = item.id;
+                
+                const maxReached = this.maxSelections && this.selectedItems.size >= this.maxSelections;
+                
+                if (maxReached) {
+                    option.classList.add('disabled');
+                }
+                
+                option.innerHTML = `
+                    <div class="option-details">
+                        <div class="option-main">${item.name}</div>
+                        ${item.secondary ? `<div class="option-secondary">${item.secondary}</div>` : ''}
+                    </div>
+                `;
+                
+                option.addEventListener('click', () => {
+                    if (!maxReached) {
+                        this.selectItem(item.id);
+                    }
+                });
+                
+                this.dropdown.appendChild(option);
+            });
+            
+            // Mostrar mensaje si no hay elementos disponibles
+            if (availableItems.length === 0 && this.allItems.length > 0) {
+                const noItemsDiv = document.createElement('div');
+                noItemsDiv.className = 'no-results';
+                if (this.maxSelections === 1) {
+                    noItemsDiv.textContent = 'Ya hay un elemento seleccionado (máximo 1)';
+                } else {
+                    noItemsDiv.textContent = 'Todos los elementos disponibles ya están seleccionados';
+                }
+                this.dropdown.appendChild(noItemsDiv);
+            }
+        }
+        
+        selectItem(itemId) {
+            const item = this.allItems.find(i => i.id.toString() === itemId.toString());
+            if (!item || this.selectedItems.has(itemId.toString())) return;
+            
+            // Check maximum selection limit
+            if (this.maxSelections && this.selectedItems.size >= this.maxSelections) {
+                // For single selection (owners), replace the existing selection
+                if (this.maxSelections === 1) {
+                    // Clear existing selections immediately for visual feedback
+                    this.selectedItems.clear();
+                    this.renderSelectedItems();
+                    this.updateHiddenInputs();
+                    // Small delay to show the replacement happening
+                    setTimeout(() => {
+                        this.selectedItems.set(itemId.toString(), item);
+                        this.renderSelectedItems();
+                        this.updateHiddenInputs();
+                        this.renderDropdown();
+                    }, 100);
+                    this.closeDropdown();
+                    return;
+                } else {
+                    // For other limits, just return without selecting
+                    return;
+                }
+            }
+            
+            this.selectedItems.set(itemId.toString(), item);
+            this.renderSelectedItems();
+            this.updateHiddenInputs();
+            this.renderDropdown(); // Re-render to update disabled state
+            this.closeDropdown();
+        }
+        
+        removeItem(itemId) {
+            const itemIdStr = itemId.toString();
+            
+            // Check if item exists before removing
+            if (!this.selectedItems.has(itemIdStr)) {
+                console.warn(`Attempted to remove non-existent item: ${itemIdStr}`);
+                return;
+            }
+            
+            // Get item name for logging
+            const item = this.selectedItems.get(itemIdStr);
+            console.log(`Removing item: ${item.name} (ID: ${itemIdStr}) from ${this.fieldName}`);
+            
+            // Remove the item
+            this.selectedItems.delete(itemIdStr);
+            
+            // Update UI components
+            this.renderSelectedItems();
+            this.updateHiddenInputs();
+            this.renderDropdown(); // Re-render to update disabled state
+            
+            // Provide visual feedback
+            this.input.focus();
+            
+            console.log(`${this.fieldName} now has ${this.selectedItems.size} selected items`);
+        }
+        
+        renderSelectedItems() {
+            this.selectedContainer.innerHTML = '';
+            
+            this.selectedItems.forEach((item, itemId) => {
+                const tag = document.createElement('div');
+                tag.className = 'selected-item';
+                
+                // Create remove button with proper event listener instead of onclick
+                const removeBtn = document.createElement('button');
+                removeBtn.type = 'button';
+                removeBtn.className = 'remove-btn';
+                removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+                
+                // Add event listener directly to avoid scope issues
+                removeBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.removeItem(itemId);
+                });
+                
+                // Create the tag content
+                const span = document.createElement('span');
+                span.textContent = item.name;
+                
+                tag.appendChild(span);
+                tag.appendChild(removeBtn);
+                this.selectedContainer.appendChild(tag);
+            });
+            
+            // Update placeholder with single selection awareness
+            if (this.selectedItems.size === 0) {
+                this.input.placeholder = this.searchPlaceholder;
+            } else if (this.maxSelections === 1) {
+                // For single selection, show the selected item name
+                const selectedItem = Array.from(this.selectedItems.values())[0];
+                this.input.placeholder = `${selectedItem.name} seleccionado`;
+            } else {
+                this.input.placeholder = `${this.selectedItems.size} seleccionados - buscar más...`;
+            }
+        }
+        
+        updateHiddenInputs() {
+            // Clear existing hidden inputs
+            this.hiddenInputsContainer.innerHTML = '';
+            
+            // Create new hidden inputs for each selected item
+            this.selectedItems.forEach((item, itemId) => {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = this.fieldName;
+                input.value = itemId;
+                input.id = `${this.fieldName}_${itemId}`;
+                this.hiddenInputsContainer.appendChild(input);
+            });
+            
+            // Log for debugging
+            console.log(`Updated hidden inputs for ${this.fieldName}:`, Array.from(this.selectedItems.keys()));
+            
+            // Also update the original select element to maintain form consistency
+            const originalSelect = document.getElementById(`${this.fieldName}Original`);
+            if (originalSelect) {
+                // Clear all selections
+                Array.from(originalSelect.options).forEach(option => {
+                    option.selected = false;
+                });
+                
+                // Set selections based on selectedItems
+                this.selectedItems.forEach((item, itemId) => {
+                    const option = originalSelect.querySelector(`option[value="${itemId}"]`);
+                    if (option) {
+                        option.selected = true;
+                    }
+                });
+            }
+        }
+        
+        loadPreselectedValues() {
+            // Map field names to their original select element IDs
+            const originalSelectId = `${this.fieldName}Original`;
+            const originalSelect = document.getElementById(originalSelectId);
+            
+            if (originalSelect) {
+                // Log for debugging
+                console.log(`Loading preselected values for ${this.fieldName}:`, originalSelect.selectedOptions.length);
+                
+                // Wait for data to be loaded first
+                if (this.allItems.length === 0) {
+                    console.log(`Waiting for data to load for ${this.fieldName}`);
+                    // Retry after a short delay
+                    setTimeout(() => this.loadPreselectedValues(), 500);
+                    return;
+                }
+                
+                const selectedOptions = Array.from(originalSelect.selectedOptions);
+                
+                // Handle maxSelections constraint
+                let optionsToLoad = selectedOptions;
+                if (this.maxSelections && selectedOptions.length > this.maxSelections) {
+                    console.warn(`${this.fieldName}: Found ${selectedOptions.length} preselected values, but maxSelections is ${this.maxSelections}. Taking only the first ${this.maxSelections}.`);
+                    optionsToLoad = selectedOptions.slice(0, this.maxSelections);
+                }
+                
+                optionsToLoad.forEach(option => {
+                    const item = this.allItems.find(i => i.id.toString() === option.value);
+                    if (item) {
+                        this.selectedItems.set(option.value, item);
+                        console.log(`Loaded: ${item.name} (ID: ${option.value})`);
+                    } else {
+                        console.warn(`Item with ID ${option.value} not found in available items for ${this.fieldName}`);
+                        console.log(`Available items:`, this.allItems.map(i => `${i.name} (${i.id})`));
+                    }
+                });
+                
+                // Ensure UI is updated with preselected values
+                this.renderSelectedItems();
+                this.updateHiddenInputs();
+                this.renderDropdown();
+                
+                console.log(`Final selected items for ${this.fieldName}:`, this.selectedItems.size);
+            } else {
+                console.log(`No original select found for ${this.fieldName} with ID: ${originalSelectId}`);
+            }
+        }
+        
+        showError(message) {
+            this.dropdown.innerHTML = `<div class="no-results">${message}</div>`;
+            this.loading.style.display = 'none';
+        }
+    }
+    
+    // Global instance storage for access from onclick handlers
+    window.comboboxInstances = {};
+    
+    // Initialize all comboboxes
+    window.comboboxInstances.owners = new MultiSelectCombobox({
+        containerId: 'ownersCombobox',
+        inputId: 'ownersInput',
+        dropdownId: 'ownersDropdown',
+        selectedId: 'ownersSelected',
+        hiddenInputsId: 'ownersHiddenInputs',
+        loadingId: 'ownersLoading',
+        fieldName: 'owners',
+        dataUrl: '/api/users/active',
+        searchPlaceholder: '🔍 Buscar propietario...',
+        maxSelections: 1
+    });
+    
+    window.comboboxInstances.validators = new MultiSelectCombobox({
+        containerId: 'validatorsCombobox',
+        inputId: 'validatorsInput',
+        dropdownId: 'validatorsDropdown',
+        selectedId: 'validatorsSelected',
+        hiddenInputsId: 'validatorsHiddenInputs',
+        loadingId: 'validatorsLoading',
+        fieldName: 'validators',
+        dataUrl: '/api/users/active',
+        searchPlaceholder: '🔍 Buscar validadores...'
+    });
+    
+    window.comboboxInstances.read_groups = new MultiSelectCombobox({
+        containerId: 'readGroupsCombobox',
+        inputId: 'readGroupsInput',
+        dropdownId: 'readGroupsDropdown',
+        selectedId: 'readGroupsSelected',
+        hiddenInputsId: 'readGroupsHiddenInputs',
+        loadingId: 'readGroupsLoading',
+        fieldName: 'read_groups',
+        dataUrl: '/api/ad-groups/active',
+        searchPlaceholder: '🔍 Buscar grupos de lectura...'
+    });
+    
+    window.comboboxInstances.write_groups = new MultiSelectCombobox({
+        containerId: 'writeGroupsCombobox',
+        inputId: 'writeGroupsInput',
+        dropdownId: 'writeGroupsDropdown',
+        selectedId: 'writeGroupsSelected',
+        hiddenInputsId: 'writeGroupsHiddenInputs',
+        loadingId: 'writeGroupsLoading',
+        fieldName: 'write_groups',
+        dataUrl: '/api/ad-groups/active',
+        searchPlaceholder: '🔍 Buscar grupos de escritura...'
+    });
+});
+</script>
+{% endblock %}

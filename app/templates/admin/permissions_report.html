@@ -1,0 +1,567 @@
+{% extends "base.html" %}
+
+{% block page_title %}Informe carpetas{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2><i class="fas fa-chart-bar me-2"></i>{{ title }}</h2>
+                <div>
+                    <button onclick="window.print()" class="btn btn-outline-primary me-2">
+                        <i class="fas fa-print me-2"></i>Imprimir
+                    </button>
+                    <a href="{{ url_for('admin.admin_dashboard') }}" class="btn btn-secondary">
+                        <i class="fas fa-arrow-left me-2"></i>Volver al Panel
+                    </a>
+                </div>
+            </div>
+
+            <!-- Search and Filters -->
+            <div class="row mb-3">
+                <div class="col-md-12">
+                    <form method="GET" id="filtersForm">
+                        <div class="row g-3">
+                            <!-- Filtro de Carpetas -->
+                            <div class="col-md-4">
+                                <label class="form-label">Filtrar por Carpeta</label>
+                                <div class="combobox-container">
+                                    <input type="text" class="combobox-input" id="folderComboboxInput" 
+                                           placeholder="📁 Buscar carpeta..." value="{{ folder_search or '' }}">
+                                    <div class="combobox-dropdown" id="folderComboboxDropdown">
+                                        {% set all_folders = permissions|map(attribute='folder')|unique|list %}
+                                        <div class="combobox-option" data-value="">
+                                            <span class="folder-icon">🗂️</span>
+                                            <div class="folder-info">
+                                                <div class="folder-path">Todas las carpetas</div>
+                                            </div>
+                                        </div>
+                                        {% for folder in all_folders %}
+                                            <div class="combobox-option" data-value="{{ folder.id }}">
+                                                <span class="folder-icon">📁</span>
+                                                <div class="folder-info">
+                                                    <div class="folder-path">{{ folder.name }}</div>
+                                                    <div class="folder-description">{{ folder.path }}</div>
+                                                </div>
+                                            </div>
+                                        {% endfor %}
+                                    </div>
+                                    <input type="hidden" name="folder_id" id="folder_id" value="{{ folder_id or '' }}">
+                                </div>
+                            </div>
+                            
+                            <!-- Filtro de Grupos -->
+                            <div class="col-md-4">
+                                <label class="form-label">Filtrar por Grupo AD</label>
+                                <div class="combobox-container">
+                                    <input type="text" class="combobox-input" id="groupComboboxInput" 
+                                           placeholder="👥 Buscar grupo..." value="{{ group_search or '' }}">
+                                    <div class="combobox-dropdown" id="groupComboboxDropdown">
+                                        {% set all_groups = permissions|map(attribute='ad_group')|unique|list %}
+                                        <div class="combobox-option" data-value="">
+                                            <span class="folder-icon">👥</span>
+                                            <div class="folder-info">
+                                                <div class="folder-path">Todos los grupos</div>
+                                            </div>
+                                        </div>
+                                        {% for group in all_groups %}
+                                            <div class="combobox-option" data-value="{{ group.id }}">
+                                                <span class="folder-icon">👥</span>
+                                                <div class="folder-info">
+                                                    <div class="folder-path">{{ group.name }}</div>
+                                                    <div class="folder-description">{{ group.description or 'Sin descripción' }}</div>
+                                                </div>
+                                            </div>
+                                        {% endfor %}
+                                    </div>
+                                    <input type="hidden" name="group_id" id="group_id" value="{{ group_id or '' }}">
+                                </div>
+                            </div>
+                            
+                            <!-- Filtros adicionales -->
+                            <div class="col-md-2">
+                                <label class="form-label">Tipo Permiso</label>
+                                <select class="form-select form-select-sm" name="permission_type" onchange="this.form.submit()">
+                                    <option value="all" {% if filters.permission_type == 'all' %}selected{% endif %}>
+                                        Todos
+                                    </option>
+                                    <option value="read" {% if filters.permission_type == 'read' %}selected{% endif %}>
+                                        Lectura
+                                    </option>
+                                    <option value="write" {% if filters.permission_type == 'write' %}selected{% endif %}>
+                                        Escritura
+                                    </option>
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Estado</label>
+                                <select class="form-select form-select-sm" name="status" onchange="this.form.submit()">
+                                    <option value="active" {% if filters.status == 'active' %}selected{% endif %}>
+                                        Activos
+                                    </option>
+                                    <option value="all" {% if filters.status == 'all' %}selected{% endif %}>
+                                        Todos
+                                    </option>
+                                    <option value="inactive" {% if filters.status == 'inactive' %}selected{% endif %}>
+                                        Inactivos
+                                    </option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="row mt-3">
+                            <div class="col-12 text-end">
+                                <button type="button" class="btn btn-outline-secondary me-2" onclick="clearAllFilters()">
+                                    <i class="fas fa-times"></i> Limpiar Filtros
+                                </button>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-filter"></i> Aplicar Filtros
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <!-- Results Summary -->
+            <div class="row mb-3">
+                <div class="col-12 text-end">
+                    <span class="text-muted">
+                        {{ permissions|length }} permiso(s) encontrado(s)
+                        {% if folder_search or group_search or filters.permission_type != 'all' or filters.status != 'active' %}
+                            con filtros aplicados
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+
+            <!-- Summary Statistics -->
+            <div class="row mb-4">
+                <div class="col-md-3">
+                    <div class="card bg-primary text-white">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h6 class="card-title">Total Permisos</h6>
+                                    <h3>{{ permissions|length }}</h3>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="fas fa-key fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-success text-white">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h6 class="card-title">Permisos de Lectura</h6>
+                                    <h3>{{ permissions|selectattr("permission_type", "equalto", "read")|list|length }}</h3>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="fas fa-eye fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-warning text-white">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h6 class="card-title">Permisos de Escritura</h6>
+                                    <h3>{{ permissions|selectattr("permission_type", "equalto", "write")|list|length }}</h3>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="fas fa-edit fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-info text-white">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h6 class="card-title">Carpetas Únicas</h6>
+                                    <h3>{{ permissions|map(attribute='folder')|unique|list|length }}</h3>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="fas fa-folder fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Permissions Table -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-list me-2"></i>Detalle de Permisos por Carpeta
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if permissions %}
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>Carpeta</th>
+                                    <th>Ruta</th>
+                                    <th>Grupo AD</th>
+                                    <th>Tipo de Permiso</th>
+                                    <th>Estado</th>
+                                    <th>Fecha Creación</th>
+                                    <th>Propietarios</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for permission in permissions %}
+                                <tr>
+                                    <td>
+                                        <strong>{{ permission.folder.name }}</strong>
+                                    </td>
+                                    <td>
+                                        <code>{{ permission.folder.path }}</code>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-info">{{ permission.ad_group.name }}</span>
+                                    </td>
+                                    <td>
+                                        {% if permission.permission_type == 'read' %}
+                                            <span class="badge bg-success">
+                                                <i class="fas fa-eye me-1"></i>Lectura
+                                            </span>
+                                        {% elif permission.permission_type == 'write' %}
+                                            <span class="badge bg-warning">
+                                                <i class="fas fa-edit me-1"></i>Escritura
+                                            </span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">{{ permission.permission_type }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if permission.is_active %}
+                                            <span class="badge bg-success">Activo</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">Inactivo</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <small>{{ permission.granted_at.strftime('%d/%m/%Y') if permission.granted_at else '-' }}</small>
+                                    </td>
+                                    <td>
+                                        {% for owner in permission.folder.owners %}
+                                            <span class="badge bg-primary me-1">{{ owner.username }}</span>
+                                        {% endfor %}
+                                        {% if not permission.folder.owners %}
+                                            <span class="text-muted">Sin propietarios</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="text-center py-4">
+                        <i class="fas fa-folder-open fa-3x text-muted mb-3"></i>
+                        <h5 class="text-muted">No hay permisos configurados</h5>
+                        <p class="text-muted">No se encontraron permisos de carpetas en el sistema.</p>
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="card-footer text-muted">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <small>
+                                <i class="fas fa-clock me-1"></i>
+                                Reporte generado el {{ now.strftime('%d/%m/%Y %H:%M:%S') }}
+                            </small>
+                        </div>
+                        {% if folder_search or group_search or filters.permission_type != 'all' or filters.status != 'active' %}
+                        <div>
+                            <small class="text-info">
+                                <i class="fas fa-filter me-1"></i>
+                                Filtros aplicados
+                            </small>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+@media print {
+    .btn, .card-footer, nav {
+        display: none !important;
+    }
+    
+    .card {
+        border: none !important;
+        box-shadow: none !important;
+    }
+    
+    body {
+        font-size: 12px;
+    }
+    
+    .table {
+        font-size: 11px;
+    }
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize Folder Combobox
+    initializeCombobox(
+        'folderComboboxInput', 
+        'folderComboboxDropdown', 
+        'folder_id',
+        'folder_search'
+    );
+    
+    // Initialize Group Combobox  
+    initializeCombobox(
+        'groupComboboxInput', 
+        'groupComboboxDropdown', 
+        'group_id',
+        'group_search'
+    );
+    
+    function initializeCombobox(inputId, dropdownId, hiddenInputId, searchParamName) {
+        const input = document.getElementById(inputId);
+        const dropdown = document.getElementById(dropdownId);
+        const hiddenInput = document.getElementById(hiddenInputId);
+        
+        // Check if all required elements exist
+        if (!input || !dropdown || !hiddenInput) {
+            console.warn(`Combobox initialization failed: missing elements for ${inputId}`);
+            return;
+        }
+        
+        let currentSelection = -1;
+        let filteredOptions = [];
+        let allOptions = [];
+
+        function initializeOptions() {
+            const options = dropdown.querySelectorAll('.combobox-option');
+            allOptions = Array.from(options).map(option => {
+                const pathElement = option.querySelector('.folder-path');
+                const descriptionElement = option.querySelector('.folder-description');
+                
+                return {
+                    element: option,
+                    value: option.dataset.value || '',
+                    text: option.textContent.toLowerCase(),
+                    pathText: pathElement ? pathElement.textContent : '',
+                    descriptionText: descriptionElement ? descriptionElement.textContent : ''
+                };
+            });
+            filteredOptions = [...allOptions];
+        }
+
+        function filterOptions(searchTerm) {
+            const term = searchTerm.toLowerCase().trim();
+            filteredOptions = allOptions.filter(option => 
+                option.pathText.toLowerCase().includes(term) ||
+                option.descriptionText.toLowerCase().includes(term) ||
+                option.text.includes(term)
+            );
+            return filteredOptions;
+        }
+
+        function renderOptions(options) {
+            // Hide all options first
+            allOptions.forEach(option => {
+                if (option.element) {
+                    option.element.style.display = 'none';
+                }
+            });
+            
+            filteredOptions = options;
+            currentSelection = -1;
+            
+            if (options.length === 0) {
+                // Show no results message
+                let noResults = dropdown.querySelector('.no-results');
+                if (!noResults) {
+                    noResults = document.createElement('div');
+                    noResults.className = 'no-results combobox-option';
+                    noResults.innerHTML = '<span class="folder-icon">🚫</span><div class="folder-info"><div class="folder-path">No se encontraron resultados</div></div>';
+                    dropdown.appendChild(noResults);
+                }
+                noResults.style.display = 'flex';
+                return;
+            } else {
+                // Hide no results message
+                const noResults = dropdown.querySelector('.no-results');
+                if (noResults) {
+                    noResults.style.display = 'none';
+                }
+            }
+            
+            options.forEach((option, index) => {
+                if (option.element) {
+                    option.element.style.display = 'flex';
+                    
+                    // Remove all existing event listeners by cloning
+                    const newElement = option.element.cloneNode(true);
+                    option.element.parentNode.replaceChild(newElement, option.element);
+                    option.element = newElement;
+                    
+                    // Add fresh event listeners
+                    if (option.element && typeof option.element.addEventListener === 'function') {
+                        option.element.addEventListener('click', () => selectOption(option));
+                        option.element.addEventListener('mouseenter', () => {
+                            currentSelection = index;
+                            updateSelection();
+                        });
+                    }
+                }
+            });
+        }
+
+        function selectOption(option) {
+            if (!option || !option.pathText) {
+                console.warn('Invalid option selected');
+                return;
+            }
+            
+            input.value = option.pathText;
+            hiddenInput.value = option.value || '';
+            dropdown.classList.remove('show');
+            input.blur();
+            
+            // Mark as selected
+            allOptions.forEach(o => {
+                if (o.element && o.element.classList) {
+                    o.element.classList.remove('selected');
+                }
+            });
+            
+            if (option.element && option.element.classList) {
+                option.element.classList.add('selected');
+            }
+            
+            // Update search parameter for form submission
+            const form = document.getElementById('filtersForm');
+            if (form) {
+                let searchInput = form.querySelector(`input[name="${searchParamName}"]`);
+                if (!searchInput) {
+                    searchInput = document.createElement('input');
+                    searchInput.type = 'hidden';
+                    searchInput.name = searchParamName;
+                    form.appendChild(searchInput);
+                }
+                searchInput.value = option.pathText;
+            }
+        }
+
+        function updateSelection() {
+            filteredOptions.forEach((option, index) => {
+                if (option.element && option.element.classList) {
+                    option.element.classList.toggle('selected', index === currentSelection);
+                }
+            });
+        }
+
+        // Event listeners with improved dropdown handling
+        input.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const filtered = filterOptions(input.value);
+            renderOptions(filtered);
+            dropdown.classList.add('show');
+        });
+
+        input.addEventListener('focus', () => {
+            // Use setTimeout to ensure the dropdown doesn't immediately hide
+            setTimeout(() => {
+                const filtered = filterOptions(input.value);
+                renderOptions(filtered);
+                dropdown.classList.add('show');
+            }, 10);
+        });
+
+        input.addEventListener('input', (e) => {
+            const filtered = filterOptions(e.target.value);
+            renderOptions(filtered);
+            dropdown.classList.add('show');
+            
+            if (e.target.value === '') {
+                hiddenInput.value = '';
+            }
+        });
+
+        input.addEventListener('keydown', (e) => {
+            switch(e.key) {
+                case 'ArrowDown':
+                    e.preventDefault();
+                    currentSelection = Math.min(currentSelection + 1, filteredOptions.length - 1);
+                    updateSelection();
+                    break;
+                case 'ArrowUp':
+                    e.preventDefault();
+                    currentSelection = Math.max(currentSelection - 1, 0);
+                    updateSelection();
+                    break;
+                case 'Enter':
+                    e.preventDefault();
+                    if (currentSelection >= 0 && filteredOptions[currentSelection]) {
+                        selectOption(filteredOptions[currentSelection]);
+                    }
+                    break;
+                case 'Escape':
+                    dropdown.classList.remove('show');
+                    input.blur();
+                    break;
+            }
+        });
+
+        // Close dropdown when clicking outside with improved detection
+        document.addEventListener('click', (e) => {
+            const comboboxContainer = input.closest('.combobox-container');
+            if (!comboboxContainer || !comboboxContainer.contains(e.target)) {
+                dropdown.classList.remove('show');
+            }
+        });
+
+        // Initialize
+        try {
+            initializeOptions();
+            renderOptions(allOptions);
+        } catch (error) {
+            console.error(`Error initializing combobox ${inputId}:`, error);
+        }
+    }
+    
+    // Clear all filters function
+    window.clearAllFilters = function() {
+        // Clear combobox inputs
+        document.getElementById('folderComboboxInput').value = '';
+        document.getElementById('folder_id').value = '';
+        document.getElementById('groupComboboxInput').value = '';
+        document.getElementById('group_id').value = '';
+        
+        // Reset select dropdowns
+        document.querySelector('select[name="permission_type"]').value = 'all';
+        document.querySelector('select[name="status"]').value = 'active';
+        
+        // Submit form
+        document.getElementById('filtersForm').submit();
+    };
+});
+</script>
+{% endblock %}

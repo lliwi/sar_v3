@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">
+                        <i class="fas fa-shield-alt"></i>
+                        {{ title }}
+                    </h3>
+                    <div class="card-tools">
+                        <button type="button" class="btn btn-tool" data-card-widget="collapse">
+                            <i class="fas fa-minus"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">
+                        Utilice esta herramienta para validar la consistencia entre los permisos almacenados en la base de datos 
+                        y los permisos actuales en Active Directory.
+                    </p>
+
+                    <!-- Validation Form -->
+                    <form method="post" id="validation-form">
+                        {{ csrf_token() }}
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="validation_type">Tipo de Validación</label>
+                                    <select class="form-control" id="validation_type" name="validation_type" required>
+                                        <option value="folders">Validar Permisos de Carpetas</option>
+                                        <option value="users">Validar Grupos de Usuario</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="target_id">ID Específico (Opcional)</label>
+                                    <input type="number" class="form-control" id="target_id" name="target_id" 
+                                           placeholder="Dejar vacío para validar todos">
+                                    <small class="form-text text-muted">
+                                        Especifique un ID de carpeta o usuario para validar solo ese elemento.
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-12">
+                                <button type="submit" class="btn btn-primary" id="validate-btn">
+                                    <i class="fas fa-play"></i>
+                                    Ejecutar Validación
+                                </button>
+                                <button type="button" class="btn btn-secondary ml-2" onclick="clearResults()">
+                                    <i class="fas fa-trash"></i>
+                                    Limpiar Resultados
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+
+                    <!-- Loading Indicator -->
+                    <div id="loading-indicator" class="text-center mt-4" style="display: none;">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="sr-only">Validando...</span>
+                        </div>
+                        <p class="mt-2">Ejecutando validación contra Active Directory...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Validation Results -->
+    {% if validation_results %}
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">
+                        <i class="fas fa-chart-bar"></i>
+                        Resultados de Validación
+                    </h3>
+                </div>
+                <div class="card-body">
+                    {% if validation_results.success %}
+                        <!-- Summary Statistics -->
+                        <div class="row mb-4">
+                            <div class="col-md-3">
+                                <div class="info-box">
+                                    <span class="info-box-icon bg-info">
+                                        <i class="fas fa-database"></i>
+                                    </span>
+                                    <div class="info-box-content">
+                                        <span class="info-box-text">Elementos Validados</span>
+                                        <span class="info-box-number">
+                                            {{ validation_results.validated_folders or validation_results.validated_users or 0 }}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="info-box">
+                                    <span class="info-box-icon {% if validation_results.summary.total_discrepancies == 0 %}bg-success{% else %}bg-warning{% endif %}">
+                                        <i class="fas fa-exclamation-triangle"></i>
+                                    </span>
+                                    <div class="info-box-content">
+                                        <span class="info-box-text">Total Discrepancias</span>
+                                        <span class="info-box-number">
+                                            {{ validation_results.summary.total_discrepancies }}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="info-box">
+                                    <span class="info-box-icon bg-danger">
+                                        <i class="fas fa-times"></i>
+                                    </span>
+                                    <div class="info-box-content">
+                                        <span class="info-box-text">Grupos No Existen</span>
+                                        <span class="info-box-number">
+                                            {{ validation_results.summary.group_not_exists or 0 }}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="info-box">
+                                    <span class="info-box-icon bg-warning">
+                                        <i class="fas fa-minus"></i>
+                                    </span>
+                                    <div class="info-box-content">
+                                        <span class="info-box-text">Faltantes en AD</span>
+                                        <span class="info-box-number">
+                                            {{ validation_results.summary.missing_in_ad or 0 }}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Discrepancies Table -->
+                        {% if validation_results.discrepancies %}
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead class="thead-dark">
+                                    <tr>
+                                        <th>Tipo</th>
+                                        <th>Carpeta/Usuario</th>
+                                        <th>Grupo AD</th>
+                                        <th>Permiso</th>
+                                        <th>Descripción</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for discrepancy in validation_results.discrepancies %}
+                                    <tr class="{% if discrepancy.type == 'group_not_exists' %}table-danger{% elif discrepancy.type == 'missing_in_ad' %}table-warning{% else %}table-info{% endif %}">
+                                        <td>
+                                            {% if discrepancy.type == 'group_not_exists' %}
+                                                <span class="badge badge-danger">Grupo No Existe</span>
+                                            {% elif discrepancy.type == 'missing_in_ad' %}
+                                                <span class="badge badge-warning">Faltante en AD</span>
+                                            {% else %}
+                                                <span class="badge badge-info">{{ discrepancy.type|title }}</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <small class="text-muted">
+                                                {{ discrepancy.folder_path or discrepancy.username }}
+                                            </small>
+                                        </td>
+                                        <td>
+                                            <strong>{{ discrepancy.ad_group }}</strong>
+                                        </td>
+                                        <td>
+                                            <span class="badge badge-{% if discrepancy.permission_type == 'write' %}primary{% else %}secondary{% endif %}">
+                                                {{ discrepancy.permission_type|upper }}
+                                            </span>
+                                        </td>
+                                        <td>{{ discrepancy.message }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle"></i>
+                            <strong>¡Excelente!</strong> No se encontraron discrepancias. 
+                            Los permisos en la base de datos están sincronizados con Active Directory.
+                        </div>
+                        {% endif %}
+
+                        <!-- Warnings -->
+                        {% if validation_results.warnings %}
+                        <div class="alert alert-info">
+                            <h5><i class="fas fa-info-circle"></i> Advertencias:</h5>
+                            <ul class="mb-0">
+                                {% for warning in validation_results.warnings %}
+                                <li>{{ warning }}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        {% endif %}
+
+                    {% else %}
+                        <div class="alert alert-danger">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <strong>Error en la validación:</strong>
+                            {{ validation_results.error }}
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('validation-form');
+    const loadingIndicator = document.getElementById('loading-indicator');
+    const validateBtn = document.getElementById('validate-btn');
+
+    form.addEventListener('submit', function(e) {
+        // Show loading indicator
+        loadingIndicator.style.display = 'block';
+        validateBtn.disabled = true;
+        validateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Validando...';
+    });
+
+    // Update placeholder text based on validation type
+    const validationType = document.getElementById('validation_type');
+    const targetId = document.getElementById('target_id');
+
+    validationType.addEventListener('change', function() {
+        if (this.value === 'folders') {
+            targetId.placeholder = 'ID de carpeta específica (opcional)';
+        } else {
+            targetId.placeholder = 'ID de usuario específico (opcional)';
+        }
+    });
+});
+
+function clearResults() {
+    // Reload page to clear results
+    window.location.href = window.location.pathname;
+}
+</script>
+{% endblock %}

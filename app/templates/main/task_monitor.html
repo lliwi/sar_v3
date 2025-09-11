@@ -1,0 +1,965 @@
+{% extends "base.html" %}
+
+{% block page_title %}Monitor de Tareas{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <!-- Task Statistics Cards -->
+    <div class="row mb-4">
+        <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
+            <div class="card bg-primary text-white h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-shrink-0">
+                            <i class="fas fa-tasks fa-2x"></i>
+                        </div>
+                        <div class="flex-grow-1 ms-3">
+                            <div class="text-white-75 small">Total</div>
+                            <div class="h4 mb-0 text-dark fw-bold">{{ stats.total_tasks }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
+            <div class="card bg-warning text-white h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-shrink-0">
+                            <i class="fas fa-clock fa-2x"></i>
+                        </div>
+                        <div class="flex-grow-1 ms-3">
+                            <div class="text-dark small">Pendientes</div>
+                            <div class="h4 mb-0 text-dark fw-bold">{{ stats.pending_tasks }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
+            <div class="card bg-info text-white h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-shrink-0">
+                            <i class="fas fa-spinner fa-2x"></i>
+                        </div>
+                        <div class="flex-grow-1 ms-3">
+                            <div class="text-dark small">Ejecutando</div>
+                            <div class="h4 mb-0 text-dark fw-bold">{{ stats.running_tasks }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
+            <div class="card bg-success text-white h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-shrink-0">
+                            <i class="fas fa-check fa-2x"></i>
+                        </div>
+                        <div class="flex-grow-1 ms-3">
+                            <div class="text-dark small">Completadas</div>
+                            <div class="h4 mb-0 text-dark fw-bold">{{ stats.completed_tasks }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
+            <div class="card bg-danger text-white h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-shrink-0">
+                            <i class="fas fa-times fa-2x"></i>
+                        </div>
+                        <div class="flex-grow-1 ms-3">
+                            <div class="text-white-75 small">Fallidas</div>
+                            <div class="h4 mb-0 text-dark fw-bold">{{ stats.failed_tasks }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
+            <div class="card bg-secondary text-white h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-shrink-0">
+                            <i class="fas fa-redo fa-2x"></i>
+                        </div>
+                        <div class="flex-grow-1 ms-3">
+                            <div class="text-white-75 small">Reintento</div>
+                            <div class="h4 mb-0 text-dark fw-bold">{{ stats.retry_tasks }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
+            <div class="card bg-dark text-white h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-shrink-0">
+                            <i class="fas fa-ban fa-2x"></i>
+                        </div>
+                        <div class="flex-grow-1 ms-3">
+                            <div class="text-white-75 small">Canceladas</div>
+                            <div class="h4 mb-0 text-dark fw-bold">{{ stats.cancelled_tasks or 0 }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task Management Actions -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title">Acciones de Gestión</h5>
+                </div>
+                <div class="card-body">
+                    <div class="btn-group me-3" role="group">
+                        <button type="button" class="btn btn-outline-primary" onclick="processPendingTasks()">
+                            <i class="fas fa-play"></i> Procesar Tareas Pendientes
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" onclick="cleanupOldTasks()">
+                            <i class="fas fa-trash-alt"></i> Limpiar Tareas Antiguas
+                        </button>
+                        <button type="button" class="btn btn-outline-info" onclick="refreshTaskList()">
+                            <i class="fas fa-sync-alt"></i> Actualizar Lista
+                        </button>
+                    </div>
+                    <div class="btn-group" role="group">
+                        <button type="button" class="btn btn-outline-success" onclick="testAirflow()">
+                            <i class="fas fa-flask"></i> Probar Airflow
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Tasks List -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="card-title">Tareas Recientes</h5>
+                    <div class="d-flex align-items-center">
+                        <div class="form-check form-switch me-3">
+                            <input class="form-check-input" type="checkbox" id="autoRefresh" checked>
+                            <label class="form-check-label" for="autoRefresh">
+                                Auto-actualizar
+                            </label>
+                        </div>
+                        <div class="dropdown">
+                            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                                <i class="fas fa-filter"></i> Filtros
+                            </button>
+                            <div class="dropdown-menu">
+                                <a class="dropdown-item" href="#" onclick="filterTasks('all')">Todas</a>
+                                <a class="dropdown-item" href="#" onclick="filterTasks('pending')">Pendientes</a>
+                                <a class="dropdown-item" href="#" onclick="filterTasks('running')">Ejecutando</a>
+                                <a class="dropdown-item" href="#" onclick="filterTasks('completed')">Completadas</a>
+                                <a class="dropdown-item" href="#" onclick="filterTasks('failed')">Fallidas</a>
+                                <a class="dropdown-item" href="#" onclick="filterTasks('retry')">Reintento</a>
+                                <a class="dropdown-item" href="#" onclick="filterTasks('cancelled')">Canceladas</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="taskTableContainer">
+                        {% if recent_tasks %}
+                            <div class="table-responsive">
+                                <table class="table table-hover" id="tasksTable">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Nombre</th>
+                                            <th>Tipo</th>
+                                            <th>Estado</th>
+                                            <th>Solicitud</th>
+                                            <th>Creado</th>
+                                            <th>Actualizado</th>
+                                            <th>Intentos</th>
+                                            <th>Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for task in recent_tasks %}
+                                        <tr class="task-row" data-status="{{ task.status }}" data-task-id="{{ task.id }}">
+                                            <td>
+                                                <span class="badge bg-secondary">#{{ task.id }}</span>
+                                            </td>
+                                            <td>
+                                                <strong>{{ task.name }}</strong>
+                                                {% if task.error_message %}
+                                                    <br><small class="text-danger">{{ task.error_message[:50] }}{% if task.error_message|length > 50 %}...{% endif %}</small>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <span class="badge {% if task.task_type == 'airflow_dag' %}bg-primary{% else %}bg-info{% endif %}">
+                                                    {% if task.task_type == 'airflow_dag' %}
+                                                        <i class="fas fa-code-branch"></i> Airflow DAG
+                                                    {% else %}
+                                                        <i class="fas fa-shield-alt"></i> AD Verification
+                                                    {% endif %}
+                                                </span>
+                                            </td>
+                                            <td>
+                                                {% if task.status == 'pending' %}
+                                                    <span class="badge bg-warning">
+                                                        <i class="fas fa-clock"></i> Pendiente
+                                                    </span>
+                                                {% elif task.status == 'running' %}
+                                                    <span class="badge bg-info">
+                                                        <i class="fas fa-spinner fa-spin"></i> Ejecutando
+                                                    </span>
+                                                {% elif task.status == 'completed' %}
+                                                    <span class="badge bg-success">
+                                                        <i class="fas fa-check"></i> Completada
+                                                    </span>
+                                                {% elif task.status == 'failed' %}
+                                                    <span class="badge bg-danger">
+                                                        <i class="fas fa-times"></i> Fallida
+                                                    </span>
+                                                {% elif task.status == 'retry' %}
+                                                    <span class="badge bg-secondary">
+                                                        <i class="fas fa-redo"></i> Reintento
+                                                    </span>
+                                                {% elif task.status == 'cancelled' %}
+                                                    <span class="badge bg-dark">
+                                                        <i class="fas fa-ban"></i> Cancelada
+                                                    </span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if task.permission_request %}
+                                                    <a href="{{ url_for('main.my_requests') }}" class="text-decoration-none">
+                                                        <span class="badge bg-white text-dark border">#{{ task.permission_request.id }}</span>
+                                                    </a>
+                                                    <br><small class="text-muted">{{ task.permission_request.folder.path }}</small>
+                                                {% else %}
+                                                    <span class="text-muted">N/A</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <small>{{ task.created_at.strftime('%d/%m/%Y %H:%M') }}</small>
+                                            </td>
+                                            <td>
+                                                <small>{{ task.updated_at.strftime('%d/%m/%Y %H:%M') if task.updated_at else 'N/A' }}</small>
+                                            </td>
+                                            <td>
+                                                <span class="badge {% if task.attempt_count >= task.max_attempts %}bg-danger{% elif task.attempt_count > 0 %}bg-warning{% else %}bg-secondary{% endif %}">
+                                                    {{ task.attempt_count }}/{{ task.max_attempts }}
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <div class="btn-group btn-group-sm" role="group">
+                                                    <button type="button" class="btn btn-outline-info" 
+                                                            onclick="showTaskDetails({{ task.id }})"
+                                                            title="Ver detalles">
+                                                        <i class="fas fa-eye"></i>
+                                                    </button>
+                                                    {% if task.status == 'failed' %}
+                                                        <button type="button" class="btn btn-outline-warning" 
+                                                                onclick="retryTask({{ task.id }})"
+                                                                title="Reintentar tarea">
+                                                            <i class="fas fa-redo"></i>
+                                                        </button>
+                                                    {% endif %}
+                                                    {% if task.task_type == 'airflow_dag' and task.status in ['pending', 'failed', 'retry'] %}
+                                                        <button type="button" class="btn btn-outline-success" 
+                                                                onclick="markTaskManual({{ task.id }})"
+                                                                title="Marcar como realizado manualmente">
+                                                            <i class="fas fa-hand-paper"></i>
+                                                        </button>
+                                                    {% endif %}
+                                                    {% if task.status in ['pending', 'retry'] %}
+                                                        <button type="button" class="btn btn-outline-danger" 
+                                                                onclick="cancelTask({{ task.id }})"
+                                                                title="Cancelar tarea">
+                                                            <i class="fas fa-ban"></i>
+                                                        </button>
+                                                    {% endif %}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% else %}
+                            <div class="text-center py-5">
+                                <i class="fas fa-tasks fa-3x text-muted mb-3"></i>
+                                <h5 class="text-muted">No hay tareas recientes</h5>
+                                <p class="text-muted">Las tareas aparecerán aquí cuando se creen solicitudes de permisos.</p>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Task Details Modal -->
+<div class="modal fade" id="taskDetailsModal" tabindex="-1" aria-labelledby="taskDetailsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="taskDetailsModalLabel">Detalles de la Tarea</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="taskDetailsContent">
+                <!-- Task details will be loaded here -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Cleanup Tasks Modal -->
+<div class="modal fade" id="cleanupModal" tabindex="-1" aria-labelledby="cleanupModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="cleanupModalLabel">Limpiar Tareas Antiguas</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="cleanupForm">
+                    <div class="mb-3">
+                        <label for="daysOld" class="form-label">Días de antigüedad:</label>
+                        <input type="number" class="form-control" id="daysOld" value="30" min="1" max="365">
+                        <div class="form-text">Eliminar tareas completadas/fallidas con más de X días de antigüedad.</div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-danger" onclick="executeCleanup()">
+                    <i class="fas fa-trash-alt"></i> Eliminar Tareas
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Manual Task Completion Modal -->
+<div class="modal fade" id="manualTaskModal" tabindex="-1" aria-labelledby="manualTaskModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="manualTaskModalLabel">Marcar como Realizado Manualmente</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-warning" role="alert">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <strong>Atención:</strong> Esta acción marcará la tarea de Airflow como completada sin ejecutar realmente el DAG.
+                    Solo úsala cuando hayas aplicado los cambios manualmente en Active Directory.
+                </div>
+                <form id="manualTaskForm">
+                    <div class="mb-3">
+                        <label for="manualTaskNotes" class="form-label">Notas (opcional):</label>
+                        <textarea class="form-control" id="manualTaskNotes" rows="3" placeholder="Describe brevemente qué cambios realizaste manualmente..."></textarea>
+                        <div class="form-text">Estas notas se guardarán en el registro de auditoría.</div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-success" onclick="executeManualCompletion()">
+                    <i class="fas fa-hand-paper"></i> Marcar como Realizado
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Cancel Task Modal -->
+<div class="modal fade" id="cancelTaskModal" tabindex="-1" aria-labelledby="cancelTaskModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="cancelTaskModalLabel">Cancelar Tarea</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-warning" role="alert">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <strong>Atención:</strong> Esta acción cancelará la tarea y no se podrá ejecutar posteriormente.
+                </div>
+                <form id="cancelTaskForm">
+                    <div class="mb-3">
+                        <label for="cancelTaskReason" class="form-label">Motivo de cancelación (opcional):</label>
+                        <textarea class="form-control" id="cancelTaskReason" rows="3" placeholder="Describe brevemente por qué cancelas esta tarea..."></textarea>
+                        <div class="form-text">Este motivo se guardará en el registro de auditoría.</div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                <button type="button" class="btn btn-danger" onclick="executeCancelTask()">
+                    <i class="fas fa-ban"></i> Cancelar Tarea
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let autoRefreshInterval;
+let currentFilter = 'all';
+
+// Auto-refresh functionality
+function startAutoRefresh() {
+    if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+    autoRefreshInterval = setInterval(refreshTaskList, 10000); // 10 seconds
+}
+
+function stopAutoRefresh() {
+    if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+}
+
+// Event listener for auto-refresh toggle
+document.getElementById('autoRefresh').addEventListener('change', function() {
+    if (this.checked) {
+        startAutoRefresh();
+    } else {
+        stopAutoRefresh();
+    }
+});
+
+// Start auto-refresh by default
+startAutoRefresh();
+
+// Process pending tasks
+function processPendingTasks() {
+    const button = event.target;
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando...';
+    button.disabled = true;
+
+    fetch('/api/tasks/process', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token() }}'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`${data.message}`);
+            refreshTaskList();
+        } else {
+            alert('Error: ' + (data.error || data.message));
+        }
+        button.innerHTML = originalText;
+        button.disabled = false;
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error al procesar tareas pendientes');
+        button.innerHTML = originalText;
+        button.disabled = false;
+    });
+}
+
+// Show cleanup modal
+function cleanupOldTasks() {
+    new bootstrap.Modal(document.getElementById('cleanupModal')).show();
+}
+
+// Execute cleanup
+function executeCleanup() {
+    const daysOld = document.getElementById('daysOld').value;
+    
+    fetch('/api/tasks/cleanup', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token() }}'
+        },
+        body: JSON.stringify({ days_old: parseInt(daysOld) })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`${data.message}`);
+            bootstrap.Modal.getInstance(document.getElementById('cleanupModal')).hide();
+            refreshTaskList();
+        } else {
+            alert('Error: ' + (data.error || data.message));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error al limpiar tareas antiguas');
+    });
+}
+
+// Test Airflow connection
+function testAirflow() {
+    const button = event.target;
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Probando...';
+    button.disabled = true;
+
+    fetch('/api/test-airflow', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token() }}'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`Airflow test exitoso: ${data.message}`);
+        } else {
+            alert('Error en test de Airflow: ' + (data.error || data.message));
+        }
+        button.innerHTML = originalText;
+        button.disabled = false;
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error al probar Airflow');
+        button.innerHTML = originalText;
+        button.disabled = false;
+    });
+}
+
+// Refresh task list and statistics
+function refreshTaskList() {
+    // Refresh task list
+    fetch('/api/tasks' + (currentFilter !== 'all' ? '?status=' + currentFilter : ''))
+    .then(response => response.json())
+    .then(data => {
+        if (data.tasks) {
+            updateTaskTable(data.tasks);
+        }
+    })
+    .catch(error => {
+        console.error('Error refreshing tasks:', error);
+    });
+    
+    // Refresh statistics
+    updateTaskStats();
+}
+
+// Update task table with new data
+function updateTaskTable(tasks) {
+    const tbody = document.querySelector('#tasksTable tbody');
+    if (!tbody) return;
+    
+    tbody.innerHTML = '';
+    
+    if (tasks.length === 0) {
+        const row = tbody.insertRow();
+        const cell = row.insertCell(0);
+        cell.colSpan = 9;
+        cell.className = 'text-center py-4 text-muted';
+        cell.innerHTML = 'No hay tareas que mostrar';
+        return;
+    }
+    
+    tasks.forEach(task => {
+        const row = tbody.insertRow();
+        row.className = 'task-row';
+        row.setAttribute('data-status', task.status);
+        row.setAttribute('data-task-id', task.id);
+        
+        // Build row HTML
+        row.innerHTML = `
+            <td><span class="badge bg-secondary">#${task.id}</span></td>
+            <td>
+                <strong>${task.name}</strong>
+                ${task.error_message ? '<br><small class="text-danger">' + task.error_message.substring(0, 50) + (task.error_message.length > 50 ? '...' : '') + '</small>' : ''}
+            </td>
+            <td>
+                <span class="badge ${task.task_type === 'airflow_dag' ? 'bg-primary' : 'bg-info'}">
+                    <i class="fas ${task.task_type === 'airflow_dag' ? 'fa-code-branch' : 'fa-shield-alt'}"></i>
+                    ${task.task_type === 'airflow_dag' ? 'Airflow DAG' : 'AD Verification'}
+                </span>
+            </td>
+            <td>
+                <span class="badge ${getStatusBadgeClass(task.status)}">
+                    <i class="fas ${getStatusIcon(task.status)}"></i> ${getStatusText(task.status)}
+                </span>
+            </td>
+            <td>
+                ${task.permission_request_id ? '<span class="badge bg-white text-dark border">#' + task.permission_request_id + '</span>' : '<span class="text-muted">N/A</span>'}
+            </td>
+            <td><small>${formatDate(task.created_at)}</small></td>
+            <td><small>${task.updated_at ? formatDate(task.updated_at) : 'N/A'}</small></td>
+            <td>
+                <span class="badge ${task.attempt_count >= task.max_attempts ? 'bg-danger' : task.attempt_count > 0 ? 'bg-warning' : 'bg-secondary'}">
+                    ${task.attempt_count}/${task.max_attempts}
+                </span>
+            </td>
+            <td>
+                <div class="btn-group btn-group-sm" role="group">
+                    <button type="button" class="btn btn-outline-info" onclick="showTaskDetails(${task.id})" title="Ver detalles">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                    ${task.status === 'failed' ? '<button type="button" class="btn btn-outline-warning" onclick="retryTask(' + task.id + ')" title="Reintentar tarea"><i class="fas fa-redo"></i></button>' : ''}
+                    ${task.task_type === 'airflow_dag' && (task.status === 'pending' || task.status === 'failed' || task.status === 'retry') ? '<button type="button" class="btn btn-outline-success" onclick="markTaskManual(' + task.id + ')" title="Marcar como realizado manualmente"><i class="fas fa-hand-paper"></i></button>' : ''}
+                    ${(task.status === 'pending' || task.status === 'retry') ? '<button type="button" class="btn btn-outline-danger" onclick="cancelTask(' + task.id + ')" title="Cancelar tarea"><i class="fas fa-ban"></i></button>' : ''}
+                </div>
+            </td>
+        `;
+    });
+}
+
+// Helper functions for task display
+function getStatusBadgeClass(status) {
+    const classes = {
+        'pending': 'bg-warning',
+        'running': 'bg-info',
+        'completed': 'bg-success',
+        'failed': 'bg-danger',
+        'retry': 'bg-secondary',
+        'cancelled': 'bg-dark'
+    };
+    return classes[status] || 'bg-secondary';
+}
+
+function getStatusIcon(status) {
+    const icons = {
+        'pending': 'fa-clock',
+        'running': 'fa-spinner fa-spin',
+        'completed': 'fa-check',
+        'failed': 'fa-times',
+        'retry': 'fa-redo',
+        'cancelled': 'fa-ban'
+    };
+    return icons[status] || 'fa-question';
+}
+
+function getStatusText(status) {
+    const texts = {
+        'pending': 'Pendiente',
+        'running': 'Ejecutando',
+        'completed': 'Completada',
+        'failed': 'Fallida',
+        'retry': 'Reintento',
+        'cancelled': 'Cancelada'
+    };
+    return texts[status] || status;
+}
+
+function formatDate(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('es-ES', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+// Filter tasks by status
+function filterTasks(status) {
+    currentFilter = status;
+    const rows = document.querySelectorAll('.task-row');
+    
+    rows.forEach(row => {
+        if (status === 'all' || row.getAttribute('data-status') === status) {
+            row.style.display = '';
+        } else {
+            row.style.display = 'none';
+        }
+    });
+    
+    // Update dropdown text
+    event.target.closest('.dropdown').querySelector('button').innerHTML = 
+        '<i class="fas fa-filter"></i> ' + event.target.textContent;
+}
+
+// Show task details
+function showTaskDetails(taskId) {
+    fetch(`/api/tasks/${taskId}`)
+    .then(response => response.json())
+    .then(task => {
+        if (task) {
+            document.getElementById('taskDetailsContent').innerHTML = `
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>ID:</strong>
+                        <p class="text-muted">#${task.id}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Nombre:</strong>
+                        <p class="text-muted">${task.name}</p>
+                    </div>
+                </div>
+                
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Tipo:</strong>
+                        <p class="text-muted">
+                            <span class="badge ${task.task_type === 'airflow_dag' ? 'bg-primary' : 'bg-info'}">
+                                ${task.task_type === 'airflow_dag' ? 'Airflow DAG' : 'AD Verification'}
+                            </span>
+                        </p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Estado:</strong>
+                        <p class="text-muted">
+                            <span class="badge ${getStatusBadgeClass(task.status)}">
+                                <i class="fas ${getStatusIcon(task.status)}"></i> ${getStatusText(task.status)}
+                            </span>
+                        </p>
+                    </div>
+                </div>
+                
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Creado:</strong>
+                        <p class="text-muted">${formatDate(task.created_at)}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Actualizado:</strong>
+                        <p class="text-muted">${task.updated_at ? formatDate(task.updated_at) : 'N/A'}</p>
+                    </div>
+                </div>
+                
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Intentos:</strong>
+                        <p class="text-muted">
+                            <span class="badge ${task.attempt_count >= task.max_attempts ? 'bg-danger' : task.attempt_count > 0 ? 'bg-warning' : 'bg-secondary'}">
+                                ${task.attempt_count}/${task.max_attempts}
+                            </span>
+                        </p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Próxima ejecución:</strong>
+                        <p class="text-muted">${task.next_execution_at ? formatDate(task.next_execution_at) : 'N/A'}</p>
+                    </div>
+                </div>
+                
+                ${task.error_message ? `
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <strong>Mensaje de error:</strong>
+                        <div class="border rounded p-3 bg-light text-danger">
+                            ${task.error_message}
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
+                
+                ${task.task_data ? `
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <strong>Datos de la tarea:</strong>
+                        <pre class="border rounded p-3 bg-light"><code>${JSON.stringify(task.task_data, null, 2)}</code></pre>
+                    </div>
+                </div>
+                ` : ''}
+                
+                ${task.result_data ? `
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <strong>Resultado:</strong>
+                        <pre class="border rounded p-3 bg-light"><code>${JSON.stringify(task.result_data, null, 2)}</code></pre>
+                    </div>
+                </div>
+                ` : ''}
+            `;
+            
+            new bootstrap.Modal(document.getElementById('taskDetailsModal')).show();
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error al cargar detalles de la tarea');
+    });
+}
+
+// Retry failed task
+function retryTask(taskId) {
+    if (!confirm('¿Estás seguro de que deseas reintentar esta tarea?')) {
+        return;
+    }
+    
+    fetch(`/api/tasks/retry/${taskId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token() }}'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+            refreshTaskList();
+        } else {
+            alert('Error: ' + (data.error || data.message));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error al reintentar la tarea');
+    });
+}
+
+// Update task statistics
+function updateTaskStats() {
+    fetch('/api/tasks/stats')
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.stats) {
+            const stats = data.stats;
+            
+            // Update statistics cards
+            document.querySelector('.bg-primary .h4').textContent = stats.total_tasks || 0;
+            document.querySelector('.bg-warning .h4').textContent = stats.pending_tasks || 0;
+            document.querySelector('.bg-info .h4').textContent = stats.running_tasks || 0;
+            document.querySelector('.bg-success .h4').textContent = stats.completed_tasks || 0;
+            document.querySelector('.bg-danger .h4').textContent = stats.failed_tasks || 0;
+            document.querySelector('.bg-secondary .h4').textContent = stats.retry_tasks || 0;
+            document.querySelector('.bg-dark .h4').textContent = stats.cancelled_tasks || 0;
+        }
+    })
+    .catch(error => {
+        console.error('Error refreshing task stats:', error);
+    });
+}
+
+// Global variable to store task ID for manual completion
+let currentManualTaskId = null;
+
+// Show manual task completion modal
+function markTaskManual(taskId) {
+    currentManualTaskId = taskId;
+    
+    // Clear the notes field
+    document.getElementById('manualTaskNotes').value = '';
+    
+    // Show the modal
+    new bootstrap.Modal(document.getElementById('manualTaskModal')).show();
+}
+
+// Execute manual task completion
+function executeManualCompletion() {
+    if (!currentManualTaskId) {
+        alert('Error: No hay tarea seleccionada');
+        return;
+    }
+    
+    const notes = document.getElementById('manualTaskNotes').value.trim();
+    
+    const button = document.querySelector('#manualTaskModal .btn-success');
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando...';
+    button.disabled = true;
+    
+    fetch(`/api/tasks/mark-manual/${currentManualTaskId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token() }}'
+        },
+        body: JSON.stringify({ 
+            notes: notes || 'Tarea marcada como realizada manualmente desde el monitor de tareas'
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message || 'Tarea marcada como realizada manualmente');
+            bootstrap.Modal.getInstance(document.getElementById('manualTaskModal')).hide();
+            refreshTaskList(); // Refresh both tasks and stats
+            currentManualTaskId = null;
+        } else {
+            alert('Error: ' + (data.message || 'No se pudo marcar la tarea como realizada manualmente'));
+        }
+        
+        button.innerHTML = originalText;
+        button.disabled = false;
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error al marcar la tarea como realizada manualmente');
+        
+        button.innerHTML = originalText;
+        button.disabled = false;
+    });
+}
+
+// Global variable to store task ID for cancellation
+let currentCancelTaskId = null;
+
+// Show cancel task modal
+function cancelTask(taskId) {
+    currentCancelTaskId = taskId;
+    
+    // Clear the reason field
+    document.getElementById('cancelTaskReason').value = '';
+    
+    // Show the modal
+    new bootstrap.Modal(document.getElementById('cancelTaskModal')).show();
+}
+
+// Execute task cancellation
+function executeCancelTask() {
+    if (!currentCancelTaskId) {
+        alert('Error: No hay tarea seleccionada');
+        return;
+    }
+    
+    const reason = document.getElementById('cancelTaskReason').value.trim();
+    
+    const button = document.querySelector('#cancelTaskModal .btn-danger');
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Cancelando...';
+    button.disabled = true;
+    
+    fetch(`/api/tasks/cancel/${currentCancelTaskId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token() }}'
+        },
+        body: JSON.stringify({ 
+            reason: reason || 'Tarea cancelada desde el monitor de tareas'
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message || 'Tarea cancelada exitosamente');
+            bootstrap.Modal.getInstance(document.getElementById('cancelTaskModal')).hide();
+            refreshTaskList(); // Refresh both tasks and stats
+            currentCancelTaskId = null;
+        } else {
+            alert('Error: ' + (data.message || 'No se pudo cancelar la tarea'));
+        }
+        
+        button.innerHTML = originalText;
+        button.disabled = false;
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error al cancelar la tarea');
+        
+        button.innerHTML = originalText;
+        button.disabled = false;
+    });
+}
+</script>
+{% endblock %}

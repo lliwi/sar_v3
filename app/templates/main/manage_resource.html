@@ -1,0 +1,922 @@
+{% extends "base.html" %}
+
+{% block page_title %}Gestionar Recurso{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <!-- Breadcrumb -->
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item">
+                <a href="{{ url_for('main.dashboard') }}">
+                    <i class="fas fa-home"></i> Dashboard
+                </a>
+            </li>
+            <li class="breadcrumb-item">
+                <a href="{{ url_for('main.my_resources') }}">
+                    <i class="fas fa-folder-open"></i> Mis Recursos
+                </a>
+            </li>
+            <li class="breadcrumb-item active" aria-current="page">
+                <i class="fas fa-cogs"></i> {{ folder.name }}
+            </li>
+        </ol>
+    </nav>
+
+    <div class="row">
+        <div class="col-12">
+            
+            {% if is_owner %}
+            <!-- Gestión de Validadores (solo para propietarios) -->
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-user-check text-success me-2"></i>
+                        Gestionar Validadores
+                    </h5>
+                    <span class="badge bg-success">{{ folder.validators|length }}</span>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-12">
+                            <div class="mb-3">
+                                <strong>Gestionar Validadores:</strong>
+                                <div class="mt-2">
+                                    <div class="multi-combobox-container" id="validatorsCombobox">
+                                        <div class="multi-combobox-selected" id="validatorsSelected"></div>
+                                        <input type="text" class="multi-combobox-input" id="validatorsInput" placeholder="🔍 Buscar validadores...">
+                                        <div class="multi-combobox-dropdown" id="validatorsDropdown">
+                                            <div class="multi-combobox-loading" id="validatorsLoading">Cargando usuarios...</div>
+                                        </div>
+                                    </div>
+                                    <div class="form-text mt-2">Selecciona validadores para añadir o quitar</div>
+                                    <!-- Hidden inputs for form submission -->
+                                    <div id="validatorsHiddenInputs"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-info mt-3 mb-0">
+                        <div class="d-flex">
+                            <i class="fas fa-info-circle me-2 mt-1"></i>
+                            <div>
+                                <strong>Información:</strong>
+                                Los validadores pueden aprobar o rechazar solicitudes de permisos para esta carpeta.
+                                Solo los propietarios pueden gestionar los validadores.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Usuarios con Permisos -->
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-users text-secondary me-2"></i>
+                        Usuarios con Permisos - {{ folder.name }}
+                    </h5>
+                    <div class="d-flex gap-2">
+                        <span class="badge bg-secondary">{{ permissions_summary.users_with_permissions|length }}</span>
+                        <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#assignUserPermissionModal">
+                            <i class="fas fa-user-plus me-1"></i>
+                            Nuevo
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    {% if permissions_summary.users_with_permissions %}
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>Usuario</th>
+                                        <th>Permisos</th>
+                                        <th>Origen</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for user_data in permissions_summary.users_with_permissions %}
+                                    <tr>
+                                        <td>
+                                            <div class="d-flex align-items-center">
+                                                <div class="avatar avatar-sm bg-primary text-white rounded-circle me-2 d-flex align-items-center justify-content-center">
+                                                    <i class="fas fa-user fa-sm"></i>
+                                                </div>
+                                                <div>
+                                                    <div class="fw-medium">{{ user_data.user.full_name }}</div>
+                                                    <small class="text-muted">{{ user_data.user.username }}</small>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            {% set read_perms = user_data.permissions | selectattr('type', 'equalto', 'read') | list %}
+                                            {% set write_perms = user_data.permissions | selectattr('type', 'equalto', 'write') | list %}
+                                            <div class="d-flex gap-1">
+                                                {% if read_perms %}
+                                                    <span class="badge bg-info">
+                                                        <i class="fas fa-eye me-1"></i>Lectura
+                                                    </span>
+                                                {% endif %}
+                                                {% if write_perms %}
+                                                    <span class="badge bg-success">
+                                                        <i class="fas fa-edit me-1"></i>Escritura
+                                                    </span>
+                                                {% endif %}
+                                            </div>
+                                        </td>
+                                        <td>
+                                            {% set ad_group_perms = user_data.permissions | selectattr('source', 'equalto', 'ad_group') | list %}
+                                            {% set direct_perms = user_data.permissions | selectattr('source', 'equalto', 'direct') | list %}
+                                            <div>
+                                                {% if ad_group_perms and direct_perms %}
+                                                    <span class="badge bg-primary me-1">
+                                                        <i class="fas fa-users me-1"></i>AD
+                                                    </span>
+                                                    <span class="badge bg-success">
+                                                        <i class="fas fa-user-plus me-1"></i>Directo
+                                                    </span>
+                                                {% elif ad_group_perms %}
+                                                    <span class="badge bg-primary">
+                                                        <i class="fas fa-users me-1"></i>Grupos AD
+                                                    </span>
+                                                {% elif direct_perms %}
+                                                    <span class="badge bg-success">
+                                                        <i class="fas fa-user-plus me-1"></i>Asignación Directa
+                                                    </span>
+                                                {% endif %}
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <div class="btn-group" role="group" aria-label="Acciones de usuario">
+                                                <a href="{{ url_for('main.permission_details', folder_id=folder.id, user_id=user_data.user.id) }}" 
+                                                   class="btn btn-sm btn-outline-info" title="Ver detalles">
+                                                    <i class="fas fa-eye"></i>
+                                                </a>
+                                                {% set user_direct_perms = user_data.permissions | selectattr('source', 'equalto', 'direct') | list %}
+                                                {% if user_direct_perms %}
+                                                    <div class="btn-group" role="group">
+                                                        <button type="button" class="btn btn-sm btn-outline-danger dropdown-toggle" 
+                                                                data-bs-toggle="dropdown" aria-expanded="false" title="Revocar permisos">
+                                                            <i class="fas fa-times"></i>
+                                                        </button>
+                                                        <ul class="dropdown-menu">
+                                                            {% for perm in user_direct_perms %}
+                                                                <li>
+                                                                    <form action="{{ url_for('main.revoke_user_permission', permission_id=perm.permission_id) }}" 
+                                                                          method="POST" class="dropdown-item-form">
+                                                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                                                        <button type="submit" class="dropdown-item text-danger"
+                                                                                onclick="return confirm('¿Estás seguro de que deseas revocar el permiso de {{ perm.type }} de {{ user_data.user.username }}?')">
+                                                                            <i class="fas fa-times me-2"></i>
+                                                                            Revocar {{ 'Lectura' if perm.type == 'read' else 'Escritura' }}
+                                                                        </button>
+                                                                    </form>
+                                                                </li>
+                                                            {% endfor %}
+                                                        </ul>
+                                                    </div>
+                                                    
+                                                    <!-- También añadir opciones de eliminación para permisos de grupos AD si existen -->
+                                                    {% set user_ad_perms = user_data.permissions | selectattr('source', 'equalto', 'ad_group') | list %}
+                                                    {% if user_ad_perms %}
+                                                        <div class="btn-group" role="group">
+                                                            <button type="button" class="btn btn-sm btn-outline-warning dropdown-toggle" 
+                                                                    data-bs-toggle="dropdown" aria-expanded="false" title="Eliminar permisos de grupos AD">
+                                                                <i class="fas fa-trash"></i>
+                                                            </button>
+                                                            <ul class="dropdown-menu">
+                                                                {% for perm in user_ad_perms %}
+                                                                    <li>
+                                                                        <form action="{{ url_for('main.delete_user_permission_from_ad_group') }}" 
+                                                                              method="POST" class="dropdown-item-form">
+                                                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                                                            <input type="hidden" name="folder_id" value="{{ folder.id }}"/>
+                                                                            <input type="hidden" name="user_id" value="{{ user_data.user.id }}"/>
+                                                                            <input type="hidden" name="ad_group_id" value="{{ perm.ad_group_id if perm.ad_group_id else '' }}"/>
+                                                                            <input type="hidden" name="permission_type" value="{{ perm.type }}"/>
+                                                                            <button type="submit" class="dropdown-item text-warning"
+                                                                                    onclick="return confirm('¿Estás seguro de que deseas eliminar el permiso de {{ perm.type }} del grupo AD para {{ user_data.user.username }}?')">
+                                                                                <i class="fas fa-trash me-2"></i>
+                                                                                Eliminar {{ 'Lectura' if perm.type == 'read' else 'Escritura' }} (Grupo AD)
+                                                                            </button>
+                                                                        </form>
+                                                                    </li>
+                                                                {% endfor %}
+                                                            </ul>
+                                                        </div>
+                                                    {% endif %}
+                                                {% else %}
+                                                    <!-- Permisos solo via Grupos AD - mostrar opciones de eliminación -->
+                                                    {% set user_ad_perms = user_data.permissions | selectattr('source', 'equalto', 'ad_group') | list %}
+                                                    {% if user_ad_perms %}
+                                                        <div class="btn-group" role="group">
+                                                            <button type="button" class="btn btn-sm btn-outline-danger dropdown-toggle" 
+                                                                    data-bs-toggle="dropdown" aria-expanded="false" title="Eliminar permisos de grupos AD">
+                                                                <i class="fas fa-trash"></i>
+                                                            </button>
+                                                            <ul class="dropdown-menu">
+                                                                {% for perm in user_ad_perms %}
+                                                                    <li>
+                                                                        <form action="{{ url_for('main.delete_user_permission_from_ad_group') }}" 
+                                                                              method="POST" class="dropdown-item-form">
+                                                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                                                            <input type="hidden" name="folder_id" value="{{ folder.id }}"/>
+                                                                            <input type="hidden" name="user_id" value="{{ user_data.user.id }}"/>
+                                                                            <input type="hidden" name="ad_group_id" value="{{ perm.ad_group_id if perm.ad_group_id else '' }}"/>
+                                                                            <input type="hidden" name="permission_type" value="{{ perm.type }}"/>
+                                                                            <button type="submit" class="dropdown-item text-danger"
+                                                                                    onclick="return confirm('¿Estás seguro de que deseas eliminar el permiso de {{ perm.type }} del grupo AD para {{ user_data.user.username }}?')">
+                                                                                <i class="fas fa-trash me-2"></i>
+                                                                                Eliminar {{ 'Lectura' if perm.type == 'read' else 'Escritura' }}
+                                                                            </button>
+                                                                        </form>
+                                                                    </li>
+                                                                {% endfor %}
+                                                            </ul>
+                                                        </div>
+                                                    {% else %}
+                                                        <span class="btn btn-sm btn-outline-secondary" title="Sin permisos disponibles" disabled>
+                                                            <i class="fas fa-info-circle"></i>
+                                                        </span>
+                                                    {% endif %}
+                                                {% endif %}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-users fa-3x mb-3 opacity-25"></i>
+                            <h6>Sin usuarios con permisos</h6>
+                            <p class="mb-0">No se encontraron usuarios con permisos para esta carpeta.</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Grupos AD con Permisos (sin usuarios conocidos) -->
+            {% set ad_groups_without_users = permissions_summary.ad_groups_with_permissions | rejectattr('has_known_users') | list %}
+            {% if ad_groups_without_users %}
+            <div class="card mt-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-layer-group text-warning me-2"></i>
+                        Grupos AD con Permisos Asignados
+                    </h5>
+                    <div class="d-flex gap-2">
+                        <span class="badge bg-warning">{{ ad_groups_without_users|length }}</span>
+                        <small class="text-muted">Sincronización pendiente</small>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-info border-0 bg-light mb-3">
+                        <div class="d-flex">
+                            <i class="fas fa-info-circle me-2 mt-1"></i>
+                            <div>
+                                <strong>Información:</strong>
+                                Estos grupos AD tienen permisos asignados pero aún no se han sincronizado los usuarios miembros desde Active Directory. 
+                                Los permisos están configurados y funcionales, pero no se pueden mostrar los usuarios individuales hasta que se ejecute la sincronización.
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Grupo AD</th>
+                                    <th>Permiso</th>
+                                    <th>Asignado</th>
+                                    <th>Estado</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for group_data in ad_groups_without_users %}
+                                <tr>
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <div class="avatar avatar-sm bg-warning text-white rounded-circle me-2 d-flex align-items-center justify-content-center">
+                                                <i class="fas fa-users fa-sm"></i>
+                                            </div>
+                                            <div>
+                                                <div class="fw-medium">{{ group_data.ad_group.name }}</div>
+                                                <small class="text-muted">{{ group_data.ad_group.distinguished_name }}</small>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        {% if group_data.permission_type == 'read' %}
+                                            <span class="badge bg-info">
+                                                <i class="fas fa-eye me-1"></i>Lectura
+                                            </span>
+                                        {% elif group_data.permission_type == 'write' %}
+                                            <span class="badge bg-success">
+                                                <i class="fas fa-edit me-1"></i>Escritura
+                                            </span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <div>
+                                            <div class="text-sm">{{ group_data.granted_at.strftime('%d/%m/%Y %H:%M') if group_data.granted_at else 'N/A' }}</div>
+                                            {% if group_data.granted_by %}
+                                                <small class="text-muted">Por: {{ group_data.granted_by.username }}</small>
+                                            {% endif %}
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-warning">
+                                            <i class="fas fa-clock me-1"></i>Pendiente sincronización
+                                        </span>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="text-center mt-3">
+                        <p class="text-muted small mb-2">
+                            <i class="fas fa-sync-alt me-1"></i>
+                            Para ver los usuarios individuales de estos grupos, ejecuta la sincronización con Active Directory
+                        </p>
+                        {% if current_user.is_admin() %}
+                            <a href="{{ url_for('admin.ad_groups') }}" class="btn btn-sm btn-outline-primary">
+                                <i class="fas fa-sync-alt me-1"></i>
+                                Sincronizar con AD
+                            </a>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Modal para Asignar Permiso de Usuario -->
+<div class="modal fade" id="assignUserPermissionModal" tabindex="-1" aria-labelledby="assignUserPermissionModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="assignUserPermissionModalLabel">
+                    <i class="fas fa-user-plus text-primary me-2"></i>
+                    Asignar Permiso a Usuario
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="POST" action="{{ url_for('main.assign_user_permission', folder_id=folder.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="modal-body">
+                    <div class="row">
+                        <!-- Información de la carpeta -->
+                        <div class="col-md-6 mb-3">
+                            <div class="card border-light bg-light">
+                                <div class="card-body py-2">
+                                    <h6 class="card-title mb-1">
+                                        <i class="fas fa-folder text-warning me-1"></i>
+                                        Carpeta
+                                    </h6>
+                                    <p class="card-text mb-0">
+                                        <strong>{{ folder.name }}</strong><br>
+                                        <small class="text-muted font-monospace">{{ folder.path }}</small>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Usuario con filtro -->
+                        <div class="col-md-6 mb-3">
+                            <label for="user_search" class="form-label">
+                                <i class="fas fa-user me-1"></i>
+                                Usuario
+                            </label>
+                            <div class="position-relative">
+                                <input type="text" 
+                                       class="form-control" 
+                                       id="user_search" 
+                                       placeholder="Buscar usuario por nombre o email..." 
+                                       autocomplete="off">
+                                <input type="hidden" id="user_id" name="user_id" required>
+                                <div id="user_dropdown" class="dropdown-menu position-absolute w-100" style="display: none; max-height: 250px; overflow-y: auto;">
+                                    {% for user in all_active_users %}
+                                        <a class="dropdown-item user-option" 
+                                           href="#" 
+                                           data-user-id="{{ user.id }}"
+                                           data-user-name="{{ user.full_name }}"
+                                           data-user-username="{{ user.username }}"
+                                           data-user-email="{{ user.email }}">
+                                            <div class="d-flex align-items-center">
+                                                <div class="avatar avatar-sm bg-primary text-white rounded-circle me-2 d-flex align-items-center justify-content-center">
+                                                    <i class="fas fa-user fa-sm"></i>
+                                                </div>
+                                                <div>
+                                                    <div class="fw-medium">{{ user.full_name }}</div>
+                                                    <small class="text-muted">{{ user.username }} - {{ user.email }}</small>
+                                                </div>
+                                            </div>
+                                        </a>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Tipo de permiso -->
+                        <div class="col-md-6 mb-3">
+                            <label for="permission_type" class="form-label">
+                                <i class="fas fa-shield-alt me-1"></i>
+                                Tipo de Permiso
+                            </label>
+                            <select class="form-select" id="permission_type" name="permission_type" required>
+                                <option value="">Seleccionar tipo...</option>
+                                <option value="read">
+                                    <i class="fas fa-eye"></i> Lectura
+                                </option>
+                                <option value="write">
+                                    <i class="fas fa-edit"></i> Escritura
+                                </option>
+                            </select>
+                        </div>
+
+                        <!-- Notas -->
+                        <div class="col-12 mb-3">
+                            <label for="notes" class="form-label">
+                                <i class="fas fa-sticky-note me-1"></i>
+                                Notas
+                                <span class="text-muted">(opcional)</span>
+                            </label>
+                            <textarea class="form-control" id="notes" name="notes" rows="3" 
+                                      placeholder="Añadir cualquier información adicional sobre este permiso..."></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Información importante -->
+                    <div class="alert alert-info mb-0">
+                        <div class="d-flex">
+                            <i class="fas fa-info-circle me-2 mt-1"></i>
+                            <div>
+                                <strong>Información:</strong>
+                                <ul class="mb-0 mt-1">
+                                    <li>Este permiso será asignado directamente al usuario seleccionado.</li>
+                                    <li>Se creará una tarea automática para aplicar el cambio en Active Directory.</li>
+                                    <li>Los permisos directos son independientes de los permisos por grupos AD.</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-1"></i>
+                        Cancelar
+                    </button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-check me-1"></i>
+                        Asignar Permiso
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script>
+// Clase MultiSelectCombobox para la gestión de validadores
+class MultiSelectCombobox {
+    constructor(config) {
+        this.container = document.getElementById(config.containerId);
+        this.input = document.getElementById(config.inputId);
+        this.dropdown = document.getElementById(config.dropdownId);
+        this.selectedContainer = document.getElementById(config.selectedId);
+        this.hiddenInputsContainer = document.getElementById(config.hiddenInputsId);
+        this.loading = document.getElementById(config.loadingId);
+        this.fieldName = config.fieldName;
+        this.dataUrl = config.dataUrl;
+        this.placeholder = config.placeholder;
+        this.searchPlaceholder = config.searchPlaceholder;
+        this.maxSelections = config.maxSelections || null;
+        this.folderId = config.folderId; // Específico para manage-resource
+        
+        this.allItems = [];
+        this.selectedItems = new Map();
+        this.isOpen = false;
+        
+        this.init();
+    }
+    
+    async init() {
+        await this.loadData();
+        this.setupEvents();
+        this.loadPreselectedValidators();
+    }
+    
+    async loadData() {
+        try {
+            const response = await fetch(this.dataUrl);
+            const data = await response.json();
+            
+            if (data.success) {
+                this.allItems = data.items;
+                this.renderDropdown();
+                this.loading.style.display = 'none';
+            } else {
+                this.showError('Error al cargar datos');
+            }
+        } catch (error) {
+            console.error('Error loading data:', error);
+            this.showError('Error de conexión');
+        }
+    }
+    
+    loadPreselectedValidators() {
+        // Cargar validadores actuales de la carpeta
+        const currentValidators = {{ folder.validators|map(attribute='id')|list|tojson|safe }};
+        
+        currentValidators.forEach(validatorId => {
+            const item = this.allItems.find(i => i.id.toString() === validatorId.toString());
+            if (item) {
+                this.selectedItems.set(validatorId.toString(), item);
+            }
+        });
+        
+        this.renderSelectedItems();
+        this.renderDropdown();
+    }
+    
+    setupEvents() {
+        this.input.addEventListener('input', () => this.handleInput());
+        this.input.addEventListener('focus', () => this.openDropdown());
+        this.input.addEventListener('keydown', (e) => this.handleKeyDown(e));
+        
+        document.addEventListener('click', (e) => {
+            if (!this.container.contains(e.target)) {
+                this.closeDropdown();
+            }
+        });
+    }
+    
+    handleInput() {
+        const searchTerm = this.input.value.toLowerCase();
+        this.filterItems(searchTerm);
+        if (!this.isOpen) this.openDropdown();
+    }
+    
+    handleKeyDown(e) {
+        if (e.key === 'Escape') {
+            this.closeDropdown();
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            const highlighted = this.dropdown.querySelector('.multi-combobox-option:hover');
+            if (highlighted && !highlighted.classList.contains('disabled')) {
+                this.selectItem(highlighted.dataset.value);
+            }
+        }
+    }
+    
+    openDropdown() {
+        this.isOpen = true;
+        this.dropdown.classList.add('show');
+        this.filterItems(this.input.value.toLowerCase());
+    }
+    
+    closeDropdown() {
+        this.isOpen = false;
+        this.dropdown.classList.remove('show');
+        this.input.value = '';
+    }
+    
+    filterItems(searchTerm) {
+        const options = this.dropdown.querySelectorAll('.multi-combobox-option');
+        let visibleCount = 0;
+        
+        options.forEach(option => {
+            const text = option.textContent.toLowerCase();
+            const matches = text.includes(searchTerm);
+            option.style.display = matches ? 'block' : 'none';
+            if (matches) visibleCount++;
+        });
+        
+        const noResults = this.dropdown.querySelector('.no-results');
+        if (noResults) noResults.remove();
+        
+        // Contar elementos disponibles (no seleccionados)
+        const availableItems = this.allItems.filter(item => 
+            !this.selectedItems.has(item.id.toString())
+        );
+        
+        if (visibleCount === 0 && availableItems.length > 0) {
+            const noResultsDiv = document.createElement('div');
+            noResultsDiv.className = 'no-results';
+            noResultsDiv.textContent = 'No se encontraron resultados';
+            this.dropdown.appendChild(noResultsDiv);
+        } else if (visibleCount === 0 && availableItems.length === 0) {
+            const noResultsDiv = document.createElement('div');
+            noResultsDiv.className = 'no-results';
+            noResultsDiv.textContent = 'Todos los usuarios disponibles ya están asignados';
+            this.dropdown.appendChild(noResultsDiv);
+        }
+    }
+    
+    renderDropdown() {
+        this.dropdown.innerHTML = '';
+        
+        // Filtrar solo los elementos no seleccionados
+        const availableItems = this.allItems.filter(item => 
+            !this.selectedItems.has(item.id.toString())
+        );
+        
+        availableItems.forEach(item => {
+            const option = document.createElement('div');
+            option.className = 'multi-combobox-option';
+            option.dataset.value = item.id;
+            
+            option.innerHTML = `
+                <div class="option-details">
+                    <div class="option-main">${item.name}</div>
+                    ${item.secondary ? `<div class="option-secondary">${item.secondary}</div>` : ''}
+                </div>
+            `;
+            
+            option.addEventListener('click', async () => {
+                await this.addValidator(item.id);
+            });
+            
+            this.dropdown.appendChild(option);
+        });
+        
+        // Mostrar mensaje si no hay elementos disponibles
+        if (availableItems.length === 0 && this.allItems.length > 0) {
+            const noItemsDiv = document.createElement('div');
+            noItemsDiv.className = 'no-results';
+            noItemsDiv.textContent = 'Todos los usuarios disponibles ya están asignados';
+            this.dropdown.appendChild(noItemsDiv);
+        }
+    }
+    
+    async addValidator(itemId) {
+        const item = this.allItems.find(i => i.id.toString() === itemId.toString());
+        if (!item || this.selectedItems.has(itemId.toString())) return;
+        
+        try {
+            const response = await this.makeValidatorRequest('add', itemId);
+            if (response.success) {
+                this.selectedItems.set(itemId.toString(), item);
+                this.renderSelectedItems();
+                this.renderDropdown();
+                this.closeDropdown();
+            } else {
+                alert(response.message || 'Error al añadir validador');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('Error de conexión');
+        }
+    }
+    
+    async removeValidator(itemId) {
+        const item = this.selectedItems.get(itemId.toString());
+        if (!item) return;
+        
+        if (!confirm(`¿Estás seguro de remover a ${item.name} como validador?`)) {
+            return;
+        }
+        
+        try {
+            const response = await this.makeValidatorRequest('remove', itemId);
+            if (response.success) {
+                this.selectedItems.delete(itemId.toString());
+                this.renderSelectedItems();
+                this.renderDropdown();
+            } else {
+                alert(response.message || 'Error al remover validador');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('Error de conexión');
+        }
+    }
+    
+    async makeValidatorRequest(action, userId) {
+        const formData = new FormData();
+        formData.append('csrf_token', '{{ csrf_token() }}');
+        formData.append('user_id', userId);
+        formData.append('action', action);
+        
+        const response = await fetch(`{{ url_for('main.manage_validators', folder_id=folder.id) }}`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        return await response.json();
+    }
+    
+    renderSelectedItems() {
+        this.selectedContainer.innerHTML = '';
+        
+        this.selectedItems.forEach((item, itemId) => {
+            const tag = document.createElement('div');
+            tag.className = 'selected-item';
+            
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'remove-btn';
+            removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+            
+            removeBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.removeValidator(itemId);
+            });
+            
+            const span = document.createElement('span');
+            span.textContent = item.name;
+            
+            tag.appendChild(span);
+            tag.appendChild(removeBtn);
+            this.selectedContainer.appendChild(tag);
+        });
+        
+        if (this.selectedItems.size === 0) {
+            this.input.placeholder = this.searchPlaceholder || 'Buscar...';
+        } else {
+            this.input.placeholder = 'Buscar más...';
+        }
+    }
+    
+    showError(message) {
+        this.dropdown.innerHTML = `<div class="no-results">${message}</div>`;
+        this.loading.style.display = 'none';
+    }
+}
+
+// Inicialización única cuando el DOM está listo
+document.addEventListener('DOMContentLoaded', function() {
+    // Inicializar tooltips de Bootstrap
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+    
+    // Funcionalidad de búsqueda de usuarios con filtro
+    initializeUserSearch();
+    
+    // Inicializar el componente de validadores solo si existe (solo para propietarios)
+    if (document.getElementById('validatorsCombobox')) {
+        window.validatorsCombobox = new MultiSelectCombobox({
+            containerId: 'validatorsCombobox',
+            inputId: 'validatorsInput',
+            dropdownId: 'validatorsDropdown',
+            selectedId: 'validatorsSelected',
+            hiddenInputsId: 'validatorsHiddenInputs',
+            loadingId: 'validatorsLoading',
+            fieldName: 'validators',
+            dataUrl: '/api/users/active',
+            searchPlaceholder: '🔍 Buscar validadores...',
+            folderId: {{ folder.id }}
+        });
+    }
+    
+    // Mejorar los selects con iconos
+    initializePermissionSelect();
+    
+    // Validación del formulario
+    initializeFormValidation();
+});
+
+function initializeUserSearch() {
+    const userSearch = document.getElementById('user_search');
+    const userDropdown = document.getElementById('user_dropdown');
+    const userIdInput = document.getElementById('user_id');
+    const userOptions = document.querySelectorAll('.user-option');
+
+    if (!userSearch || !userDropdown || !userIdInput || userOptions.length === 0) {
+        console.warn('User search elements not found or incomplete');
+        return;
+    }
+
+    // Mostrar dropdown al hacer foco en el input
+    userSearch.addEventListener('focus', function() {
+        userDropdown.style.display = 'block';
+        userDropdown.classList.add('show');
+        filterUsers(''); // Mostrar todos los usuarios
+    });
+
+    // Filtrar usuarios mientras se escribe
+    userSearch.addEventListener('input', function() {
+        const searchTerm = this.value.toLowerCase();
+        filterUsers(searchTerm);
+        userDropdown.style.display = 'block';
+        userDropdown.classList.add('show');
+    });
+
+    // Ocultar dropdown al hacer clic fuera
+    document.addEventListener('click', function(event) {
+        if (!userSearch.contains(event.target) && !userDropdown.contains(event.target)) {
+            userDropdown.style.display = 'none';
+            userDropdown.classList.remove('show');
+        }
+    });
+
+    // Manejar selección de usuario
+    userOptions.forEach(option => {
+        option.addEventListener('click', function(e) {
+            e.preventDefault();
+            const userId = this.dataset.userId;
+            const userName = this.dataset.userName;
+            const userUsername = this.dataset.userUsername;
+            
+            userSearch.value = `${userName} (${userUsername})`;
+            userIdInput.value = userId;
+            userDropdown.style.display = 'none';
+            userDropdown.classList.remove('show');
+            
+            // Validar el formulario
+            userIdInput.dispatchEvent(new Event('change'));
+        });
+    });
+
+    // Función para filtrar usuarios
+    function filterUsers(searchTerm) {
+        userOptions.forEach(option => {
+            const userName = option.dataset.userName.toLowerCase();
+            const userUsername = option.dataset.userUsername.toLowerCase();
+            const userEmail = option.dataset.userEmail.toLowerCase();
+            
+            const matches = userName.includes(searchTerm) || 
+                           userUsername.includes(searchTerm) || 
+                           userEmail.includes(searchTerm);
+            
+            option.style.display = matches ? 'block' : 'none';
+        });
+    }
+
+    // Limpiar la selección si se borra el texto
+    userSearch.addEventListener('input', function() {
+        if (this.value === '') {
+            userIdInput.value = '';
+        }
+    });
+}
+
+function initializePermissionSelect() {
+    const permissionSelect = document.getElementById('permission_type');
+    if (permissionSelect) {
+        permissionSelect.addEventListener('change', function() {
+            const selectedOption = this.options[this.selectedIndex];
+            // Aquí se podrían agregar efectos visuales adicionales
+        });
+    }
+}
+
+function initializeFormValidation() {
+    const form = document.querySelector('#assignUserPermissionModal form');
+    const submitButton = form?.querySelector('button[type="submit"]');
+    
+    if (!form || !submitButton) {
+        console.warn('Form or submit button not found for validation');
+        return;
+    }
+    
+    form.addEventListener('submit', function(e) {
+        const userIdInput = document.getElementById('user_id');
+        const permissionTypeSelect = document.getElementById('permission_type');
+        
+        let isValid = true;
+        let errorMessage = '';
+        
+        // Validar que se haya seleccionado un usuario
+        if (!userIdInput || !userIdInput.value || userIdInput.value.trim() === '') {
+            isValid = false;
+            errorMessage = 'Por favor, selecciona un usuario.';
+        }
+        
+        // Validar que se haya seleccionado un tipo de permiso
+        if (isValid && (!permissionTypeSelect || !permissionTypeSelect.value)) {
+            isValid = false;
+            errorMessage = 'Por favor, selecciona un tipo de permiso.';
+        }
+        
+        if (!isValid) {
+            e.preventDefault();
+            alert(errorMessage);
+            return false;
+        }
+        
+        // Mostrar indicador de carga
+        submitButton.disabled = true;
+        submitButton.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Procesando...';
+        
+        return true;
+    });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,829 @@
+{% extends "base.html" %}
+
+{% block extra_css %}
+<style>
+/* Multi-select Combobox Styles */
+.multi-combobox-container {
+    position: relative;
+    width: 100%;
+    border: 2px solid #dee2e6;
+    border-radius: 0.5rem;
+    background-color: #fff;
+    min-height: 80px;
+    padding: 12px;
+    transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.multi-combobox-container:focus-within {
+    border-color: #0d6efd;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.15), 0 2px 8px rgba(0, 0, 0, 0.15);
+    transform: translateY(-1px);
+}
+
+.multi-combobox-container.is-invalid {
+    border-color: #dc3545;
+}
+
+.multi-combobox-selected {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+    min-height: 32px;
+}
+
+.selected-item {
+    display: inline-flex;
+    align-items: center;
+    background: linear-gradient(135deg, #e7f3ff 0%, #f0f8ff 100%);
+    border: 1px solid #b6d7ff;
+    border-radius: 18px;
+    padding: 6px 10px 6px 14px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #0a58ca;
+    gap: 8px;
+    box-shadow: 0 1px 3px rgba(13, 110, 253, 0.1);
+    transition: all 0.2s ease;
+}
+
+.selected-item .remove-btn {
+    background: none;
+    border: none;
+    color: #0a58ca;
+    cursor: pointer;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    transition: background-color 0.15s ease;
+}
+
+.selected-item .remove-btn:hover {
+    background-color: rgba(220, 53, 69, 0.1);
+    color: #dc3545;
+}
+
+.selected-item:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(13, 110, 253, 0.2);
+}
+
+.multi-combobox-input {
+    width: 100%;
+    border: 1px solid #ced4da;
+    border-radius: 0.25rem;
+    padding: 6px 12px;
+    font-size: 0.875rem;
+    outline: none;
+    transition: border-color 0.15s ease-in-out;
+}
+
+.multi-combobox-input:focus {
+    border-color: #86b7fe;
+    box-shadow: 0 0 0 0.1rem rgba(13, 110, 253, 0.25);
+}
+
+.multi-combobox-dropdown {
+    position: absolute;
+    top: 100%;
+    left: -2px;
+    right: -2px;
+    z-index: 9999;
+    background: #fff;
+    border: 2px solid #86b7fe;
+    border-top: none;
+    border-radius: 0 0 0.375rem 0.375rem;
+    max-height: 300px;
+    overflow-y: auto;
+    display: none;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.multi-combobox-dropdown.show {
+    display: block;
+}
+
+.multi-combobox-option {
+    padding: 12px 16px;
+    cursor: pointer;
+    border-bottom: 1px solid #f1f3f5;
+    transition: all 0.2s ease;
+    font-size: 0.875rem;
+    margin: 2px 4px;
+    border-radius: 6px;
+}
+
+.multi-combobox-option:hover {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    transform: translateX(4px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.multi-combobox-option.selected {
+    background-color: #e7f3ff;
+    color: #0a58ca;
+}
+
+.multi-combobox-option.disabled {
+    color: #6c757d;
+    cursor: not-allowed;
+    background-color: #f8f9fa;
+}
+
+.option-details {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.option-main {
+    font-weight: 600;
+    color: #212529;
+    margin-bottom: 2px;
+}
+
+.option-secondary {
+    font-size: 0.75rem;
+    color: #6c757d;
+    font-style: italic;
+    opacity: 0.8;
+}
+
+.no-results {
+    padding: 16px 12px;
+    text-align: center;
+    color: #6c757d;
+    font-style: italic;
+}
+
+/* Loading state */
+.multi-combobox-loading {
+    padding: 16px 12px;
+    text-align: center;
+    color: #6c757d;
+}
+
+.multi-combobox-loading::before {
+    content: "🔄 ";
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+</style>
+{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h2 class="h4 mb-1">
+                        <i class="fas fa-user-shield text-primary me-2"></i>
+                        Detalles de Permisos: {{ user.full_name }}
+                    </h2>
+                    <nav aria-label="breadcrumb">
+                        <ol class="breadcrumb mb-0">
+                            <li class="breadcrumb-item">
+                                <a href="{{ url_for('main.my_resources') }}" class="text-decoration-none">
+                                    Mis Recursos
+                                </a>
+                            </li>
+                            <li class="breadcrumb-item">
+                                <a href="{{ url_for('main.manage_resource', folder_id=folder.id) }}" class="text-decoration-none">
+                                    {{ folder.name }}
+                                </a>
+                            </li>
+                            <li class="breadcrumb-item active" aria-current="page">
+                                {{ user.full_name }}
+                            </li>
+                        </ol>
+                    </nav>
+                </div>
+                <div>
+                    <a href="{{ url_for('main.manage_resource', folder_id=folder.id) }}" 
+                       class="btn btn-outline-secondary">
+                        <i class="fas fa-arrow-left me-1"></i>
+                        Volver
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- User and Folder Information -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-light">
+                    <h5 class="card-title mb-0 text-dark">
+                        <i class="fas fa-user text-info me-2"></i>
+                        Información del Usuario
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-sm-4">
+                            <label class="text-muted small">Nombre completo:</label>
+                            <div class="fw-medium text-dark">{{ user.full_name }}</div>
+                        </div>
+                        <div class="col-sm-4">
+                            <label class="text-muted small">Usuario:</label>
+                            <div class="fw-medium text-dark">{{ user.username }}</div>
+                        </div>
+                        <div class="col-sm-4">
+                            <label class="text-muted small">Email:</label>
+                            <div class="fw-medium text-dark">{{ user.email }}</div>
+                        </div>
+                        {% if user.department %}
+                        <div class="col-sm-6">
+                            <label class="text-muted small">Departamento:</label>
+                            <div class="fw-medium text-dark">{{ user.department }}</div>
+                        </div>
+                        {% endif %}
+                        <div class="col-sm-6">
+                            <label class="text-muted small">Estado:</label>
+                            <div>
+                                {% if user.is_active %}
+                                    <span class="badge bg-success">Activo</span>
+                                {% else %}
+                                    <span class="badge bg-danger">Inactivo</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-light">
+                    <h5 class="card-title mb-0 text-dark">
+                        <i class="fas fa-folder text-warning me-2"></i>
+                        Información de la Carpeta
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="text-muted small">Nombre:</label>
+                            <div class="fw-medium text-dark">{{ folder.name }}</div>
+                        </div>
+                        <div class="col-12">
+                            <label class="text-muted small">Ruta:</label>
+                            <div class="font-monospace text-break text-dark">{{ folder.path }}</div>
+                        </div>
+                        {% if folder.description %}
+                        <div class="col-12">
+                            <label class="text-muted small">Descripción:</label>
+                            <div class="text-dark">{{ folder.description }}</div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Folder Validators Management -->
+    {% if folder in current_user.owned_folders %}
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-warning text-dark">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-user-check me-2"></i>
+                        Gestionar Validadores de la Carpeta
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <form method="POST" action="{{ url_for('main.update_folder_validators', folder_id=folder.id) }}" id="validatorsForm">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                <div class="mb-3">
+                                    <label class="form-label fw-medium">
+                                        <i class="fas fa-users me-2"></i>Validadores Autorizados
+                                    </label>
+                                    <div class="multi-combobox-container" id="validatorsCombobox">
+                                        <div class="multi-combobox-selected" id="validatorsSelected"></div>
+                                        <input type="text" class="multi-combobox-input" id="validatorsInput" placeholder="🔍 Buscar validadores...">
+                                        <div class="multi-combobox-dropdown" id="validatorsDropdown">
+                                            <div class="multi-combobox-loading" id="validatorsLoading">Cargando usuarios...</div>
+                                        </div>
+                                    </div>
+                                    <div class="form-text">
+                                        <i class="fas fa-info-circle text-primary me-1"></i>
+                                        Los validadores pueden aprobar/rechazar solicitudes de permisos para esta carpeta.
+                                    </div>
+                                    <!-- Hidden inputs for form submission -->
+                                    <div id="validatorsHiddenInputs"></div>
+                                </div>
+                                <div class="d-flex gap-2">
+                                    <button type="submit" class="btn btn-warning">
+                                        <i class="fas fa-save me-2"></i>Guardar Validadores
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card border-0 shadow-sm">
+                                <div class="card-header bg-light">
+                                    <h6 class="mb-0 text-dark">
+                                        <i class="fas fa-lightbulb me-1 text-warning"></i>
+                                        Validadores Actuales
+                                    </h6>
+                                </div>
+                                <div class="card-body">
+                                    <div id="currentValidators">
+                                        {% if folder.validators %}
+                                            {% for validator in folder.validators %}
+                                                <div class="d-flex align-items-center mb-2">
+                                                    <div class="avatar avatar-sm bg-warning text-dark rounded-circle me-2 d-flex align-items-center justify-content-center">
+                                                        <i class="fas fa-user-check fa-sm"></i>
+                                                    </div>
+                                                    <div class="flex-grow-1">
+                                                        <div class="fw-medium text-dark">{{ validator.full_name }}</div>
+                                                        <small class="text-muted">{{ validator.username }}</small>
+                                                    </div>
+                                                </div>
+                                            {% endfor %}
+                                        {% else %}
+                                            <div class="text-muted small">
+                                                <i class="fas fa-exclamation-triangle me-1"></i>
+                                                Sin validadores asignados
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Permission Details -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-shield-alt me-2"></i>
+                        Detalles de Permisos
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if user_permissions and user_permissions.permissions %}
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>Tipo de Permiso</th>
+                                        <th>Origen</th>
+                                        <th>Otorgado por</th>
+                                        <th>Fecha de Asignación</th>
+                                        <th>Expira</th>
+                                        <th>Notas</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for permission in user_permissions.permissions %}
+                                    <tr>
+                                        <td>
+                                            {% if permission.type == 'read' %}
+                                                <span class="badge bg-info">
+                                                    <i class="fas fa-eye me-1"></i>
+                                                    Lectura
+                                                </span>
+                                            {% elif permission.type == 'write' %}
+                                                <span class="badge bg-success">
+                                                    <i class="fas fa-edit me-1"></i>
+                                                    Escritura
+                                                </span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if permission.source == 'ad_group' %}
+                                                <div class="d-flex align-items-center">
+                                                    <i class="fas fa-users text-primary me-2"></i>
+                                                    <div>
+                                                        <div class="fw-medium">Grupo AD</div>
+                                                        <small class="text-muted">{{ permission.source_name }}</small>
+                                                    </div>
+                                                </div>
+                                            {% elif permission.source == 'direct' %}
+                                                <div class="d-flex align-items-center">
+                                                    <i class="fas fa-user-plus text-success me-2"></i>
+                                                    <div>
+                                                        <div class="fw-medium">Asignación Directa</div>
+                                                        <small class="text-muted">Individual</small>
+                                                    </div>
+                                                </div>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if permission.granted_by %}
+                                                <div class="fw-medium">{{ permission.granted_by }}</div>
+                                            {% else %}
+                                                <span class="text-muted">—</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if permission.granted_at %}
+                                                <div>{{ permission.granted_at.strftime('%d/%m/%Y') }}</div>
+                                                <small class="text-muted">{{ permission.granted_at.strftime('%H:%M') }}</small>
+                                            {% else %}
+                                                <span class="text-muted">—</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if permission.expires_at %}
+                                                {% if permission.expires_at and permission.expires_at < current_date %}
+                                                    <span class="badge bg-danger">
+                                                        <i class="fas fa-clock me-1"></i>
+                                                        Expirado
+                                                    </span>
+                                                    <div class="small text-muted">{{ permission.expires_at.strftime('%d/%m/%Y') }}</div>
+                                                {% else %}
+                                                    <div>{{ permission.expires_at.strftime('%d/%m/%Y') }}</div>
+                                                    <small class="text-success">Activo</small>
+                                                {% endif %}
+                                            {% else %}
+                                                <span class="badge bg-secondary">Sin expiración</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if permission.notes %}
+                                                <div class="text-truncate" style="max-width: 200px;" 
+                                                     title="{{ permission.notes }}">
+                                                    {{ permission.notes }}
+                                                </div>
+                                            {% else %}
+                                                <span class="text-muted">—</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if permission.source == 'direct' %}
+                                                <!-- Only allow revoking direct permissions -->
+                                                <form action="{{ url_for('main.revoke_user_permission', permission_id=permission.permission_id) }}" 
+                                                      method="POST" class="d-inline">
+                                                    <button type="submit" class="btn btn-outline-danger btn-sm"
+                                                            onclick="return confirm('¿Estás seguro de que deseas revocar este permiso?')"
+                                                            title="Revocar permiso">
+                                                        <i class="fas fa-times"></i>
+                                                    </button>
+                                                </form>
+                                            {% elif permission.source == 'ad_group' %}
+                                                <!-- AD group permissions cannot be revoked individually -->
+                                                <span class="text-muted small">
+                                                    <i class="fas fa-info-circle me-1"></i>
+                                                    Vía Grupo AD
+                                                </span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Summary -->
+                        <div class="row mt-4 pt-4 border-top">
+                            <div class="col-md-6">
+                                <h6 class="text-muted">Resumen de Permisos</h6>
+                                <ul class="list-unstyled">
+                                    {% set read_perms = user_permissions.permissions | selectattr('type', 'equalto', 'read') | list %}
+                                    {% set write_perms = user_permissions.permissions | selectattr('type', 'equalto', 'write') | list %}
+                                    <li class="text-dark">
+                                        <i class="fas fa-eye text-info me-2"></i>
+                                        <strong>{{ read_perms | length }}</strong> permiso(s) de lectura
+                                    </li>
+                                    <li class="text-dark">
+                                        <i class="fas fa-edit text-success me-2"></i>
+                                        <strong>{{ write_perms | length }}</strong> permiso(s) de escritura
+                                    </li>
+                                </ul>
+                            </div>
+                            <div class="col-md-6">
+                                <h6 class="text-muted">Origen de Permisos</h6>
+                                <ul class="list-unstyled">
+                                    {% set ad_group_perms = user_permissions.permissions | selectattr('source', 'equalto', 'ad_group') | list %}
+                                    {% set direct_perms = user_permissions.permissions | selectattr('source', 'equalto', 'direct') | list %}
+                                    <li class="text-dark">
+                                        <i class="fas fa-users text-primary me-2"></i>
+                                        <strong>{{ ad_group_perms | length }}</strong> vía Grupos AD
+                                    </li>
+                                    <li class="text-dark">
+                                        <i class="fas fa-user-plus text-success me-2"></i>
+                                        <strong>{{ direct_perms | length }}</strong> asignación directa
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+                    {% else %}
+                        <div class="text-center py-5">
+                            <div class="text-muted mb-3">
+                                <i class="fas fa-exclamation-triangle fa-3x"></i>
+                            </div>
+                            <h5 class="text-muted">Sin permisos encontrados</h5>
+                            <p class="text-muted">
+                                Este usuario no tiene permisos asignados para esta carpeta.
+                            </p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize tooltips
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[title]'));
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+
+    {% if folder in current_user.owned_folders %}
+    // Multi-select Combobox Class (same as folder_form_improved.html)
+    class MultiSelectCombobox {
+        constructor(config) {
+            this.container = document.getElementById(config.containerId);
+            this.input = document.getElementById(config.inputId);
+            this.dropdown = document.getElementById(config.dropdownId);
+            this.selectedContainer = document.getElementById(config.selectedId);
+            this.hiddenInputsContainer = document.getElementById(config.hiddenInputsId);
+            this.loading = document.getElementById(config.loadingId);
+            this.fieldName = config.fieldName;
+            this.dataUrl = config.dataUrl;
+            this.placeholder = config.placeholder;
+            this.searchPlaceholder = config.searchPlaceholder;
+            this.maxSelections = config.maxSelections || null;
+            this.preselectedData = config.preselectedData || [];
+            
+            this.allItems = [];
+            this.selectedItems = new Map();
+            this.isOpen = false;
+            
+            this.init();
+        }
+        
+        async init() {
+            await this.loadData();
+            this.setupEvents();
+            this.loadPreselectedValues();
+        }
+        
+        async loadData() {
+            try {
+                const response = await fetch(this.dataUrl);
+                const data = await response.json();
+                
+                if (data.success) {
+                    this.allItems = data.items;
+                    this.renderDropdown();
+                    this.loading.style.display = 'none';
+                } else {
+                    this.showError('Error al cargar datos');
+                }
+            } catch (error) {
+                console.error('Error loading data:', error);
+                this.showError('Error de conexión');
+            }
+        }
+        
+        setupEvents() {
+            // Input events
+            this.input.addEventListener('input', () => this.handleInput());
+            this.input.addEventListener('focus', () => this.openDropdown());
+            this.input.addEventListener('keydown', (e) => this.handleKeyDown(e));
+            
+            // Click outside to close
+            document.addEventListener('click', (e) => {
+                if (!this.container.contains(e.target)) {
+                    this.closeDropdown();
+                }
+            });
+        }
+        
+        handleInput() {
+            const searchTerm = this.input.value.toLowerCase();
+            this.filterItems(searchTerm);
+            if (!this.isOpen) this.openDropdown();
+        }
+        
+        handleKeyDown(e) {
+            if (e.key === 'Escape') {
+                this.closeDropdown();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                const highlighted = this.dropdown.querySelector('.multi-combobox-option:hover');
+                if (highlighted && !highlighted.classList.contains('disabled')) {
+                    this.selectItem(highlighted.dataset.value);
+                }
+            }
+        }
+        
+        openDropdown() {
+            this.isOpen = true;
+            this.dropdown.classList.add('show');
+            this.filterItems(this.input.value.toLowerCase());
+        }
+        
+        closeDropdown() {
+            this.isOpen = false;
+            this.dropdown.classList.remove('show');
+            this.input.value = '';
+        }
+        
+        filterItems(searchTerm) {
+            const options = this.dropdown.querySelectorAll('.multi-combobox-option');
+            let visibleCount = 0;
+            
+            options.forEach(option => {
+                const text = option.textContent.toLowerCase();
+                const matches = text.includes(searchTerm);
+                option.style.display = matches ? 'block' : 'none';
+                if (matches) visibleCount++;
+            });
+            
+            // Show/hide no results message
+            const noResults = this.dropdown.querySelector('.no-results');
+            if (noResults) noResults.remove();
+            
+            if (visibleCount === 0 && this.allItems.length > 0) {
+                const noResultsDiv = document.createElement('div');
+                noResultsDiv.className = 'no-results';
+                noResultsDiv.textContent = 'No se encontraron resultados';
+                this.dropdown.appendChild(noResultsDiv);
+            }
+        }
+        
+        renderDropdown() {
+            this.dropdown.innerHTML = '';
+            
+            this.allItems.forEach(item => {
+                const option = document.createElement('div');
+                option.className = 'multi-combobox-option';
+                option.dataset.value = item.id;
+                
+                const isSelected = this.selectedItems.has(item.id.toString());
+                const maxReached = this.maxSelections && this.selectedItems.size >= this.maxSelections;
+                
+                if (isSelected || (maxReached && !isSelected)) {
+                    option.classList.add('disabled');
+                }
+                
+                option.innerHTML = `
+                    <div class="option-details">
+                        <div class="option-main">${item.name}</div>
+                        ${item.secondary ? `<div class="option-secondary">${item.secondary}</div>` : ''}
+                    </div>
+                `;
+                
+                option.addEventListener('click', () => {
+                    if (!isSelected && (!this.maxSelections || this.selectedItems.size < this.maxSelections)) {
+                        this.selectItem(item.id);
+                    }
+                });
+                
+                this.dropdown.appendChild(option);
+            });
+        }
+        
+        selectItem(itemId) {
+            const item = this.allItems.find(i => i.id.toString() === itemId.toString());
+            if (!item || this.selectedItems.has(itemId.toString())) return;
+            
+            // Check maximum selection limit
+            if (this.maxSelections && this.selectedItems.size >= this.maxSelections) {
+                return;
+            }
+            
+            this.selectedItems.set(itemId.toString(), item);
+            this.renderSelectedItems();
+            this.updateHiddenInputs();
+            this.renderDropdown();
+            this.closeDropdown();
+        }
+        
+        removeItem(itemId) {
+            const itemIdStr = itemId.toString();
+            
+            if (!this.selectedItems.has(itemIdStr)) {
+                return;
+            }
+            
+            this.selectedItems.delete(itemIdStr);
+            this.renderSelectedItems();
+            this.updateHiddenInputs();
+            this.renderDropdown();
+            this.input.focus();
+        }
+        
+        renderSelectedItems() {
+            this.selectedContainer.innerHTML = '';
+            
+            this.selectedItems.forEach((item, itemId) => {
+                const tag = document.createElement('div');
+                tag.className = 'selected-item';
+                
+                const removeBtn = document.createElement('button');
+                removeBtn.type = 'button';
+                removeBtn.className = 'remove-btn';
+                removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+                
+                removeBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.removeItem(itemId);
+                });
+                
+                const span = document.createElement('span');
+                span.textContent = item.name;
+                
+                tag.appendChild(span);
+                tag.appendChild(removeBtn);
+                this.selectedContainer.appendChild(tag);
+            });
+            
+            // Update placeholder
+            if (this.selectedItems.size === 0) {
+                this.input.placeholder = this.searchPlaceholder;
+            } else {
+                this.input.placeholder = `${this.selectedItems.size} seleccionados - buscar más...`;
+            }
+        }
+        
+        updateHiddenInputs() {
+            this.hiddenInputsContainer.innerHTML = '';
+            
+            this.selectedItems.forEach((item, itemId) => {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = this.fieldName;
+                input.value = itemId;
+                this.hiddenInputsContainer.appendChild(input);
+            });
+        }
+        
+        loadPreselectedValues() {
+            if (this.preselectedData && this.preselectedData.length > 0 && this.allItems.length > 0) {
+                this.preselectedData.forEach(preselectedItem => {
+                    const item = this.allItems.find(i => i.id.toString() === preselectedItem.id.toString());
+                    if (item) {
+                        this.selectedItems.set(preselectedItem.id.toString(), item);
+                    }
+                });
+                
+                this.renderSelectedItems();
+                this.updateHiddenInputs();
+                this.renderDropdown();
+            }
+        }
+        
+        showError(message) {
+            this.dropdown.innerHTML = `<div class="no-results">${message}</div>`;
+            this.loading.style.display = 'none';
+        }
+    }
+    
+    // Initialize validators combobox
+    const currentValidators = [
+        {% for validator in folder.validators %}
+        { id: {{ validator.id }}, name: "{{ validator.full_name }}" },
+        {% endfor %}
+    ];
+    
+    new MultiSelectCombobox({
+        containerId: 'validatorsCombobox',
+        inputId: 'validatorsInput',
+        dropdownId: 'validatorsDropdown',
+        selectedId: 'validatorsSelected',
+        hiddenInputsId: 'validatorsHiddenInputs',
+        loadingId: 'validatorsLoading',
+        fieldName: 'validators',
+        dataUrl: '/api/users/active',
+        searchPlaceholder: '🔍 Buscar validadores...',
+        preselectedData: currentValidators
+    });
+    {% endif %}
+});
+</script>
+{% endblock %}

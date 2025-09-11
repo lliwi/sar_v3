@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+
+{% block page_title %}Mis Recursos{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-folder-open text-primary me-2"></i>
+                        {{ title }}
+                    </h5>
+                    <div class="text-muted">
+                        <small>{{ pagination.total }} carpeta(s) bajo tu gestión</small>
+                    </div>
+                </div>
+                
+                <div class="card-body">
+                    <!-- Filtro de búsqueda -->
+                    <div class="row mb-4">
+                        <div class="col-md-6">
+                            <form method="GET" action="{{ url_for('main.my_resources') }}" class="d-flex">
+                                <div class="input-group">
+                                    <span class="input-group-text">
+                                        <i class="fas fa-search"></i>
+                                    </span>
+                                    <input type="text" 
+                                           name="filter" 
+                                           value="{{ current_filter or '' }}" 
+                                           class="form-control" 
+                                           placeholder="Filtrar por nombre de carpeta o ruta...">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-filter me-1"></i>Filtrar
+                                    </button>
+                                    {% if current_filter %}
+                                        <a href="{{ url_for('main.my_resources') }}" class="btn btn-outline-secondary">
+                                            <i class="fas fa-times me-1"></i>Limpiar
+                                        </a>
+                                    {% endif %}
+                                </div>
+                            </form>
+                        </div>
+                        {% if current_filter %}
+                        <div class="col-md-6">
+                            <div class="alert alert-success mb-0">
+                                <i class="fas fa-filter me-2"></i>
+                                <strong>Filtrado por:</strong> "{{ current_filter }}" 
+                                <small class="text-muted">({{ pagination.total }} resultado(s) encontrado(s))</small>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                    
+                    {% if folder_details %}
+                        <div class="alert alert-info mb-4">
+                            <i class="fas fa-info-circle me-2"></i>
+                            <strong>¿Qué puedes hacer aquí?</strong><br>
+                            Como propietario o validador de estas carpetas, puedes otorgar o revocar permisos de lectura y escritura directamente a grupos de AD. 
+                            Los cambios generarán tareas automáticas para aplicar las modificaciones en el Active Directory.
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>Carpeta</th>
+                                        <th>Ruta</th>
+                                        <th>Tu Rol</th>
+                                        <th>Permisos Configurados</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in folder_details %}
+                                    <tr>
+                                        <td>
+                                            <strong>{{ item.folder.name }}</strong>
+                                            {% if item.folder.description %}
+                                                <br><small class="text-muted">{{ item.folder.description }}</small>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <code>{{ item.folder.path }}</code>
+                                        </td>
+                                        <td>
+                                            {% if item.is_owner %}
+                                                <span class="badge bg-primary me-1">
+                                                    <i class="fas fa-crown me-1"></i>Propietario
+                                                </span>
+                                            {% endif %}
+                                            {% if item.is_validator %}
+                                                <span class="badge bg-success">
+                                                    <i class="fas fa-check-circle me-1"></i>Validador
+                                                </span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <div class="d-flex flex-wrap gap-1">
+                                                {% if item.read_permissions %}
+                                                    <span class="badge bg-info">
+                                                        <i class="fas fa-eye me-1"></i>
+                                                        {{ item.read_permissions|length }} lectura
+                                                    </span>
+                                                {% endif %}
+                                                {% if item.write_permissions %}
+                                                    <span class="badge bg-warning">
+                                                        <i class="fas fa-edit me-1"></i>
+                                                        {{ item.write_permissions|length }} escritura
+                                                    </span>
+                                                {% endif %}
+                                                {% if not item.read_permissions and not item.write_permissions %}
+                                                    <span class="text-muted">
+                                                        <i class="fas fa-exclamation-triangle me-1"></i>
+                                                        Sin permisos configurados
+                                                    </span>
+                                                {% endif %}
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <div class="btn-group" role="group">
+                                                <a href="{{ url_for('main.manage_resource', folder_id=item.folder.id) }}" 
+                                                   class="btn btn-sm btn-primary" 
+                                                   data-bs-toggle="tooltip" 
+                                                   title="Gestionar permisos">
+                                                    <i class="fas fa-cogs me-1"></i>Gestionar
+                                                </a>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Paginación -->
+                        {% if pagination.pages > 1 %}
+                        <nav aria-label="Paginación de carpetas">
+                            <ul class="pagination justify-content-center">
+                                {% if pagination.has_prev %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('main.my_resources', page=pagination.prev_num, filter=current_filter) }}">
+                                            <i class="fas fa-chevron-left"></i> Anterior
+                                        </a>
+                                    </li>
+                                {% endif %}
+                                
+                                {% for page_num in range(1, pagination.pages + 1) %}
+                                    {% if page_num == pagination.page %}
+                                        <li class="page-item active">
+                                            <span class="page-link">{{ page_num }}</span>
+                                        </li>
+                                    {% else %}
+                                        <li class="page-item">
+                                            <a class="page-link" href="{{ url_for('main.my_resources', page=page_num, filter=current_filter) }}">{{ page_num }}</a>
+                                        </li>
+                                    {% endif %}
+                                {% endfor %}
+                                
+                                {% if pagination.has_next %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('main.my_resources', page=pagination.next_num, filter=current_filter) }}">
+                                            Siguiente <i class="fas fa-chevron-right"></i>
+                                        </a>
+                                    </li>
+                                {% endif %}
+                            </ul>
+                        </nav>
+                        {% endif %}
+
+                    {% else %}
+                        {% if current_filter %}
+                            <div class="alert alert-warning text-center">
+                                <i class="fas fa-search fa-3x mb-3 text-muted"></i>
+                                <h4>No se encontraron carpetas</h4>
+                                <p class="mb-3">No se encontraron carpetas que coincidan con el filtro "<strong>{{ current_filter }}</strong>".</p>
+                                <a href="{{ url_for('main.my_resources') }}" class="btn btn-primary">
+                                    <i class="fas fa-times me-1"></i>Limpiar filtro
+                                </a>
+                            </div>
+                        {% else %}
+                            <div class="alert alert-warning text-center">
+                                <i class="fas fa-folder-open fa-3x mb-3 text-muted"></i>
+                                <h4>No hay carpetas bajo tu gestión</h4>
+                                <p class="mb-0">No eres propietario ni validador de ninguna carpeta actualmente. 
+                                   Contacta con un administrador si necesitas permisos de gestión sobre alguna carpeta.</p>
+                            </div>
+                        {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Inicializar tooltips de Bootstrap
+document.addEventListener('DOMContentLoaded', function() {
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+});
+</script>
+{% endblock %}

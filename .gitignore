@@ -227,7 +227,6 @@ redis_data/
 
 # Test files and artifacts
 test_files/
-*.html
 cookies*.txt
 *_test.html
 *_debug.html

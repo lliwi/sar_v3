@@ -1,0 +1,1104 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} - SAR{% endblock %}
+
+{% block page_title %}{{ title }}{% endblock %}
+
+{% block extra_css %}{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <!-- Header with actions -->
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <h2><i class="fas fa-users me-2"></i>{{ title }}</h2>
+                <div>
+                    <button type="button" class="btn btn-success me-2" 
+                            title="Sincronizar usuarios con permisos desde AD"
+                            onclick="syncUsersFromAD()">
+                        <i class="fas fa-users-cog"></i> Sincronizar Usuarios AD
+                    </button>
+                    <button onclick="window.print()" class="btn btn-outline-primary me-2">
+                        <i class="fas fa-print me-2"></i>Imprimir
+                    </button>
+                    <a href="{{ url_for('admin.admin_dashboard') }}" class="btn btn-secondary">
+                        <i class="fas fa-arrow-left me-2"></i>Volver al Panel
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card permissions-card text-center">
+                <div class="card-body">
+                    <i class="fas fa-users fa-2x mb-2"></i>
+                    <h4 class="card-title mb-0">{{ permissions_by_user|length }}</h4>
+                    <p class="card-text small">Usuarios con Permisos</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card permissions-card text-center">
+                <div class="card-body">
+                    <i class="fas fa-check-circle fa-2x mb-2"></i>
+                    <h4 class="card-title mb-0">{{ approved_permissions|length }}</h4>
+                    <p class="card-text small">Permisos Activos</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card permissions-card text-center">
+                <div class="card-body">
+                    <i class="fas fa-folder fa-2x mb-2"></i>
+                    <h4 class="card-title mb-0">
+                        {% set unique_folders = [] %}
+                        {% for user_data in permissions_by_user.values() %}
+                            {% for folder_data in user_data.folders.values() %}
+                                {% if folder_data.folder.id not in unique_folders %}
+                                    {% set _ = unique_folders.append(folder_data.folder.id) %}
+                                {% endif %}
+                            {% endfor %}
+                        {% endfor %}
+                        {{ unique_folders|length }}
+                    </h4>
+                    <p class="card-text small">Carpetas con usuarios</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card permissions-card text-center">
+                <div class="card-body">
+                    <i class="fas fa-shield-alt fa-2x mb-2"></i>
+                    <h4 class="card-title mb-0">
+                        {% set unique_groups = [] %}
+                        {% for permission in approved_permissions %}
+                            {% if permission.ad_group and permission.ad_group.name not in unique_groups %}
+                                {% set _ = unique_groups.append(permission.ad_group.name) %}
+                            {% endif %}
+                        {% endfor %}
+                        {{ unique_groups|length }}
+                    </h4>
+                    <p class="card-text small">Grupos AD Utilizados</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden CSRF Token for JavaScript -->
+    <input type="hidden" id="csrf_token" name="csrf_token" value="{{ csrf_token() }}">
+    
+    <!-- Search and Filters -->
+    <div class="search-container">
+        <form method="GET" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">Buscar Usuario</label>
+                <div class="position-relative">
+                    <input type="text" name="user_search" class="form-control search-input" 
+                           placeholder="Buscar por nombre de usuario..." value="{{ user_search }}">
+                    <i class="fas fa-search search-icon"></i>
+                </div>
+            </div>
+            <div class="col-md-5">
+                <label class="form-label">Carpeta</label>
+                <div class="combobox-container">
+                    <input type="text" class="combobox-input" id="folderComboboxInput" 
+                           placeholder="📁 Buscar carpeta..." value="{{ folder_search or '' }}">
+                    <div class="combobox-dropdown" id="folderComboboxDropdown">
+                        <div class="combobox-option" data-value="">
+                            <span class="folder-icon">🗂️</span>
+                            <div class="folder-info">
+                                <div class="folder-path">Todas las carpetas</div>
+                            </div>
+                        </div>
+                        {% for folder in all_folders %}
+                            <div class="combobox-option" data-value="{{ folder.id }}" {% if folder.id|string == request.args.get('folder_id', '') %}class="selected"{% endif %}>
+                                <span class="folder-icon">📁</span>
+                                <div class="folder-info">
+                                    <div class="folder-path">{{ folder.name }}</div>
+                                    <div class="folder-description">{{ folder.path }}</div>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                    <input type="hidden" name="folder_id" id="folder_id" value="{{ request.args.get('folder_id', '') }}">
+                </div>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Tipo de Permiso</label>
+                <select name="permission_type" class="form-select">
+                    <option value="all" {% if filters.permission_type == 'all' %}selected{% endif %}>
+                        Todos los permisos
+                    </option>
+                    <option value="read" {% if filters.permission_type == 'read' %}selected{% endif %}>
+                        Solo lectura
+                    </option>
+                    <option value="write" {% if filters.permission_type == 'write' %}selected{% endif %}>
+                        Solo escritura
+                    </option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">&nbsp;</label>
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="fas fa-filter me-2"></i>Filtrar
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Results Summary -->
+    {% if permissions_by_user %}
+        <div class="row mb-3">
+            <div class="col-12 text-end">
+                <span class="text-muted">
+                    <i class="fas fa-info-circle me-1"></i>
+                    {{ permissions_by_user|length }} usuario(s) con permisos activos | {{ approved_permissions|length }} permiso(s) total
+                </span>
+            </div>
+        </div>
+
+        <!-- Active Permissions Table -->
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-list me-2"></i>Permisos Activos por Usuario
+                    </h5>
+                    {% if pagination %}
+                    <small class="text-muted">
+                        <i class="fas fa-info-circle me-1"></i>
+                        {{ pagination.total }} usuario(s) con permisos | 
+                        {{ approved_permissions|length }} permiso(s) total
+                        {% if pagination.pages > 1 %}
+                            | Página {{ pagination.page }} de {{ pagination.pages }}
+                        {% endif %}
+                    </small>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover permissions-table">
+                        <thead>
+                            <tr>
+                                <th><i class="fas fa-user me-2"></i>Usuario</th>
+                                <th><i class="fas fa-folder me-2"></i>Carpeta</th>
+                                <th><i class="fas fa-route me-2"></i>Ruta</th>
+                                <th><i class="fas fa-key me-2"></i>Tipo de Permiso</th>
+                                <th><i class="fas fa-users me-2"></i>Grupo AD</th>
+                                <th><i class="fas fa-check me-2"></i>Validado Por</th>
+                                <th><i class="fas fa-calendar me-2"></i>Fecha Aprobación</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for user_id, user_data in permissions_by_user.items() %}
+                                {% set user = user_data.user %}
+                                {% for folder_id, folder_data in user_data.folders.items() %}
+                                    {% set folder = folder_data.folder %}
+                                    {% for permission in folder_data.permissions %}
+                                        <tr>
+                                            <td>
+                                                <div class="d-flex flex-column">
+                                                    <strong class="text-primary">
+                                                        <i class="fas fa-user me-2"></i>{{ user.full_name or user.username }}
+                                                    </strong>
+                                                    <small class="text-muted">{{ user.username }}</small>
+                                                    {% if user.department %}
+                                                        <small class="text-muted">{{ user.department }}</small>
+                                                    {% endif %}
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div class="d-flex flex-column">
+                                                    <strong class="text-success">
+                                                        <i class="fas fa-folder me-2"></i>{{ folder.name }}
+                                                    </strong>
+                                                    {% if folder.description %}
+                                                        <small class="text-muted">{{ folder.description }}</small>
+                                                    {% endif %}
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <code class="text-muted">{{ folder.path }}</code>
+                                            </td>
+                                            <td>
+                                                {% if permission.permission_type == 'read' %}
+                                                    <span class="badge bg-success permission-badge">
+                                                        <i class="fas fa-eye me-1"></i>Lectura
+                                                    </span>
+                                                {% else %}
+                                                    <span class="badge bg-warning permission-badge">
+                                                        <i class="fas fa-edit me-1"></i>Escritura
+                                                    </span>
+                                                {% endif %}
+                                                {% if permission.source is defined and permission.source == 'ad_sync' %}
+                                                    <span class="badge bg-info permission-badge ms-1">
+                                                        <i class="fas fa-sync-alt me-1"></i>Sincronizado
+                                                    </span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if permission.ad_group %}
+                                                    <span class="badge bg-info permission-badge">
+                                                        <i class="fas fa-users me-1"></i>{{ permission.ad_group.name }}
+                                                    </span>
+                                                {% else %}
+                                                    <span class="text-muted">Sin grupo asignado</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if permission.validator %}
+                                                    <small>
+                                                        <i class="fas fa-user-check me-1"></i>
+                                                        {{ permission.validator.full_name or permission.validator.username }}
+                                                    </small>
+                                                {% elif permission.source is defined and permission.source == 'ad_sync' %}
+                                                    <small class="text-info">
+                                                        <i class="fas fa-sync-alt me-1"></i>
+                                                        Sincronización AD
+                                                    </small>
+                                                {% else %}
+                                                    <span class="text-muted">Sistema</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <small>
+                                                    {% if permission.validated_at %}
+                                                        <i class="fas fa-calendar me-1"></i>
+                                                        {{ permission.validated_at.strftime('%d/%m/%Y %H:%M') }}
+                                                    {% elif permission.source is defined and permission.source == 'ad_sync' %}
+                                                        <i class="fas fa-sync-alt me-1"></i>
+                                                        <span class="text-info">Sincronizado</span>
+                                                    {% else %}
+                                                        <span class="text-muted">N/A</span>
+                                                    {% endif %}
+                                                </small>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                {% endfor %}
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Pagination Controls -->
+                {% if pagination and pagination.pages > 1 %}
+                <div class="d-flex justify-content-center my-3">
+                    <nav aria-label="Paginación de registros">
+                        <ul class="pagination">
+                            <!-- Previous Page -->
+                            <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+                                {% if pagination.has_prev %}
+                                    <a class="page-link" href="{{ url_for('admin.active_permissions_report', 
+                                        page=pagination.prev_num, 
+                                        per_page=pagination.per_page,
+                                        folder_id=folder_id or '',
+                                        user_search=user_search or '',
+                                        permission_type=filters.permission_type or 'all') }}" aria-label="Anterior">
+                                        <span aria-hidden="true">&laquo;</span>
+                                    </a>
+                                {% else %}
+                                    <span class="page-link">&laquo;</span>
+                                {% endif %}
+                            </li>
+                            
+                            <!-- Page Numbers -->
+                            {% for page_num in range(1, pagination.pages + 1) %}
+                                {% if page_num <= 3 or page_num > pagination.pages - 3 or (page_num >= pagination.page - 1 and page_num <= pagination.page + 1) %}
+                                    <li class="page-item {% if page_num == pagination.page %}active{% endif %}">
+                                        <a class="page-link" href="{{ url_for('admin.active_permissions_report', 
+                                            page=page_num, 
+                                            per_page=pagination.per_page,
+                                            folder_id=folder_id or '',
+                                            user_search=user_search or '',
+                                            permission_type=filters.permission_type or 'all') }}">{{ page_num }}</a>
+                                    </li>
+                                {% elif page_num == 4 and pagination.page > 5 %}
+                                    <li class="page-item disabled">
+                                        <span class="page-link">...</span>
+                                    </li>
+                                {% elif page_num == pagination.pages - 3 and pagination.page < pagination.pages - 4 %}
+                                    <li class="page-item disabled">
+                                        <span class="page-link">...</span>
+                                    </li>
+                                {% endif %}
+                            {% endfor %}
+                            
+                            <!-- Next Page -->
+                            <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+                                {% if pagination.has_next %}
+                                    <a class="page-link" href="{{ url_for('admin.active_permissions_report', 
+                                        page=pagination.next_num, 
+                                        per_page=pagination.per_page,
+                                        folder_id=folder_id or '',
+                                        user_search=user_search or '',
+                                        permission_type=filters.permission_type or 'all') }}" aria-label="Siguiente">
+                                        <span aria-hidden="true">&raquo;</span>
+                                    </a>
+                                {% else %}
+                                    <span class="page-link">&raquo;</span>
+                                {% endif %}
+                            </li>
+                        </ul>
+                    </nav>
+                </div>
+                
+                <!-- Per Page Selector -->
+                <div class="d-flex justify-content-center mb-3">
+                    <div class="btn-group" role="group" aria-label="Registros por página">
+                        <span class="input-group-text">Registros por página:</span>
+                        {% for per_page_option in [10, 20, 50, 100] %}
+                            <a href="{{ url_for('admin.active_permissions_report', 
+                                page=1, 
+                                per_page=per_page_option,
+                                folder_id=folder_id or '',
+                                user_search=user_search or '',
+                                permission_type=filters.permission_type or 'all') }}" 
+                               class="btn btn-outline-primary {% if pagination.per_page == per_page_option %}active{% endif %}">
+                                {{ per_page_option }}
+                            </a>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+            <div class="card-footer text-muted">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <small>
+                            <i class="fas fa-clock me-1"></i>
+                            Reporte generado el {{ now.strftime('%d/%m/%Y %H:%M:%S') }}
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% else %}
+        <!-- Empty State -->
+        <div class="empty-state">
+            <i class="fas fa-users"></i>
+            <h4>No hay permisos activos</h4>
+            <p>No se encontraron usuarios con permisos aprobados según los filtros aplicados.</p>
+            <a href="{{ url_for('admin.admin_dashboard') }}" class="btn btn-primary">
+                <i class="fas fa-arrow-left me-1"></i>
+                Volver al Panel
+            </a>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize folder combobox
+    initializeCombobox('folderComboboxInput', 'folderComboboxDropdown', 'folder_id');
+    
+    // Auto-submit form on select change
+    const selects = document.querySelectorAll('select[name="permission_type"]');
+    selects.forEach(select => {
+        select.addEventListener('change', function() {
+            this.form.submit();
+        });
+    });
+    
+    // Search input enter key handler
+    const searchInput = document.querySelector('input[name="user_search"]');
+    if (searchInput) {
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                this.form.submit();
+            }
+        });
+    }
+    
+    // Auto-refresh functionality (optional)
+    // Uncomment if you want auto-refresh every 5 minutes
+    // setInterval(() => {
+    //     window.location.reload();
+    // }, 300000); // 5 minutes
+    
+    // Combobox initialization function
+    function initializeCombobox(inputId, dropdownId, hiddenInputId) {
+        const input = document.getElementById(inputId);
+        const dropdown = document.getElementById(dropdownId);
+        const hiddenInput = document.getElementById(hiddenInputId);
+        
+        if (!input || !dropdown || !hiddenInput) {
+            console.error(`Error initializing combobox: missing elements for ${inputId}`);
+            return;
+        }
+        
+        let currentSelection = -1;
+        let filteredOptions = [];
+        let allOptions = [];
+        
+        function initializeOptions() {
+            const options = dropdown.querySelectorAll('.combobox-option');
+            allOptions = Array.from(options).map(option => {
+                const pathElement = option.querySelector('.folder-path');
+                const descriptionElement = option.querySelector('.folder-description');
+                
+                return {
+                    element: option,
+                    value: option.dataset.value || '',
+                    text: option.textContent.toLowerCase(),
+                    pathText: pathElement ? pathElement.textContent : '',
+                    descriptionText: descriptionElement ? descriptionElement.textContent : ''
+                };
+            });
+            filteredOptions = [...allOptions];
+            
+            // Set initial selected state based on hidden input value
+            const currentValue = hiddenInput.value;
+            if (currentValue) {
+                const selectedOption = allOptions.find(opt => opt.value === currentValue);
+                if (selectedOption) {
+                    input.value = selectedOption.pathText;
+                    selectedOption.element.classList.add('selected');
+                }
+            }
+        }
+        
+        function filterOptions(searchTerm) {
+            const term = searchTerm.toLowerCase().trim();
+            filteredOptions = allOptions.filter(option => 
+                option.pathText.toLowerCase().includes(term) ||
+                option.descriptionText.toLowerCase().includes(term) ||
+                option.text.includes(term)
+            );
+            renderOptions(filteredOptions);
+        }
+        
+        function renderOptions(options) {
+            // Clear existing options
+            dropdown.innerHTML = '';
+            
+            if (options.length === 0) {
+                // Show no results message
+                const noResults = document.createElement('div');
+                noResults.className = 'no-results combobox-option';
+                noResults.innerHTML = '<span class="folder-icon">🚫</span><div class="folder-info"><div class="folder-path">No se encontraron resultados</div></div>';
+                dropdown.appendChild(noResults);
+                return;
+            }
+            
+            options.forEach((option, index) => {
+                const clonedOption = option.element.cloneNode(true);
+                clonedOption.addEventListener('click', () => selectOption(option));
+                dropdown.appendChild(clonedOption);
+            });
+            
+            currentSelection = -1;
+        }
+        
+        function selectOption(option) {
+            // Clear all selected states
+            allOptions.forEach(opt => opt.element.classList.remove('selected'));
+            
+            // Set new selection
+            option.element.classList.add('selected');
+            input.value = option.pathText;
+            hiddenInput.value = option.value;
+            
+            dropdown.classList.remove('show');
+            
+            // Auto-submit the form
+            input.closest('form').submit();
+        }
+        
+        // Event listeners
+        input.addEventListener('focus', () => {
+            dropdown.classList.add('show');
+            renderOptions(filteredOptions);
+        });
+        
+        input.addEventListener('input', (e) => {
+            filterOptions(e.target.value);
+            dropdown.classList.add('show');
+        });
+        
+        input.addEventListener('keydown', (e) => {
+            if (!dropdown.classList.contains('show')) return;
+            
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                currentSelection = Math.min(currentSelection + 1, filteredOptions.length - 1);
+                updateSelection();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                currentSelection = Math.max(currentSelection - 1, -1);
+                updateSelection();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (currentSelection >= 0 && filteredOptions[currentSelection]) {
+                    selectOption(filteredOptions[currentSelection]);
+                }
+            } else if (e.key === 'Escape') {
+                dropdown.classList.remove('show');
+            }
+        });
+        
+        function updateSelection() {
+            const options = dropdown.querySelectorAll('.combobox-option');
+            options.forEach((option, index) => {
+                option.classList.toggle('hover', index === currentSelection);
+            });
+        }
+        
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            const comboboxContainer = input.closest('.combobox-container');
+            if (!comboboxContainer || !comboboxContainer.contains(e.target)) {
+                dropdown.classList.remove('show');
+            }
+        });
+        
+        // Initialize
+        try {
+            initializeOptions();
+            renderOptions(allOptions);
+        } catch (error) {
+            console.error(`Error initializing combobox ${inputId}:`, error);
+        }
+    }
+});
+
+// Get CSRF token helper function
+function getCsrfToken() {
+    // First, try to find a hidden CSRF token field by ID
+    const csrfElementById = document.querySelector('input#csrf_token');
+    if (csrfElementById && csrfElementById.value) {
+        console.log('CSRF token found by ID:', csrfElementById.value);
+        return csrfElementById.value;
+    }
+    
+    // Second, try to find by name attribute
+    const csrfElement = document.querySelector('input[name="csrf_token"]');
+    if (csrfElement && csrfElement.value) {
+        console.log('CSRF token found by name:', csrfElement.value);
+        return csrfElement.value;
+    }
+    
+    // Try to get from meta tag
+    const metaElement = document.querySelector('meta[name="csrf-token"]');
+    if (metaElement) {
+        const content = metaElement.getAttribute('content');
+        if (content) {
+            console.log('CSRF token found in meta tag:', content);
+            return content;
+        }
+    }
+    
+    // Fallback: try to get from cookies (if using Cookie-based CSRF)
+    const cookies = document.cookie.split(';');
+    for (let cookie of cookies) {
+        const [name, value] = cookie.trim().split('=');
+        if (name === 'csrf_token') {
+            console.log('CSRF token found in cookie:', value);
+            return value;
+        }
+    }
+    
+    console.warn('No CSRF token found');
+    return null;
+}
+
+// Background sync users from AD using Celery task
+function syncUsersFromAD() {
+    // Execute directly without modal confirmation
+    
+    // Show loading state
+    const button = document.querySelector('button[onclick="syncUsersFromAD()"]');
+    const originalContent = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-tasks fa-spin"></i> Iniciando tarea...';
+    
+    // Get CSRF token
+    const csrfToken = getCsrfToken();
+    if (!csrfToken) {
+        alert('Error: No se pudo obtener el token CSRF');
+        button.disabled = false;
+        button.innerHTML = originalContent;
+        return;
+    }
+    
+    // Make request to start background task (using working version)
+    fetch('/admin/folders/sync-users-from-ad-old', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        }
+    })
+    .then(response => {
+        console.log('Response status:', response.status);
+        if (!response.ok) {
+            return response.text().then(text => {
+                console.log('Error response body:', text);
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success && data.background_task) {
+            // Background task started successfully
+            showBackgroundTaskModal(data.task_id, data.message);
+        } else if (data.success) {
+            // Synchronous task completed (fallback)
+            showSyncResultsModal(data);
+        } else {
+            alert('Error: ' + (data.error || 'Error desconocido en la sincronización'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error de conexión durante la sincronización: ' + error.message);
+    })
+    .finally(() => {
+        // Restore button state
+        button.disabled = false;
+        button.innerHTML = originalContent;
+    });
+}
+
+// Show background task modal with progress tracking
+function showBackgroundTaskModal(taskId, message) {
+    const modalId = 'backgroundTaskModal';
+    
+    // Remove existing modal if present
+    const existingModal = document.getElementById(modalId);
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
+    const modal = document.createElement('div');
+    modal.className = 'modal fade';
+    modal.id = modalId;
+    modal.setAttribute('data-bs-backdrop', 'static');
+    modal.setAttribute('data-bs-keyboard', 'false');
+    modal.innerHTML = `
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header" style="background: linear-gradient(135deg, #0d6efd 0%, #6610f2 100%); color: white;">
+                    <h5 class="modal-title">
+                        <i class="fas fa-tasks me-2"></i> Sincronización en Background
+                    </h5>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i>
+                        <strong>${message}</strong>
+                    </div>
+                    
+                    <div class="text-center mb-3">
+                        <div class="spinner-border text-primary" role="status" id="taskSpinner">
+                            <span class="visually-hidden">Cargando...</span>
+                        </div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header">
+                            <h6 class="mb-0"><i class="fas fa-chart-line me-2"></i>Progreso de la Tarea</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <span class="text-muted">Estado:</span>
+                                    <span id="taskStatus" class="badge bg-info">INICIANDO</span>
+                                </div>
+                                <div class="progress mb-2">
+                                    <div id="taskProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                                         role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                                        0%
+                                    </div>
+                                </div>
+                                <div class="d-flex justify-content-between">
+                                    <small class="text-muted" id="taskMessage">Preparando sincronización...</small>
+                                    <small class="text-muted" id="taskProgress">0/0</small>
+                                </div>
+                            </div>
+                            
+                            <div id="taskResults" style="display: none;">
+                                <!-- Results will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3">
+                        <small class="text-muted">
+                            <i class="fas fa-clock me-1"></i>
+                            <strong>Task ID:</strong> ${taskId}
+                        </small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="cancelBackgroundTask('${taskId}')" id="cancelTaskBtn">
+                        <i class="fas fa-times me-1"></i> Cancelar
+                    </button>
+                    <button type="button" class="btn btn-success" onclick="location.reload()" style="display: none;" id="refreshPageBtn">
+                        <i class="fas fa-sync-alt me-1"></i> Actualizar Página
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    const bootstrapModal = new bootstrap.Modal(modal);
+    bootstrapModal.show();
+    
+    // Start polling task status
+    pollTaskStatus(taskId, modalId);
+    
+    // Clean up modal after it's hidden
+    modal.addEventListener('hidden.bs.modal', function() {
+        this.remove();
+    });
+}
+
+// Poll task status and update the modal
+function pollTaskStatus(taskId, modalId) {
+    const pollInterval = setInterval(() => {
+        fetch(`/admin/folders/sync-task-status/${taskId}`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken()
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            updateTaskModal(data, modalId);
+            
+            // Stop polling if task is complete or failed
+            if (data.state === 'SUCCESS' || data.state === 'FAILURE') {
+                clearInterval(pollInterval);
+                handleTaskCompletion(data, modalId);
+            }
+        })
+        .catch(error => {
+            console.error('Error polling task status:', error);
+            clearInterval(pollInterval);
+        });
+    }, 2000); // Poll every 2 seconds
+}
+
+// Update task modal with current status
+function updateTaskModal(data, modalId) {
+    const modal = document.getElementById(modalId);
+    if (!modal) return;
+    
+    const statusElement = modal.querySelector('#taskStatus');
+    const progressBar = modal.querySelector('#taskProgressBar');
+    const messageElement = modal.querySelector('#taskMessage');
+    const progressElement = modal.querySelector('#taskProgress');
+    
+    // Update status badge
+    if (statusElement) {
+        let statusClass = 'bg-info';
+        if (data.state === 'SUCCESS') statusClass = 'bg-success';
+        else if (data.state === 'FAILURE') statusClass = 'bg-danger';
+        else if (data.state === 'PROGRESS') statusClass = 'bg-warning';
+        
+        statusElement.className = `badge ${statusClass}`;
+        statusElement.textContent = data.state;
+    }
+    
+    // Update progress bar
+    if (progressBar && data.meta) {
+        const current = data.meta.current || 0;
+        const total = data.meta.total || 100;
+        const percentage = total > 0 ? Math.round((current / total) * 100) : 0;
+        
+        progressBar.style.width = `${percentage}%`;
+        progressBar.setAttribute('aria-valuenow', percentage);
+        progressBar.textContent = `${percentage}%`;
+        
+        if (progressElement) {
+            progressElement.textContent = `${current}/${total}`;
+        }
+    }
+    
+    // Update message
+    if (messageElement && data.meta && data.meta.message) {
+        messageElement.textContent = data.meta.message;
+    }
+}
+
+// Handle task completion (success or failure)
+function handleTaskCompletion(data, modalId) {
+    const modal = document.getElementById(modalId);
+    if (!modal) return;
+    
+    const spinner = modal.querySelector('#taskSpinner');
+    const cancelBtn = modal.querySelector('#cancelTaskBtn');
+    const refreshBtn = modal.querySelector('#refreshPageBtn');
+    const resultsDiv = modal.querySelector('#taskResults');
+    
+    // Hide spinner and cancel button, show refresh button
+    if (spinner) spinner.style.display = 'none';
+    if (cancelBtn) cancelBtn.style.display = 'none';
+    if (refreshBtn) refreshBtn.style.display = 'inline-block';
+    
+    if (data.state === 'SUCCESS' && data.result) {
+        // Show success results
+        if (resultsDiv) {
+            resultsDiv.style.display = 'block';
+            resultsDiv.innerHTML = `
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle"></i>
+                    <strong>¡Sincronización completada exitosamente!</strong>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <ul class="list-unstyled">
+                            <li><i class="fas fa-folder text-info me-2"></i><strong>Carpetas procesadas:</strong> ${data.result.folders_processed || 0}</li>
+                            <li><i class="fas fa-user-plus text-success me-2"></i><strong>Usuarios sincronizados:</strong> ${data.result.users_synced || 0}</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <ul class="list-unstyled">
+                            <li><i class="fas fa-users text-primary me-2"></i><strong>Membresías creadas:</strong> ${data.result.memberships_created || 0}</li>
+                            <li><i class="fas fa-exclamation-triangle text-warning me-2"></i><strong>Errores:</strong> ${data.result.errors ? data.result.errors.length : 0}</li>
+                        </ul>
+                    </div>
+                </div>
+            `;
+        }
+    } else if (data.state === 'FAILURE') {
+        // Show error message
+        if (resultsDiv) {
+            resultsDiv.style.display = 'block';
+            resultsDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <strong>Error en la sincronización:</strong> ${data.meta && data.meta.error ? data.meta.error : 'Error desconocido'}
+                </div>
+            `;
+        }
+    }
+}
+
+// Cancel background task
+function cancelBackgroundTask(taskId) {
+    if (confirm('¿Está seguro de que desea cancelar la sincronización?')) {
+        // Close modal
+        const modal = document.getElementById('backgroundTaskModal');
+        if (modal) {
+            const bootstrapModal = bootstrap.Modal.getInstance(modal);
+            if (bootstrapModal) {
+                bootstrapModal.hide();
+            }
+        }
+    }
+}
+
+// Show sync results in a modal
+function showSyncResultsModal(data) {
+    const modalId = 'syncResultsModal';
+    
+    // Remove existing modal if present
+    const existingModal = document.getElementById(modalId);
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
+    const modal = document.createElement('div');
+    modal.className = 'modal fade';
+    modal.id = modalId;
+    modal.innerHTML = `
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header" style="background: linear-gradient(135deg, #198754 0%, #20c997 100%); color: white;">
+                    <h5 class="modal-title">
+                        <i class="fas fa-users-cog me-2"></i> Sincronización de Usuarios AD
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-success">
+                        <i class="fas fa-check-circle"></i>
+                        <strong>¡Sincronización completada exitosamente!</strong>
+                    </div>
+                    
+                    <!-- Summary Cards -->
+                    <div class="row mb-4">
+                        <div class="col-md-3">
+                            <div class="card text-center border-info bg-light">
+                                <div class="card-body">
+                                    <i class="fas fa-folder text-info fa-2x mb-2"></i>
+                                    <h5 class="card-title text-dark">${data.summary.folders_processed}</h5>
+                                    <p class="card-text small text-muted">Carpetas Procesadas</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card text-center border-success bg-light">
+                                <div class="card-body">
+                                    <i class="fas fa-user-plus text-success fa-2x mb-2"></i>
+                                    <h5 class="card-title text-dark">${data.summary.users_synced}</h5>
+                                    <p class="card-text small text-muted">Usuarios Sincronizados</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card text-center border-primary bg-light">
+                                <div class="card-body">
+                                    <i class="fas fa-users text-primary fa-2x mb-2"></i>
+                                    <h5 class="card-title text-dark">${data.summary.memberships_created}</h5>
+                                    <p class="card-text small text-muted">Membresías Creadas</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card text-center ${data.summary.errors_count > 0 ? 'border-warning bg-warning-subtle' : 'border-secondary bg-light'}">
+                                <div class="card-body">
+                                    <i class="fas fa-exclamation-triangle ${data.summary.errors_count > 0 ? 'text-warning' : 'text-secondary'} fa-2x mb-2"></i>
+                                    <h5 class="card-title ${data.summary.errors_count > 0 ? 'text-dark' : 'text-dark'}">${data.summary.errors_count}</h5>
+                                    <p class="card-text small ${data.summary.errors_count > 0 ? 'text-dark' : 'text-muted'}">Errores</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Optimization Information -->
+                    ${data.summary.optimizations_applied ? `
+                        <div class="alert alert-warning border-warning mb-4">
+                            <div class="d-flex align-items-center mb-2">
+                                ${data.summary.optimizations_applied.ultra_fast_mode ? `
+                                    <i class="fas fa-bolt text-warning me-2"></i>
+                                    <h6 class="mb-0 text-dark"><strong>⚡ Modo Ultra-Rápido</strong></h6>
+                                ` : `
+                                    <i class="fas fa-rocket text-info me-2"></i>
+                                    <h6 class="mb-0 text-dark"><strong>🚀 Optimizaciones Aplicadas</strong></h6>
+                                `}
+                            </div>
+                            <div class="row g-2">
+                                <div class="col-md-6">
+                                    ${data.summary.optimizations_applied.ultra_fast_mode ? `
+                                        <small class="text-muted">• Procesamiento omitido: <strong>✓ Activado</strong></small><br>
+                                        <small class="text-muted">• Tiempo límite: <strong>60 segundos</strong></small>
+                                    ` : `
+                                        <small class="text-muted">• Procesamiento en lotes: <strong>✓ Activado</strong></small><br>
+                                        <small class="text-muted">• Prevención de timeouts: <strong>✓ Activado</strong></small>
+                                    `}
+                                </div>
+                            </div>
+                            <div class="mt-2">
+                                <small class="text-muted">⏱️ <strong>Tiempo de ejecución:</strong> ${data.summary.execution_time_seconds}s</small>
+                            </div>
+                            ${data.summary.large_groups_processed > 0 ? `
+                                <div class="mt-2">
+                                    <small class="text-success">✅ <strong>${data.summary.large_groups_processed}</strong> grupos grandes procesados completamente (sin omisiones)</small>
+                                </div>
+                            ` : ''}
+                        </div>
+                    ` : ''}
+                    
+                    <!-- Detailed Information -->
+                    <div class="accordion" id="syncDetailsAccordion">
+                        <div class="accordion-item border-0 rounded">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed bg-light text-dark border-0 rounded-top" 
+                                        type="button" data-bs-toggle="collapse" data-bs-target="#syncDetails"
+                                        style="box-shadow: none;">
+                                    <i class="fas fa-info-circle me-2 text-primary"></i> 
+                                    <strong>Detalles de la Sincronización</strong>
+                                </button>
+                            </h2>
+                            <div id="syncDetails" class="accordion-collapse collapse" 
+                                 data-bs-parent="#syncDetailsAccordion">
+                                <div class="accordion-body bg-white border rounded-bottom">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <ul class="list-unstyled">
+                                                <li class="mb-2">
+                                                    <i class="fas fa-folder-open text-info me-2"></i>
+                                                    <strong class="text-dark">Total de carpetas:</strong> 
+                                                    <span class="badge bg-info">${data.summary.total_folders_in_system || data.summary.total_folders}</span>
+                                                </li>
+                                                <li class="mb-2">
+                                                    <i class="fas fa-check-circle text-success me-2"></i>
+                                                    <strong class="text-dark">Carpetas procesadas:</strong> 
+                                                    <span class="badge bg-success">${data.summary.folders_processed}</span>
+                                                </li>
+                                                <li class="mb-2">
+                                                    <i class="fas fa-user-plus text-primary me-2"></i>
+                                                    <strong class="text-dark">Usuarios sincronizados:</strong> 
+                                                    <span class="badge bg-primary">${data.summary.users_synced}</span>
+                                                </li>
+                                            </ul>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <ul class="list-unstyled">
+                                                <li class="mb-2">
+                                                    <i class="fas fa-users text-info me-2"></i>
+                                                    <strong class="text-dark">Membresías AD creadas:</strong> 
+                                                    <span class="badge bg-info">${data.summary.memberships_created}</span>
+                                                </li>
+                                                <li class="mb-2">
+                                                    <i class="fas fa-exclamation-triangle ${data.summary.errors_count > 0 ? 'text-warning' : 'text-secondary'} me-2"></i>
+                                                    <strong class="text-dark">Errores encontrados:</strong> 
+                                                    <span class="badge ${data.summary.errors_count > 0 ? 'bg-warning text-dark' : 'bg-secondary'}">${data.summary.errors_count}</span>
+                                                </li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                    
+                                    ${data.errors && data.errors.length > 0 ? `
+                                        <hr class="my-3">
+                                        <div class="alert alert-warning border-warning">
+                                            <div class="d-flex align-items-center mb-2">
+                                                <i class="fas fa-exclamation-triangle text-warning me-2"></i>
+                                                <h6 class="mb-0 text-dark"><strong>Errores encontrados:</strong></h6>
+                                            </div>
+                                            <ul class="mb-0 text-dark">
+                                                ${data.errors.map(error => `<li class="mb-1">${error}</li>`).join('')}
+                                            </ul>
+                                        </div>
+                                    ` : `
+                                        <hr class="my-3">
+                                        <div class="alert alert-success border-success">
+                                            <div class="d-flex align-items-center">
+                                                <i class="fas fa-check-circle text-success me-2"></i>
+                                                <span class="text-dark"><strong>¡Sincronización completada sin errores!</strong></span>
+                                            </div>
+                                        </div>
+                                    `}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-1"></i> Cerrar
+                    </button>
+                    <button type="button" class="btn btn-success" onclick="location.reload()">
+                        <i class="fas fa-sync-alt me-1"></i> Actualizar Página
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    const bootstrapModal = new bootstrap.Modal(modal);
+    bootstrapModal.show();
+    
+    // Clean up modal after it's hidden
+    modal.addEventListener('hidden.bs.modal', function() {
+        this.remove();
+    });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solicitud de Validación de Permiso</title>
+    <style>
+        /* Reset styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f8f9fa;
+        }
+        
+        .email-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+            color: white;
+            padding: 30px 25px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        
+        .header p {
+            font-size: 16px;
+            opacity: 0.9;
+        }
+        
+        .content {
+            padding: 30px 25px;
+        }
+        
+        .greeting {
+            font-size: 16px;
+            margin-bottom: 20px;
+            color: #495057;
+        }
+        
+        .request-details {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .detail-row {
+            display: flex;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+        
+        .detail-row:last-child {
+            margin-bottom: 0;
+        }
+        
+        .detail-label {
+            font-weight: 600;
+            color: #495057;
+            min-width: 140px;
+            margin-bottom: 4px;
+        }
+        
+        .detail-value {
+            color: #212529;
+            flex: 1;
+        }
+        
+        .justification-section, .business-need-section {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .section-title {
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 8px;
+        }
+        
+        .section-content {
+            color: #212529;
+            background-color: #ffffff;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #e9ecef;
+            white-space: pre-wrap;
+            line-height: 1.5;
+        }
+        
+        .action-buttons {
+            text-align: center;
+            margin: 30px 0;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 14px 28px;
+            margin: 0 8px;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 16px;
+            text-align: center;
+            transition: all 0.3s ease;
+            min-width: 130px;
+        }
+        
+        .btn-approve {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            border: 2px solid #28a745;
+        }
+        
+        .btn-approve:hover {
+            background: linear-gradient(135deg, #218838 0%, #1e7e34 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(40, 167, 69, 0.3);
+        }
+        
+        .btn-reject {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            color: white;
+            border: 2px solid #dc3545;
+        }
+        
+        .btn-reject:hover {
+            background: linear-gradient(135deg, #c82333 0%, #bd2130 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(220, 53, 69, 0.3);
+        }
+        
+        .web-access {
+            background-color: #e9ecef;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .web-access p {
+            margin-bottom: 15px;
+            color: #495057;
+        }
+        
+        .btn-web {
+            background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+            color: white;
+            border: 2px solid #6c757d;
+        }
+        
+        .btn-web:hover {
+            background: linear-gradient(135deg, #5a6268 0%, #343a40 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(108, 117, 125, 0.3);
+        }
+        
+        .priority-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-left: 8px;
+        }
+        
+        .priority-normal {
+            background-color: #e3f2fd;
+            color: #1976d2;
+        }
+        
+        .priority-high {
+            background-color: #fff3e0;
+            color: #f57c00;
+        }
+        
+        .priority-urgent {
+            background-color: #ffebee;
+            color: #d32f2f;
+        }
+        
+        .footer {
+            background-color: #f8f9fa;
+            padding: 20px 25px;
+            border-top: 1px solid #e9ecef;
+            text-align: center;
+        }
+        
+        .footer p {
+            font-size: 12px;
+            color: #6c757d;
+            margin-bottom: 8px;
+        }
+        
+        .footer p:last-child {
+            margin-bottom: 0;
+        }
+        
+        .company-logo {
+            font-size: 20px;
+            font-weight: 700;
+            color: #007bff;
+            margin-bottom: 10px;
+        }
+        
+        /* Responsive design */
+        @media (max-width: 600px) {
+            .email-container {
+                margin: 10px;
+                width: calc(100% - 20px);
+            }
+            
+            .header, .content, .footer {
+                padding: 20px 15px;
+            }
+            
+            .btn {
+                display: block;
+                margin: 8px 0;
+                width: 100%;
+            }
+            
+            .detail-row {
+                flex-direction: column;
+            }
+            
+            .detail-label {
+                min-width: auto;
+                margin-bottom: 4px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <!-- Header -->
+        <div class="header">
+            <div class="company-logo">
+                <i class="fas fa-folder-lock"></i> SAR
+            </div>
+            <h1>Nueva Solicitud de Validación</h1>
+            <p>Requiere su aprobación</p>
+        </div>
+        
+        <!-- Content -->
+        <div class="content">
+            <div class="greeting">
+                Estimado/a <strong>{{ validator.full_name }}</strong>,
+            </div>
+            
+            <p>Se ha recibido una nueva solicitud de permiso de carpeta que requiere su validación. Los detalles de la solicitud son los siguientes:</p>
+            
+            <!-- Request Details -->
+            <div class="request-details">
+                <div class="detail-row">
+                    <div class="detail-label">Solicitante:</div>
+                    <div class="detail-value">
+                        <strong>{{ permission_request.requester.full_name }}</strong> 
+                        ({{ permission_request.requester.username }})
+                        {% if permission_request.requester.department %}
+                        <br><small style="color: #6c757d;">{{ permission_request.requester.department }}</small>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="detail-row">
+                    <div class="detail-label">Carpeta:</div>
+                    <div class="detail-value">
+                        <strong>{{ permission_request.folder.path }}</strong>
+                        {% if permission_request.folder.description %}
+                        <br><small style="color: #6c757d;">{{ permission_request.folder.description }}</small>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="detail-row">
+                    <div class="detail-label">Grupo AD:</div>
+                    <div class="detail-value">
+                        <strong>{{ permission_request.ad_group.name }}</strong>
+                        {% if permission_request.ad_group.description %}
+                        <br><small style="color: #6c757d;">{{ permission_request.ad_group.description }}</small>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="detail-row">
+                    <div class="detail-label">Tipo de Permiso:</div>
+                    <div class="detail-value">
+                        <strong>{{ permission_request.permission_type.title() }}</strong>
+                        {% if permission_request.permission_type == 'read' %}
+                        <span style="color: #17a2b8;">(Solo Lectura)</span>
+                        {% else %}
+                        <span style="color: #fd7e14;">(Lectura y Escritura)</span>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="detail-row">
+                    <div class="detail-label">Fecha de Solicitud:</div>
+                    <div class="detail-value">{{ permission_request.created_at.strftime('%d/%m/%Y a las %H:%M') }}</div>
+                </div>
+                
+                {% if permission_request.expires_at %}
+                <div class="detail-row">
+                    <div class="detail-label">Fecha de Expiración:</div>
+                    <div class="detail-value">
+                        {{ permission_request.expires_at.strftime('%d/%m/%Y a las %H:%M') }}
+                        <span class="priority-badge priority-high">Temporal</span>
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Business Need Section -->
+                {% if permission_request.business_need %}
+                <div class="business-need-section">
+                    <div class="section-title">Justificación de la Necesidad:</div>
+                    <div class="section-content">{{ permission_request.business_need }}</div>
+                </div>
+                {% endif %}
+                
+                <!-- Technical Justification Section -->
+                {% if permission_request.justification %}
+                <div class="justification-section">
+                    <div class="section-title">Justificación Técnica:</div>
+                    <div class="section-content">{{ permission_request.justification }}</div>
+                </div>
+                {% endif %}
+            </div>
+            
+            <!-- Action Buttons -->
+            <div class="action-buttons">
+                <p style="margin-bottom: 20px; color: #495057;">
+                    <strong>¿Desea aprobar esta solicitud?</strong>
+                </p>
+                
+                <a href="{{ approve_url }}" class="btn btn-approve">
+                    ✓ Aprobar Solicitud
+                </a>
+                
+                <a href="{{ reject_url }}" class="btn btn-reject">
+                    ✗ Rechazar Solicitud
+                </a>
+            </div>
+            
+            <!-- Web Access Alternative -->
+            <div class="web-access">
+                <p>También puede revisar y gestionar la solicitud desde el sistema web:</p>
+                <a href="{{ web_url }}" class="btn btn-web">
+                    🌐 Acceder al Sistema Web
+                </a>
+            </div>
+            
+            <div style="margin-top: 20px; padding: 15px; background-color: #e7f3ff; border-radius: 8px; border-left: 4px solid #007bff;">
+                <p style="margin: 0; font-size: 14px; color: #495057;">
+                    <strong>💡 Nota:</strong> Al hacer clic en "Aprobar" o "Rechazar", la decisión se registrará automáticamente en el sistema. 
+                    Si necesita añadir comentarios adicionales, utilice el acceso web.
+                </p>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <div class="footer">
+            <div class="company-logo">SAR - Sistema de Gestión de Permisos</div>
+            <p>Este correo fue generado automáticamente por el Sistema de Gestión de Permisos de Carpetas.</p>
+            <p><strong>Por favor, no responda a este correo electrónico.</strong></p>
+            <p style="margin-top: 10px;">
+                Para soporte técnico, contacte al administrador del sistema.
+            </p>
+        </div>
+    </div>
+</body>
+</html>

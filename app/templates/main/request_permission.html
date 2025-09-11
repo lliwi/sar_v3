@@ -1,0 +1,546 @@
+{% extends "base.html" %}
+
+{% block page_title %}Solicitar Permiso{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="card-title">{{ title }}</h4>
+                    <p class="card-text text-muted">Complete el formulario para solicitar permisos de acceso a una carpeta.</p>
+                </div>
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('main.request_permission') }}">
+                        {{ form.hidden_tag() }}
+                        
+                        <div class="mb-3">
+                            {{ form.folder_id.label(class="form-label") }}
+                            
+                            <!-- Combobox con Filtrado -->
+                            <div class="combobox-container">
+                                <input type="text" class="combobox-input" id="comboboxInput" placeholder="🗂️ Buscar carpeta...">
+                                <div class="combobox-dropdown" id="comboboxDropdown">
+                                    {% for folder in form.folders %}
+                                        <div class="combobox-option" data-value="{{ folder.id }}">
+                                            <span class="folder-icon">📁</span>
+                                            <div class="folder-info">
+                                                <div class="folder-path">{{ folder.path }}</div>
+                                                {% if folder.description %}
+                                                    <div class="folder-description">{{ folder.description }}</div>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                                
+                                <!-- Hidden input for form submission -->
+                                <input type="hidden" name="folder_id" id="folder_id" required>
+                            </div>
+                            
+                            
+                            {% if form.folder_id.errors %}
+                                <div class="text-danger">
+                                    {% for error in form.folder_id.errors %}
+                                        <small>{{ error }}</small>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                        
+                        <!-- Row with Permission Type (narrow) and Validator (wider) -->
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    {{ form.permission_type.label(class="form-label") }}
+                                    {{ form.permission_type(class="form-select") }}
+                                    {% if form.permission_type.errors %}
+                                        <div class="text-danger">
+                                            {% for error in form.permission_type.errors %}
+                                                <small>{{ error }}</small>
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-8">
+                                <div class="mb-3">
+                                    {{ form.validator_id.label(class="form-label") }}
+                                    
+                                    <!-- Validator Combobox -->
+                                    <div class="combobox-container">
+                                        <input type="text" class="combobox-input" id="validatorComboboxInput" placeholder="🗂️ Seleccione primero una carpeta..." disabled>
+                                        <div class="combobox-dropdown" id="validatorComboboxDropdown">
+                                            <!-- Options will be populated dynamically -->
+                                        </div>
+                                        
+                                        <!-- Hidden input for form submission -->
+                                        <input type="hidden" name="validator_id" id="validator_id" required>
+                                    </div>
+                                    
+                                    {% if form.validator_id.errors %}
+                                        <div class="text-danger">
+                                            {% for error in form.validator_id.errors %}
+                                                <small>{{ error }}</small>
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        
+                        <!-- Information about automatic group assignment -->
+                        <div class="alert alert-info" role="alert">
+                            <i class="fas fa-magic me-2"></i>
+                            <strong>Asignación Automática de Grupos:</strong>
+                            Los grupos de AD se asignarán automáticamente según la configuración de permisos de la carpeta seleccionada.
+                            No es necesario seleccionar un grupo manualmente.
+                        </div>
+                        
+                        <div class="mb-3">
+                            {{ form.business_need.label(class="form-label") }}
+                            {{ form.business_need(class="form-control", rows="4", placeholder="Explique detalladamente por qué necesita este permiso y cómo lo utilizará...") }}
+                            {% if form.business_need.errors %}
+                                <div class="text-danger">
+                                    {% for error in form.business_need.errors %}
+                                        <small>{{ error }}</small>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="d-flex justify-content-between">
+                            <a href="{{ url_for('main.dashboard') }}" class="btn btn-secondary">
+                                <i class="fas fa-arrow-left"></i> Volver al Dashboard
+                            </a>
+                            {{ form.submit(class="btn btn-primary") }}
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Auto-resize textareas
+    const textareas = document.querySelectorAll('textarea');
+    textareas.forEach(function(textarea) {
+        textarea.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = this.scrollHeight + 'px';
+        });
+    });
+    
+    // Combobox con Filtrado functionality - adaptado del ejemplo
+    const comboboxInput = document.getElementById('comboboxInput');
+    const comboboxDropdown = document.getElementById('comboboxDropdown');
+    const hiddenInput = document.getElementById('folder_id');
+    
+    let currentSelection = -1;
+    let filteredFolders = [];
+    let allFolders = [];
+
+    function initializeFolders() {
+        const options = comboboxDropdown.querySelectorAll('.combobox-option');
+        allFolders = Array.from(options).map(option => ({
+            element: option,
+            value: option.dataset.value,
+            path: option.querySelector('.folder-path').textContent,
+            description: option.querySelector('.folder-description') ? 
+                        option.querySelector('.folder-description').textContent : '',
+            text: option.textContent.toLowerCase()
+        }));
+        filteredFolders = [...allFolders];
+    }
+
+    function filterFolders(searchTerm) {
+        const term = searchTerm.toLowerCase().trim();
+        filteredFolders = allFolders.filter(folder => 
+            folder.path.toLowerCase().includes(term) ||
+            folder.description.toLowerCase().includes(term) ||
+            folder.text.includes(term)
+        );
+        return filteredFolders;
+    }
+
+    function renderComboboxOptions(folders) {
+        // Hide all options first
+        allFolders.forEach(folder => {
+            folder.element.style.display = 'none';
+        });
+        
+        filteredFolders = folders;
+        currentSelection = -1;
+        
+        if (folders.length === 0) {
+            // Show no results message
+            let noResults = comboboxDropdown.querySelector('.no-results');
+            if (!noResults) {
+                noResults = document.createElement('div');
+                noResults.className = 'no-results';
+                noResults.innerHTML = '🚫 No se encontraron carpetas que coincidan con tu búsqueda';
+                comboboxDropdown.appendChild(noResults);
+            }
+            noResults.style.display = 'block';
+            return;
+        } else {
+            // Hide no results message
+            const noResults = comboboxDropdown.querySelector('.no-results');
+            if (noResults) {
+                noResults.style.display = 'none';
+            }
+        }
+        
+        folders.forEach((folder, index) => {
+            folder.element.style.display = 'flex';
+            folder.element.addEventListener('click', () => selectFolder(folder));
+            folder.element.addEventListener('mouseenter', () => {
+                currentSelection = index;
+                updateSelection();
+            });
+        });
+    }
+
+    function selectFolder(folder) {
+        comboboxInput.value = folder.path;
+        hiddenInput.value = folder.value;
+        comboboxDropdown.classList.remove('show');
+        comboboxInput.blur();
+        
+        // Mark as selected
+        allFolders.forEach(f => f.element.classList.remove('selected'));
+        folder.element.classList.add('selected');
+    }
+
+    function updateSelection() {
+        filteredFolders.forEach((folder, index) => {
+            folder.element.classList.toggle('selected', index === currentSelection);
+        });
+    }
+
+    // Event listeners
+    comboboxInput.addEventListener('focus', () => {
+        const filtered = filterFolders(comboboxInput.value);
+        renderComboboxOptions(filtered);
+        comboboxDropdown.classList.add('show');
+    });
+
+    comboboxInput.addEventListener('input', (e) => {
+        const filtered = filterFolders(e.target.value);
+        renderComboboxOptions(filtered);
+        comboboxDropdown.classList.add('show');
+        
+        if (e.target.value === '') {
+            hiddenInput.value = '';
+        }
+    });
+
+    comboboxInput.addEventListener('keydown', (e) => {
+        switch(e.key) {
+            case 'ArrowDown':
+                e.preventDefault();
+                currentSelection = Math.min(currentSelection + 1, filteredFolders.length - 1);
+                updateSelection();
+                break;
+            case 'ArrowUp':
+                e.preventDefault();
+                currentSelection = Math.max(currentSelection - 1, 0);
+                updateSelection();
+                break;
+            case 'Enter':
+                e.preventDefault();
+                if (currentSelection >= 0 && filteredFolders[currentSelection]) {
+                    selectFolder(filteredFolders[currentSelection]);
+                }
+                break;
+            case 'Escape':
+                comboboxDropdown.classList.remove('show');
+                comboboxInput.blur();
+                break;
+        }
+    });
+
+    // Cerrar dropdown al hacer click fuera
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.combobox-container')) {
+            comboboxDropdown.classList.remove('show');
+        }
+    });
+
+    // Initialize
+    initializeFolders();
+    renderComboboxOptions(allFolders);
+    
+    // Form validation
+    const form = comboboxInput.closest('form');
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            let hasErrors = false;
+            
+            // Validate folder selection
+            if (!hiddenInput.value) {
+                e.preventDefault();
+                hasErrors = true;
+                comboboxInput.style.borderColor = '#ef4444';
+                
+                // Remove error styling after user interaction
+                comboboxInput.addEventListener('input', function() {
+                    comboboxInput.style.borderColor = '#e1e5e9';
+                }, { once: true });
+            }
+            
+            // Validate validator selection
+            if (!validatorHiddenInput.value) {
+                e.preventDefault();
+                hasErrors = true;
+                validatorComboboxInput.style.borderColor = '#ef4444';
+                
+                // Remove error styling after user interaction
+                validatorComboboxInput.addEventListener('input', function() {
+                    validatorComboboxInput.style.borderColor = '#e1e5e9';
+                }, { once: true });
+            }
+            
+            if (hasErrors) {
+                if (!hiddenInput.value) {
+                    comboboxInput.focus();
+                } else if (!validatorHiddenInput.value) {
+                    validatorComboboxInput.focus();
+                }
+            }
+        });
+    }
+    
+    // Validator Combobox functionality
+    const validatorComboboxInput = document.getElementById('validatorComboboxInput');
+    const validatorComboboxDropdown = document.getElementById('validatorComboboxDropdown');
+    const validatorHiddenInput = document.getElementById('validator_id');
+    
+    let validatorCurrentSelection = -1;
+    let validatorFilteredItems = [];
+    let allValidators = [];
+
+    function loadValidators(folderId) {
+        if (!folderId) {
+            clearValidators();
+            return;
+        }
+        
+        // Show loading state
+        validatorComboboxInput.placeholder = '🔄 Cargando validadores...';
+        validatorComboboxInput.disabled = true;
+        
+        fetch(`/api/folder/${folderId}/validators`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    allValidators = data.validators.map(validator => ({
+                        element: null, // Will be created on demand
+                        value: validator.id,
+                        name: validator.name,
+                        role: validator.role,
+                        display_name: validator.display_name,
+                        text: validator.display_name.toLowerCase()
+                    }));
+                    
+                    populateValidatorDropdown();
+                    validatorComboboxInput.placeholder = '👤 Seleccionar validador...';
+                    validatorComboboxInput.disabled = false;
+                } else {
+                    clearValidators();
+                    validatorComboboxInput.placeholder = '❌ Error cargando validadores';
+                }
+            })
+            .catch(error => {
+                console.error('Error loading validators:', error);
+                clearValidators();
+                validatorComboboxInput.placeholder = '❌ Error cargando validadores';
+            });
+    }
+    
+    function clearValidators() {
+        allValidators = [];
+        validatorFilteredItems = [];
+        validatorComboboxDropdown.innerHTML = '';
+        validatorComboboxInput.value = '';
+        validatorHiddenInput.value = '';
+        validatorComboboxInput.placeholder = '🗂️ Seleccione primero una carpeta...';
+        validatorComboboxInput.disabled = true;
+    }
+    
+    function populateValidatorDropdown() {
+        validatorComboboxDropdown.innerHTML = '';
+        
+        allValidators.forEach(validator => {
+            const option = document.createElement('div');
+            option.className = 'combobox-option';
+            option.dataset.value = validator.value;
+            // Show only name in dropdown options (before selection)
+            option.innerHTML = `
+                <span class="folder-icon">👤</span>
+                <div class="folder-info">
+                    <div class="folder-path">${validator.name}</div>
+                </div>
+            `;
+            validator.element = option;
+            validatorComboboxDropdown.appendChild(option);
+        });
+        
+        validatorFilteredItems = [...allValidators];
+    }
+    
+    function filterValidators(searchTerm) {
+        const term = searchTerm.toLowerCase().trim();
+        validatorFilteredItems = allValidators.filter(validator => 
+            validator.name.toLowerCase().includes(term) ||
+            validator.role.toLowerCase().includes(term) ||
+            validator.text.includes(term)
+        );
+        return validatorFilteredItems;
+    }
+    
+    function renderValidatorOptions(validators) {
+        // Hide all options first
+        allValidators.forEach(validator => {
+            if (validator.element) {
+                validator.element.style.display = 'none';
+            }
+        });
+        
+        validatorFilteredItems = validators;
+        validatorCurrentSelection = -1;
+        
+        if (validators.length === 0) {
+            // Show no results message
+            let noResults = validatorComboboxDropdown.querySelector('.no-results');
+            if (!noResults) {
+                noResults = document.createElement('div');
+                noResults.className = 'no-results';
+                noResults.innerHTML = '🚫 No se encontraron validadores';
+                validatorComboboxDropdown.appendChild(noResults);
+            }
+            noResults.style.display = 'block';
+            return;
+        } else {
+            // Hide no results message
+            const noResults = validatorComboboxDropdown.querySelector('.no-results');
+            if (noResults) {
+                noResults.style.display = 'none';
+            }
+        }
+        
+        validators.forEach((validator, index) => {
+            if (validator.element) {
+                validator.element.style.display = 'flex';
+                validator.element.addEventListener('click', () => selectValidator(validator));
+                validator.element.addEventListener('mouseenter', () => {
+                    validatorCurrentSelection = index;
+                    updateValidatorSelection();
+                });
+            }
+        });
+    }
+    
+    function selectValidator(validator) {
+        // Show only name + role in the input after selection (as requested)
+        validatorComboboxInput.value = validator.display_name;
+        validatorHiddenInput.value = validator.value;
+        validatorComboboxDropdown.classList.remove('show');
+        validatorComboboxInput.blur();
+        
+        // Mark as selected
+        allValidators.forEach(v => {
+            if (v.element) v.element.classList.remove('selected');
+        });
+        if (validator.element) {
+            validator.element.classList.add('selected');
+        }
+    }
+    
+    function updateValidatorSelection() {
+        validatorFilteredItems.forEach((validator, index) => {
+            if (validator.element) {
+                validator.element.classList.toggle('selected', index === validatorCurrentSelection);
+            }
+        });
+    }
+    
+    // Event listeners for validator combobox
+    validatorComboboxInput.addEventListener('focus', () => {
+        if (allValidators.length > 0) {
+            const filtered = filterValidators(validatorComboboxInput.value);
+            renderValidatorOptions(filtered);
+            validatorComboboxDropdown.classList.add('show');
+        }
+    });
+
+    validatorComboboxInput.addEventListener('input', (e) => {
+        if (allValidators.length > 0) {
+            const filtered = filterValidators(e.target.value);
+            renderValidatorOptions(filtered);
+            validatorComboboxDropdown.classList.add('show');
+            
+            if (e.target.value === '') {
+                validatorHiddenInput.value = '';
+            }
+        }
+    });
+
+    validatorComboboxInput.addEventListener('keydown', (e) => {
+        if (allValidators.length === 0) return;
+        
+        switch(e.key) {
+            case 'ArrowDown':
+                e.preventDefault();
+                validatorCurrentSelection = Math.min(validatorCurrentSelection + 1, validatorFilteredItems.length - 1);
+                updateValidatorSelection();
+                break;
+            case 'ArrowUp':
+                e.preventDefault();
+                validatorCurrentSelection = Math.max(validatorCurrentSelection - 1, 0);
+                updateValidatorSelection();
+                break;
+            case 'Enter':
+                e.preventDefault();
+                if (validatorCurrentSelection >= 0 && validatorFilteredItems[validatorCurrentSelection]) {
+                    selectValidator(validatorFilteredItems[validatorCurrentSelection]);
+                }
+                break;
+            case 'Escape':
+                validatorComboboxDropdown.classList.remove('show');
+                validatorComboboxInput.blur();
+                break;
+        }
+    });
+
+    // Close validator dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.combobox-container') || !e.target.closest('#validatorComboboxInput')) {
+            validatorComboboxDropdown.classList.remove('show');
+        }
+    });
+    
+    // Watch for folder selection changes to load validators
+    hiddenInput.addEventListener('change', function() {
+        const folderId = this.value;
+        loadValidators(folderId);
+    });
+    
+    // Also watch for direct folder selection
+    allFolders.forEach(folder => {
+        if (folder.element) {
+            folder.element.addEventListener('click', () => {
+                setTimeout(() => {
+                    loadValidators(hiddenInput.value);
+                }, 100);
+            });
+        }
+    });
+});
+</script>
+{% endblock %}

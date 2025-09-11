@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+
+{% block page_title %}{{ title }}{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <h2><i class="fas fa-folder me-2"></i>{{ title }}</h2>
+                <a href="{{ url_for('admin.folders') }}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left me-2"></i>Volver a Carpetas
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Form -->
+    <div class="row">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-edit me-2"></i>{{ "Editar" if folder else "Nueva" }} Carpeta
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST">
+                        {{ form.hidden_tag() }}
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    {{ form.name.label(class="form-label") }}
+                                    {{ form.name(class="form-control" + (" is-invalid" if form.name.errors else "")) }}
+                                    {% if form.name.errors %}
+                                        <div class="invalid-feedback">
+                                            {{ form.name.errors[0] }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    {{ form.path.label(class="form-label") }}
+                                    {{ form.path(class="form-control" + (" is-invalid" if form.path.errors else "")) }}
+                                    {% if form.path.errors %}
+                                        <div class="invalid-feedback">
+                                            {{ form.path.errors[0] }}
+                                        </div>
+                                    {% endif %}
+                                    <div class="form-text">Ruta completa de la carpeta (ej: \\servidor\carpeta)</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            {{ form.description.label(class="form-label") }}
+                            {{ form.description(class="form-control" + (" is-invalid" if form.description.errors else ""), rows="3") }}
+                            {% if form.description.errors %}
+                                <div class="invalid-feedback">
+                                    {{ form.description.errors[0] }}
+                                </div>
+                            {% endif %}
+                        </div>
+
+                        <div class="row owners-validators-container">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    {{ form.owners.label(class="form-label") }}
+                                    {{ form.owners(class="form-select" + (" is-invalid" if form.owners.errors else ""), multiple=true, size="5") }}
+                                    {% if form.owners.errors %}
+                                        <div class="invalid-feedback">
+                                            {{ form.owners.errors[0] }}
+                                        </div>
+                                    {% endif %}
+                                    <div class="form-text">Usuarios propietarios de la carpeta</div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    {{ form.validators.label(class="form-label") }}
+                                    {{ form.validators(class="form-select" + (" is-invalid" if form.validators.errors else ""), multiple=true, size="5") }}
+                                    {% if form.validators.errors %}
+                                        <div class="invalid-feedback">
+                                            {{ form.validators.errors[0] }}
+                                        </div>
+                                    {% endif %}
+                                    <div class="form-text">Usuarios que pueden aprobar solicitudes</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Permisos de Grupos AD -->
+                        <div class="card border-primary mb-3 ad-groups-container">
+                            <div class="card-header bg-primary text-white">
+                                <h6 class="mb-0"><i class="fas fa-users me-2"></i>Permisos de Grupos AD</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            {{ form.read_groups.label(class="form-label") }}
+                                            {{ form.read_groups(class="form-select" + (" is-invalid" if form.read_groups.errors else ""), multiple=true, size="6") }}
+                                            {% if form.read_groups.errors %}
+                                                <div class="invalid-feedback">
+                                                    {{ form.read_groups.errors[0] }}
+                                                </div>
+                                            {% endif %}
+                                            <div class="form-text">Grupos con permisos de lectura en la carpeta</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            {{ form.write_groups.label(class="form-label") }}
+                                            {{ form.write_groups(class="form-select" + (" is-invalid" if form.write_groups.errors else ""), multiple=true, size="6") }}
+                                            {% if form.write_groups.errors %}
+                                                <div class="invalid-feedback">
+                                                    {{ form.write_groups.errors[0] }}
+                                                </div>
+                                            {% endif %}
+                                            <div class="form-text">Grupos con permisos de escritura en la carpeta</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    <strong>Nota:</strong> Los grupos de escritura incluyen automáticamente permisos de lectura.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <div class="form-check">
+                                {{ form.is_active(class="form-check-input") }}
+                                {{ form.is_active.label(class="form-check-label") }}
+                            </div>
+                        </div>
+
+                        <div class="d-flex gap-2">
+                            {{ form.submit(class="btn btn-primary") }}
+                            <a href="{{ url_for('admin.folders') }}" class="btn btn-outline-secondary">Cancelar</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Side Panel -->
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="card-title mb-0">
+                        <i class="fas fa-info-circle me-2"></i>Información
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <h6>Propietarios</h6>
+                    <p class="small text-muted">Usuarios propietarios con control total sobre la carpeta y aprobación de solicitudes.</p>
+                    
+                    <h6>Validadores</h6>
+                    <p class="small text-muted">Los validadores pueden aprobar/rechazar solicitudes de permisos pero no tienen otros privilegios administrativos.</p>
+                    
+                    <h6>Grupos de Lectura</h6>
+                    <p class="small text-muted">Grupos de Active Directory que tendrán permisos de lectura en esta carpeta.</p>
+                    
+                    <h6>Grupos de Escritura</h6>
+                    <p class="small text-muted">Grupos de Active Directory que tendrán permisos de escritura en esta carpeta. Los permisos de escritura incluyen automáticamente lectura.</p>
+                    
+                    <h6>Ruta</h6>
+                    <p class="small text-muted">Debe ser una ruta UNC válida (\\servidor\carpeta) o ruta local completa.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

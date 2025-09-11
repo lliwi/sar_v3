@@ -1,0 +1,421 @@
+{% extends "base.html" %}
+
+{% block page_title %}Gestión de Usuarios{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h2 class="mb-0">{{ title }}</h2>
+                    <p class="text-muted">Administrar usuarios del sistema</p>
+                </div>
+                <div>
+                    <a href="{{ url_for('admin.admin_dashboard') }}" class="btn btn-outline-secondary me-2">
+                        <i class="fas fa-arrow-left"></i> Volver al Panel
+                    </a>
+                    <a href="{{ url_for('admin.sync_users') }}" class="btn btn-primary">
+                        <i class="fas fa-sync-alt"></i> Sincronizar Usuarios
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search and Filters -->
+    <div class="row mb-3">
+        <div class="col-md-6">
+            <form method="GET" class="d-flex">
+                <input type="text" name="search" class="form-control me-2" 
+                       placeholder="Buscar por usuario, nombre o email..." 
+                       value="{{ search }}">
+                <button type="submit" class="btn btn-outline-primary">
+                    <i class="fas fa-search"></i>
+                </button>
+                {% if search %}
+                <a href="{{ url_for('admin.users') }}" class="btn btn-outline-secondary ms-2">
+                    <i class="fas fa-times"></i>
+                </a>
+                {% endif %}
+            </form>
+        </div>
+        <div class="col-md-6 text-end">
+            <span class="text-muted">
+                {{ users.total }} usuario(s) encontrado(s)
+            </span>
+        </div>
+    </div>
+
+    <!-- Users Table -->
+    <div class="card">
+        <div class="card-body">
+            {% if users.items %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Usuario</th>
+                                <th>Información</th>
+                                <th>Departamento</th>
+                                <th>Roles</th>
+                                <th>Carpetas</th>
+                                <th>Estado</th>
+                                <th>Último Acceso</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for user in users.items %}
+                            <tr>
+                                <td>
+                                    <span class="badge bg-secondary">#{{ user.id }}</span>
+                                </td>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <div class="avatar avatar-sm me-2">
+                                            <span class="avatar-initial rounded-circle bg-primary">
+                                                {{ user.username[0].upper() }}
+                                            </span>
+                                        </div>
+                                        <div>
+                                            <strong>{{ user.username }}</strong>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div>
+                                        <strong>{{ user.full_name }}</strong><br>
+                                        <small class="text-muted">{{ user.email }}</small>
+                                    </div>
+                                </td>
+                                <td>
+                                    {% if user.department %}
+                                        <span class="badge bg-info">{{ user.department }}</span>
+                                    {% else %}
+                                        <small class="text-muted">Sin asignar</small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if user.roles %}
+                                        {% for role in user.roles[:2] %}
+                                            <span class="badge bg-primary me-1">{{ role.name }}</span>
+                                        {% endfor %}
+                                        {% if user.roles|length > 2 %}
+                                            <span class="badge bg-light text-dark">+{{ user.roles|length - 2 }}</span>
+                                        {% endif %}
+                                    {% else %}
+                                        <small class="text-muted">Sin roles</small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div class="d-flex flex-column">
+                                        {% if user.owned_folders %}
+                                            <small><strong>{{ user.owned_folders|length }}</strong> propietario</small>
+                                        {% endif %}
+                                        {% if user.validated_folders %}
+                                            <small><strong>{{ user.validated_folders|length }}</strong> validador</small>
+                                        {% endif %}
+                                        {% if not user.owned_folders and not user.validated_folders %}
+                                            <small class="text-muted">Sin carpetas</small>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                                <td>
+                                    {% if user.is_active %}
+                                        <span class="badge bg-success">Activo</span>
+                                    {% else %}
+                                        <span class="badge bg-danger">Inactivo</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if user.last_login %}
+                                        <small>{{ user.last_login.strftime('%d/%m/%Y %H:%M') }}</small>
+                                    {% else %}
+                                        <small class="text-muted">Nunca</small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button type="button" class="btn btn-outline-info" 
+                                                data-bs-toggle="modal" 
+                                                data-bs-target="#detailModal{{ user.id }}">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                        <a href="{{ url_for('admin.edit_user', user_id=user.id) }}" 
+                                           class="btn btn-outline-primary">
+                                            <i class="fas fa-edit"></i>
+                                        </a>
+                                        {% if user.id != current_user.id %}
+                                        <button type="button" class="btn btn-outline-danger"
+                                                onclick="toggleUserStatus({{ user.id }}, {{ user.is_active|lower }})">
+                                            {% if user.is_active %}
+                                                <i class="fas fa-ban"></i>
+                                            {% else %}
+                                                <i class="fas fa-check"></i>
+                                            {% endif %}
+                                        </button>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Pagination -->
+                {% if users.pages > 1 %}
+                <nav aria-label="Navegación de usuarios" class="mt-3">
+                    <ul class="pagination justify-content-center">
+                        {% if users.has_prev %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('admin.users', page=users.prev_num, search=search) }}">
+                                    <i class="fas fa-chevron-left"></i>
+                                </a>
+                            </li>
+                        {% endif %}
+                        
+                        {% for page_num in users.iter_pages() %}
+                            {% if page_num %}
+                                {% if page_num != users.page %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('admin.users', page=page_num, search=search) }}">{{ page_num }}</a>
+                                    </li>
+                                {% else %}
+                                    <li class="page-item active">
+                                        <span class="page-link">{{ page_num }}</span>
+                                    </li>
+                                {% endif %}
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">...</span>
+                                </li>
+                            {% endif %}
+                        {% endfor %}
+                        
+                        {% if users.has_next %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('admin.users', page=users.next_num, search=search) }}">
+                                    <i class="fas fa-chevron-right"></i>
+                                </a>
+                            </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+                {% endif %}
+                
+            {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-users fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">No se encontraron usuarios</h5>
+                    {% if search %}
+                        <p class="text-muted">No hay usuarios que coincidan con "{{ search }}"</p>
+                        <a href="{{ url_for('admin.users') }}" class="btn btn-outline-primary">
+                            Ver todos los usuarios
+                        </a>
+                    {% else %}
+                        <p class="text-muted">Sincroniza usuarios desde Active Directory</p>
+                        <a href="{{ url_for('admin.sync_users') }}" class="btn btn-primary">
+                            <i class="fas fa-sync-alt"></i> Sincronizar Usuarios
+                        </a>
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Detail Modals -->
+{% for user in users.items %}
+<div class="modal fade" id="detailModal{{ user.id }}" tabindex="-1" aria-labelledby="detailModalLabel{{ user.id }}" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="detailModalLabel{{ user.id }}">
+                    {{ user.full_name }}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Usuario:</strong>
+                        <p class="text-muted">{{ user.username }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Estado:</strong>
+                        <p class="text-muted">
+                            {% if user.is_active %}
+                                <span class="badge bg-success">Activo</span>
+                            {% else %}
+                                <span class="badge bg-danger">Inactivo</span>
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+                
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Nombre Completo:</strong>
+                        <p class="text-muted">{{ user.full_name }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Email:</strong>
+                        <p class="text-muted">{{ user.email }}</p>
+                    </div>
+                </div>
+                
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Departamento:</strong>
+                        <p class="text-muted">{{ user.department or 'Sin asignar' }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Último Acceso:</strong>
+                        <p class="text-muted">
+                            {% if user.last_login %}
+                                {{ user.last_login.strftime('%d/%m/%Y %H:%M:%S') }}
+                            {% else %}
+                                Nunca ha ingresado
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+                
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Fecha de Creación:</strong>
+                        <p class="text-muted">{{ user.created_at.strftime('%d/%m/%Y %H:%M') }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Última Actualización:</strong>
+                        <p class="text-muted">{{ user.updated_at.strftime('%d/%m/%Y %H:%M') }}</p>
+                    </div>
+                </div>
+                
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <strong>Roles del Sistema:</strong>
+                        {% if user.roles %}
+                            <div class="mt-2">
+                                {% for role in user.roles %}
+                                <span class="badge bg-primary me-1">{{ role.name }}</span>
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            <p class="text-muted">Sin roles asignados</p>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Carpetas como Propietario:</strong>
+                        {% if user.owned_folders %}
+                            <ul class="list-unstyled mt-2">
+                                {% for folder in user.owned_folders %}
+                                <li><code>{{ folder.path }}</code></li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p class="text-muted">Sin carpetas como propietario</p>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Carpetas como Validador:</strong>
+                        {% if user.validated_folders %}
+                            <ul class="list-unstyled mt-2">
+                                {% for folder in user.validated_folders %}
+                                <li><code>{{ folder.path }}</code></li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p class="text-muted">Sin carpetas como validador</p>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <!-- User Activity Summary -->
+                <div class="row">
+                    <div class="col-12">
+                        <strong>Resumen de Actividad:</strong>
+                        <div class="row mt-2">
+                            <div class="col-md-4">
+                                <div class="text-center">
+                                    <h6 class="mb-0">{{ user.permission_requests|length }}</h6>
+                                    <small class="text-muted">Solicitudes</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="text-center">
+                                    <h6 class="mb-0">{{ user.validated_requests|length }}</h6>
+                                    <small class="text-muted">Validaciones</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="text-center">
+                                    <h6 class="mb-0">{{ (user.owned_folders|length + user.validated_folders|length) }}</h6>
+                                    <small class="text-muted">Carpetas</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                <a href="{{ url_for('admin.edit_user', user_id=user.id) }}" class="btn btn-primary">
+                    <i class="fas fa-edit"></i> Editar
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+<style>
+.avatar {
+    width: 32px;
+    height: 32px;
+}
+
+.avatar-initial {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+}
+</style>
+
+<script>
+function toggleUserStatus(userId, isActive) {
+    const action = isActive ? 'desactivar' : 'activar';
+    if (confirm(`¿Estás seguro de que deseas ${action} este usuario?`)) {
+        fetch(`/admin/users/${userId}/toggle`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Error al cambiar el estado: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error al cambiar el estado del usuario');
+        });
+    }
+}
+</script>
+{% endblock %}

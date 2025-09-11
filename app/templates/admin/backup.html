@@ -1,0 +1,539 @@
+{% extends "base.html" %}
+
+{% block page_title %}Backup del Sistema{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <!-- Backup Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h2 class="mb-0">
+                        <i class="fas fa-download text-success me-2"></i>
+                        Backup del Sistema
+                    </h2>
+                    <p class="text-muted">Crear copias de seguridad completas del sistema SAR</p>
+                </div>
+                <div>
+                    <a href="{{ url_for('admin.admin_dashboard') }}" class="btn btn-outline-secondary">
+                        <i class="fas fa-arrow-left me-1"></i>Volver al Panel
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Backup Information -->
+    <div class="row mb-4">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-info-circle text-info me-2"></i>
+                        Información del Backup
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-info">
+                        <h6><i class="fas fa-lightbulb me-2"></i>¿Qué incluye el backup?</h6>
+                        <ul class="mb-0">
+                            <li><strong>Base de Datos Completa:</strong> Todos los datos del sistema en formato JSON</li>
+                            <li><strong>Esquema de BD:</strong> Estructura de tablas en formato SQL</li>
+                            <li><strong>Configuración:</strong> Archivo .env con todas las configuraciones</li>
+                            <li><strong>Metadatos:</strong> Información del backup y instrucciones de restauración</li>
+                            <li><strong>Script de Restauración:</strong> Script automatizado para facilitar la restauración</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="alert alert-warning">
+                        <h6><i class="fas fa-exclamation-triangle me-2"></i>Casos de Uso</h6>
+                        <ul class="mb-0">
+                            <li><strong>Recuperación ante Fallos:</strong> Restaurar el sistema después de un problema técnico</li>
+                            <li><strong>Migración de Servidor:</strong> Instalar el sistema en un nuevo servidor con todos los datos</li>
+                            <li><strong>Auditoría:</strong> Mantener copias históricas del estado del sistema</li>
+                            <li><strong>Desarrollo:</strong> Clonar el entorno de producción para testing</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-chart-bar text-primary me-2"></i>
+                        Estadísticas del Sistema
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-6 mb-3">
+                            <div class="border rounded p-2">
+                                <h6 class="text-muted mb-1">Usuarios</h6>
+                                <span class="h5 text-primary">{{ stats.total_users or 0 }}</span>
+                            </div>
+                        </div>
+                        <div class="col-6 mb-3">
+                            <div class="border rounded p-2">
+                                <h6 class="text-muted mb-1">Carpetas</h6>
+                                <span class="h5 text-success">{{ stats.total_folders or 0 }}</span>
+                            </div>
+                        </div>
+                        <div class="col-6 mb-3">
+                            <div class="border rounded p-2">
+                                <h6 class="text-muted mb-1">Permisos</h6>
+                                <span class="h5 text-info">{{ stats.total_permissions or 0 }}</span>
+                            </div>
+                        </div>
+                        <div class="col-6 mb-3">
+                            <div class="border rounded p-2">
+                                <h6 class="text-muted mb-1">Grupos AD</h6>
+                                <span class="h5 text-warning">{{ stats.total_ad_groups or 0 }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Backup Creation -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-cloud-download-alt text-success me-2"></i>
+                        Crear Backup
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-warning">
+                        <h6><i class="fas fa-exclamation-circle me-2"></i>Importante</h6>
+                        <ul class="mb-0">
+                            <li>El proceso de backup puede tardar varios minutos dependiendo del tamaño de los datos</li>
+                            <li>Se generará un archivo ZIP con todos los datos del sistema</li>
+                            <li>Asegúrate de tener suficiente espacio en disco</li>
+                            <li>El backup incluye información sensible (configuraciones y datos)</li>
+                        </ul>
+                    </div>
+                    
+                    <form method="POST" action="{{ url_for('admin.create_backup') }}" class="text-center" onsubmit="showProgress()">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        
+                        <div class="mb-4">
+                            <h6 class="text-muted">El backup incluirá:</h6>
+                            <div class="row justify-content-center">
+                                <div class="col-md-8">
+                                    <div class="list-group list-group-flush">
+                                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                                            <span><i class="fas fa-database text-primary me-2"></i>Base de Datos (11 tablas)</span>
+                                            <span class="badge bg-primary rounded-pill">JSON</span>
+                                        </div>
+                                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                                            <span><i class="fas fa-cog text-success me-2"></i>Configuración del Sistema</span>
+                                            <span class="badge bg-success rounded-pill">.env</span>
+                                        </div>
+                                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                                            <span><i class="fas fa-table text-info me-2"></i>Esquema de Base de Datos</span>
+                                            <span class="badge bg-info rounded-pill">SQL</span>
+                                        </div>
+                                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                                            <span><i class="fas fa-file-code text-warning me-2"></i>Script de Restauración</span>
+                                            <span class="badge bg-warning rounded-pill">SH</span>
+                                        </div>
+                                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                                            <span><i class="fas fa-file-alt text-secondary me-2"></i>Metadatos e Instrucciones</span>
+                                            <span class="badge bg-secondary rounded-pill">JSON</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-success btn-lg" id="backup-button">
+                            <i class="fas fa-download me-2"></i>
+                            Crear Backup Completo
+                        </button>
+                        
+                        <div id="backup-progress" class="mt-4" style="display: none;">
+                            <div class="alert alert-info">
+                                <div class="d-flex align-items-center">
+                                    <div class="spinner-border spinner-border-sm me-3" role="status">
+                                        <span class="visually-hidden">Cargando...</span>
+                                    </div>
+                                    <div>
+                                        <strong>Creando backup...</strong><br>
+                                        <small class="text-muted">Este proceso puede tardar varios minutos. Por favor, no cierre esta ventana.</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Backup Management -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-list text-secondary me-2"></i>
+                        Gestión de Backups
+                    </h5>
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="loadBackups()">
+                        <i class="fas fa-sync-alt me-1"></i>Actualizar Lista
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div id="backup-list-container">
+                        <div class="text-center py-4">
+                            <div class="spinner-border" role="status">
+                                <span class="visually-hidden">Cargando...</span>
+                            </div>
+                            <p class="mt-2 text-muted">Cargando lista de backups...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function showProgress() {
+    // Show progress indicator when backup starts
+    document.getElementById('backup-progress').style.display = 'block';
+    
+    // Disable the backup button to prevent multiple submissions
+    const button = document.getElementById('backup-button');
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Creando Backup...';
+    
+    // Re-enable after a delay in case of error
+    setTimeout(function() {
+        if (button.disabled) {
+            button.disabled = false;
+            button.innerHTML = '<i class="fas fa-download me-2"></i>Crear Backup Completo';
+            document.getElementById('backup-progress').style.display = 'none';
+        }
+    }, 60000); // 1 minute timeout
+    
+    // Allow form submission to continue
+    return true;
+}
+
+// Load and display backup list
+function loadBackups() {
+    const container = document.getElementById('backup-list-container');
+    container.innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Cargando...</span>
+            </div>
+            <p class="mt-2 text-muted">Cargando lista de backups...</p>
+        </div>
+    `;
+    
+    fetch('{{ url_for("admin.list_backups") }}')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                displayBackups(data.backups);
+            } else {
+                showError('Error cargando la lista de backups: ' + data.error);
+            }
+        })
+        .catch(error => {
+            showError('Error de conexión: ' + error.message);
+        });
+}
+
+function displayBackups(backups) {
+    const container = document.getElementById('backup-list-container');
+    
+    if (backups.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-4">
+                <i class="fas fa-folder-open fa-3x text-muted mb-3"></i>
+                <h6 class="text-muted">No hay backups disponibles</h6>
+                <p class="text-muted">Crea un backup para verlo listado aquí.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = `
+        <div class="mb-3">
+            <div class="d-flex justify-content-between align-items-center">
+                <span class="text-muted">Se encontraron ${backups.length} backup(s)</span>
+                <small class="text-muted">Ordenado por fecha (más reciente primero)</small>
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th><i class="fas fa-file-archive me-1"></i>Archivo</th>
+                        <th><i class="fas fa-calendar me-1"></i>Fecha de Creación</th>
+                        <th><i class="fas fa-hdd me-1"></i>Tamaño</th>
+                        <th><i class="fas fa-cogs me-1"></i>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+    
+    backups.forEach(backup => {
+        const rowClass = 'table-row';
+        html += `
+            <tr class="${rowClass}">
+                <td>
+                    <div class="d-flex align-items-center">
+                        <i class="fas fa-file-archive text-primary me-2"></i>
+                        <div>
+                            <div class="fw-semibold">${backup.filename}</div>
+                            <small class="text-muted">${backup.timestamp}</small>
+                        </div>
+                    </div>
+                </td>
+                <td>
+                    <span class="badge bg-light text-dark">${backup.created_date}</span>
+                </td>
+                <td>
+                    <span class="badge bg-info">${backup.size_mb} ${backup.size_unit}</span>
+                </td>
+                <td>
+                    <div class="btn-group" role="group">
+                        <a href="{{ url_for('admin.download_backup', filename='') }}${backup.filename}" 
+                           class="btn btn-success btn-sm" 
+                           title="Descargar backup">
+                            <i class="fas fa-download"></i>
+                        </a>
+                        <button type="button" 
+                                class="btn btn-warning btn-sm" 
+                                onclick="restoreBackup('${backup.filename}')"
+                                title="Restaurar sistema desde este backup">
+                            <i class="fas fa-undo"></i>
+                        </button>
+                        <button type="button" 
+                                class="btn btn-danger btn-sm" 
+                                onclick="deleteBackup('${backup.filename}')"
+                                title="Eliminar backup">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    });
+    
+    html += `
+                </tbody>
+            </table>
+        </div>
+    `;
+    
+    container.innerHTML = html;
+}
+
+function deleteBackup(filename) {
+    if (!confirm(`¿Estás seguro de que deseas eliminar el backup "${filename}"?\\n\\nEsta acción no se puede deshacer.`)) {
+        return;
+    }
+    
+    const deleteButton = event.target.closest('button');
+    const originalHtml = deleteButton.innerHTML;
+    deleteButton.disabled = true;
+    deleteButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    
+    fetch(`{{ url_for('admin.delete_backup', filename='') }}${filename}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token() }}'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Show success message
+            showAlert('success', data.message);
+            // Reload backup list
+            loadBackups();
+        } else {
+            showAlert('danger', 'Error eliminando backup: ' + data.error);
+            deleteButton.disabled = false;
+            deleteButton.innerHTML = originalHtml;
+        }
+    })
+    .catch(error => {
+        showAlert('danger', 'Error de conexión: ' + error.message);
+        deleteButton.disabled = false;
+        deleteButton.innerHTML = originalHtml;
+    });
+}
+
+function restoreBackup(filename) {
+    const warningMessage = `⚠️ ATENCIÓN: OPERACIÓN DESTRUCTIVA ⚠️
+
+¿Estás seguro de que deseas restaurar el sistema desde el backup "${filename}"?
+
+ADVERTENCIAS IMPORTANTES:
+• Esta acción ELIMINARÁ todos los datos actuales de la base de datos
+• Se reemplazarán con los datos del backup seleccionado  
+• Esta operación NO SE PUEDE DESHACER
+• Se recomienda crear un backup actual antes de restaurar
+• Todos los usuarios serán desconectados durante el proceso
+
+¿Confirmas que deseas proceder con la restauración?`;
+
+    if (!confirm(warningMessage)) {
+        return;
+    }
+    
+    // Second confirmation for extra safety
+    if (!confirm(`CONFIRMACIÓN FINAL:\\n\\n¿Estás COMPLETAMENTE seguro de restaurar desde "${filename}"?\\n\\nEsta es tu última oportunidad para cancelar.`)) {
+        return;
+    }
+    
+    const restoreButton = event.target.closest('button');
+    const originalHtml = restoreButton.innerHTML;
+    restoreButton.disabled = true;
+    restoreButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    
+    // Show progress modal
+    showRestoreProgress(filename);
+    
+    fetch(`{{ url_for('admin.restore_backup', filename='') }}${filename}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token() }}'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        hideRestoreProgress();
+        
+        if (data.success) {
+            // Show detailed success message
+            const details = data.details;
+            const successMsg = `✅ RESTAURACIÓN COMPLETADA EXITOSAMENTE\\n\\n` +
+                `📁 Backup: ${filename}\\n` +
+                `📅 Fecha del backup: ${details.backup_date}\\n` +
+                `📊 Tablas restauradas: ${details.restored_tables}\\n` +
+                `📝 Registros totales: ${details.total_records}\\n\\n` +
+                `El sistema ha sido restaurado al estado del backup seleccionado.`;
+            
+            alert(successMsg);
+            showAlert('success', data.message);
+            
+            // Reload the page after successful restoration
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
+        } else {
+            showAlert('danger', '❌ Error durante la restauración: ' + data.error);
+            restoreButton.disabled = false;
+            restoreButton.innerHTML = originalHtml;
+        }
+    })
+    .catch(error => {
+        hideRestoreProgress();
+        showAlert('danger', '❌ Error de conexión durante la restauración: ' + error.message);
+        restoreButton.disabled = false;
+        restoreButton.innerHTML = originalHtml;
+    });
+}
+
+function showRestoreProgress(filename) {
+    const progressHtml = `
+        <div id="restore-progress-modal" class="modal fade show" style="display: block; background: rgba(0,0,0,0.8);">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header bg-warning text-dark">
+                        <h5 class="modal-title">
+                            <i class="fas fa-undo me-2"></i>Restaurando Sistema
+                        </h5>
+                    </div>
+                    <div class="modal-body text-center">
+                        <div class="spinner-border text-warning mb-3" style="width: 3rem; height: 3rem;" role="status">
+                            <span class="visually-hidden">Restaurando...</span>
+                        </div>
+                        <h6>Restaurando desde: <code>${filename}</code></h6>
+                        <p class="text-muted">Este proceso puede tardar varios minutos.</p>
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            <strong>No cierres esta ventana</strong> hasta que el proceso termine.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', progressHtml);
+}
+
+function hideRestoreProgress() {
+    const modal = document.getElementById('restore-progress-modal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function showError(message) {
+    const container = document.getElementById('backup-list-container');
+    container.innerHTML = `
+        <div class="alert alert-danger">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            ${message}
+        </div>
+    `;
+}
+
+function showAlert(type, message) {
+    const alertHtml = `
+        <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+            <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-triangle'} me-2"></i>
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    `;
+    
+    // Insert alert at the top of the backup management card
+    const cardBody = document.querySelector('#backup-list-container').parentElement;
+    cardBody.insertAdjacentHTML('afterbegin', alertHtml);
+    
+    // Auto-remove success alerts after 5 seconds
+    if (type === 'success') {
+        setTimeout(() => {
+            const alert = cardBody.querySelector('.alert-success');
+            if (alert) {
+                alert.remove();
+            }
+        }, 5000);
+    }
+}
+
+// Load backups when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    loadBackups();
+    
+    // Also reload after creating a backup (detect form submission success)
+    const form = document.querySelector('form[action="{{ url_for("admin.create_backup") }}"]');
+    if (form) {
+        form.addEventListener('submit', function() {
+            setTimeout(loadBackups, 2000); // Reload after 2 seconds
+        });
+    }
+});
+</script>
+{% endblock %}
