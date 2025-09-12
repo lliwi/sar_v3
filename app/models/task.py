@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from app import db
 import json
+import os
 
 class Task(db.Model):
     __tablename__ = 'tasks'
@@ -187,7 +188,7 @@ class Task(db.Model):
             'permission_type': permission_request.permission_type,
             'requester': permission_request.requester.username,
             'validator': created_by.username,
-            'csv_file_path': csv_file_path
+            'csv_file_path': os.path.basename(csv_file_path) if csv_file_path else None  # Store only filename
         }
         task.set_task_data(task_data)
         

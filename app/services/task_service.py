@@ -29,14 +29,19 @@ class TaskService:
         """Clean up CSV file associated with a task after AD verification completes or is cancelled"""
         try:
             task_data = task.get_task_data()
-            csv_file_path = task_data.get('csv_file_path')
+            csv_filename = task_data.get('csv_file_path')
             
-            if csv_file_path and os.path.exists(csv_file_path):
-                os.remove(csv_file_path)
-                logger.info(f"Cleaned up CSV file {csv_file_path} for task {task.id} after AD verification completion")
-                return True
-            elif csv_file_path:
-                logger.debug(f"CSV file {csv_file_path} not found for cleanup (task {task.id})")
+            # Construct full path from filename
+            if csv_filename:
+                exports_dir = '/app/exports'
+                csv_file_path = os.path.join(exports_dir, csv_filename)
+                
+                if os.path.exists(csv_file_path):
+                    os.remove(csv_file_path)
+                    logger.info(f"Cleaned up CSV file {csv_file_path} for task {task.id} after AD verification completion")
+                    return True
+                else:
+                    logger.debug(f"CSV file {csv_file_path} not found for cleanup (task {task.id})")
             return False
             
         except Exception as e:
@@ -79,7 +84,7 @@ class TaskService:
             # Link tasks - verification task references airflow task
             verification_data = verification_task.get_task_data()
             verification_data['depends_on_task_id'] = airflow_task.id
-            verification_data['csv_file_path'] = csv_file_path  # Add CSV path for cleanup
+            verification_data['csv_file_path'] = os.path.basename(csv_file_path) if csv_file_path else None  # Store only filename for cleanup
             verification_task.set_task_data(verification_data)
             
             db.session.commit()
@@ -124,7 +129,7 @@ class TaskService:
             # Link tasks - verification task references airflow task
             verification_data = verification_task.get_task_data()
             verification_data['depends_on_task_id'] = airflow_task.id
-            verification_data['csv_file_path'] = csv_file_path  # Add CSV path for cleanup
+            verification_data['csv_file_path'] = os.path.basename(csv_file_path) if csv_file_path else None  # Store only filename for cleanup
             verification_task.set_task_data(verification_data)
             
             db.session.commit()
@@ -263,7 +268,7 @@ class TaskService:
                 'folder_id': permission_request.folder_id,
                 'permission_type': existing_permission_info.get('existing_permission_type'),
                 'validator': validator.username,
-                'csv_file_path': csv_file_path,
+                'csv_file_path': os.path.basename(csv_file_path) if csv_file_path else None,
                 'existing_source': existing_permission_info.get('existing_source'),
                 'requester': permission_request.requester.username
             }
@@ -302,7 +307,7 @@ class TaskService:
                 'ad_group_name': existing_permission_info.get('existing_group', {}).get('name'),
                 'ad_group_id': existing_permission_info.get('existing_group', {}).get('id'),
                 'validator': validator.username,
-                'csv_file_path': csv_file_path,
+                'csv_file_path': os.path.basename(csv_file_path) if csv_file_path else None,
                 'existing_source': 'ad_sync',
                 'requester': permission_request.requester.username
             }
@@ -694,11 +699,12 @@ class TaskService:
             db.session.commit()
             
             task_data = task.get_task_data()
-            csv_file_path = task_data.get('csv_file_path')
+            csv_filename = task_data.get('csv_file_path')
             
             # Prepare configuration for Airflow DAG
+            # csv_filename now already contains only the filename
             conf = {
-                'change_file': csv_file_path,
+                'change_file': csv_filename,
                 'request_ids': [task_data.get('permission_request_id')],
                 'triggered_by': task_data.get('validator', 'system'),
                 'folder_path': task_data.get('folder_path'),

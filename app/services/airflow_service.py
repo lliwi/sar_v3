@@ -126,7 +126,7 @@ class AirflowService:
                     })
             
             logger.info(f"Permission change file created: {filepath}")
-            return filepath
+            return filename  # Return only filename instead of full path
             
         except Exception as e:
             logger.error(f"Error creating permission change file: {str(e)}")
@@ -208,6 +208,7 @@ def trigger_permission_changes(request_id):
                 return False
             
             # Trigger Airflow DAG
+            # Now change_file contains only the filename
             conf = {
                 'change_file': change_file,
                 'request_ids': [request_id],
@@ -255,6 +256,7 @@ def batch_trigger_permission_changes(request_ids):
                 return False
             
             # Trigger Airflow DAG
+            # Now change_file contains only the filename
             conf = {
                 'change_file': change_file,
                 'request_ids': request_ids,

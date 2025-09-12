@@ -109,13 +109,18 @@ def process_permission_changes(**context):
     logging.info(f"Solicitudes: {request_ids}")
     logging.info(f"Usuario: {triggered_by}")
     
-    if not change_file or not os.path.exists(change_file):
-        logging.error("❌ No se puede procesar: archivo no disponible")
+    # Construct full path from filename
+    exports_dir = '/app/exports'
+    full_change_file_path = os.path.join(exports_dir, change_file) if change_file else None
+    
+    if not change_file or not full_change_file_path or not os.path.exists(full_change_file_path):
+        logging.error(f"❌ No se puede procesar: archivo no disponible en {full_change_file_path}")
         return False
     
     try:
         # Leer y procesar el archivo CSV
-        with open(change_file, 'r', encoding='utf-8') as file:
+        logging.info(f"📁 Leyendo archivo CSV desde: {full_change_file_path}")
+        with open(full_change_file_path, 'r', encoding='utf-8') as file:
             reader = csv.DictReader(file)
             changes_processed = 0
             
@@ -150,7 +155,11 @@ def cleanup_files(**context):
     ti = context['task_instance']
     change_file = ti.xcom_pull(key='change_file', task_ids='print_parameters')
     
-    if change_file and os.path.exists(change_file):
+    # Construct full path from filename
+    exports_dir = '/app/exports'
+    full_change_file_path = os.path.join(exports_dir, change_file) if change_file else None
+    
+    if change_file and full_change_file_path and os.path.exists(full_change_file_path):
         try:
             # En producción, podrías querer mover el archivo a un directorio de backup
             # en lugar de eliminarlo directamente
@@ -158,8 +167,8 @@ def cleanup_files(**context):
             os.makedirs(backup_dir, exist_ok=True)
             
             import shutil
-            backup_file = os.path.join(backup_dir, os.path.basename(change_file))
-            shutil.move(change_file, backup_file)
+            backup_file = os.path.join(backup_dir, change_file)  # Use filename directly
+            shutil.move(full_change_file_path, backup_file)
             
             logging.info(f"📦 Archivo movido a backup: {backup_file}")
             
@@ -345,7 +354,7 @@ El DAG espera recibir los siguientes parámetros en el campo `conf` al ser ejecu
 
 ```json
 {
-    "change_file": "/app/exports/permission_changes_20240101_120000.csv",
+    "change_file": "permission_changes_20240101_120000.csv",
     "request_ids": [123, 124, 125],
     "triggered_by": "admin.usuario",
     "folder_path": "\\\\servidor\\carpeta\\subcarpeta"
@@ -365,7 +374,7 @@ El DAG espera recibir los siguientes parámetros en el campo `conf` al ser ejecu
 ```python
 # Desde el AirflowService
 conf = {
-    'change_file': '/app/exports/permission_changes_20240101_120000.csv',
+    'change_file': 'permission_changes_20240101_120000.csv',
     'request_ids': [123, 124, 125],
     'triggered_by': 'sistema.sar',
     'folder_path': '\\\\servidor\\carpeta\\target'
