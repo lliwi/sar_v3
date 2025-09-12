@@ -11,12 +11,14 @@ import json
 import zipfile
 import tempfile
 import shutil
+import logging
 from sqlalchemy import text
 
 # Configuration constants
 BACKUP_DIRECTORY = '/app/backups'
 
 admin_bp = Blueprint('admin', __name__)
+logger = logging.getLogger(__name__)
 
 def admin_required(f):
     @wraps(f)
@@ -860,6 +862,93 @@ def sync_ad_groups():
         flash(f'Error durante la sincronización: {str(e)}', 'error')
     
     return redirect(url_for('admin.ad_groups'))
+
+@admin_bp.route('/ad-groups/<int:group_id>/sync', methods=['POST'])
+@login_required
+@admin_required
+def sync_single_ad_group(group_id):
+    """Sync a specific AD group from LDAP"""
+    try:
+        # Get the group from database
+        ad_group = ADGroup.query.get_or_404(group_id)
+        
+        ldap_service = LDAPService()
+        success = ldap_service.sync_single_group(ad_group.distinguished_name)
+        
+        if success:
+            # Log audit event
+            AuditEvent.log_event(
+                user=current_user,
+                event_type='ad_sync',
+                action='sync_single_group',
+                resource_type='ad_group',
+                resource_id=group_id,
+                description=f'Sincronización individual del grupo AD: {ad_group.name}',
+                metadata={'group_id': group_id, 'group_name': ad_group.name},
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get('User-Agent')
+            )
+            
+            return jsonify({
+                'success': True, 
+                'message': f'Grupo {ad_group.name} sincronizado correctamente'
+            })
+        else:
+            return jsonify({
+                'success': False, 
+                'message': 'No se pudo sincronizar el grupo desde AD'
+            }), 400
+            
+    except Exception as e:
+        logger.error(f"Error syncing single group {group_id}: {str(e)}")
+        return jsonify({
+            'success': False, 
+            'message': f'Error durante la sincronización: {str(e)}'
+        }), 500
+
+@admin_bp.route('/ad-groups/<int:group_id>/toggle', methods=['POST'])
+@login_required
+@admin_required
+def toggle_ad_group_status(group_id):
+    """Toggle AD group active status"""
+    try:
+        ad_group = ADGroup.query.get_or_404(group_id)
+        old_status = ad_group.is_active
+        ad_group.is_active = not ad_group.is_active
+        
+        db.session.commit()
+        
+        # Log audit event
+        AuditEvent.log_event(
+            user=current_user,
+            event_type='ad_group_management',
+            action='toggle_status',
+            resource_type='ad_group',
+            resource_id=group_id,
+            description=f'Estado del grupo AD {ad_group.name} cambiado de {"activo" if old_status else "inactivo"} a {"activo" if ad_group.is_active else "inactivo"}',
+            metadata={
+                'group_id': group_id, 
+                'group_name': ad_group.name,
+                'old_status': old_status,
+                'new_status': ad_group.is_active
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent')
+        )
+        
+        return jsonify({
+            'success': True, 
+            'message': f'Estado del grupo {ad_group.name} actualizado',
+            'new_status': ad_group.is_active
+        })
+        
+    except Exception as e:
+        logger.error(f"Error toggling group status {group_id}: {str(e)}")
+        db.session.rollback()
+        return jsonify({
+            'success': False, 
+            'message': f'Error al cambiar el estado: {str(e)}'
+        }), 500
 
 # Audit and Reports
 @admin_bp.route('/audit')

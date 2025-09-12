@@ -361,6 +361,73 @@ class LDAPService:
                 pass
             raise e
     
+    def sync_single_group(self, group_dn):
+        """Sync a specific AD group by its Distinguished Name"""
+        try:
+            conn = self.get_connection()
+            if not conn:
+                logger.error("Could not connect to LDAP")
+                return False
+            
+            # Search for the specific group
+            search_filter = f"(distinguishedName={group_dn})"
+            attributes = ['cn', 'distinguishedName', 'description', 'groupType']
+            
+            conn.search(
+                search_base=group_dn,
+                search_filter='(objectClass=group)',
+                search_scope=ldap3.BASE,
+                attributes=attributes
+            )
+            
+            if not conn.entries:
+                logger.warning(f"Group not found in AD: {group_dn}")
+                return False
+            
+            entry = conn.entries[0]
+            group_name = str(entry.cn)
+            distinguished_name = str(entry.distinguishedName)
+            description = str(entry.description) if entry.description else None
+            group_type = str(entry.groupType) if entry.groupType else 'Security'
+            
+            current_time = datetime.utcnow()
+            
+            # Find existing group in database
+            ad_group = ADGroup.query.filter_by(distinguished_name=distinguished_name).first()
+            
+            if ad_group:
+                # Update existing group
+                ad_group.name = group_name
+                ad_group.distinguished_name = distinguished_name
+                ad_group.description = description
+                ad_group.group_type = group_type
+                ad_group.last_sync = current_time
+                ad_group.is_active = True
+                logger.info(f"Updated existing AD group: {group_name}")
+            else:
+                # Create new group
+                ad_group = ADGroup(
+                    name=group_name,
+                    distinguished_name=distinguished_name,
+                    description=description,
+                    group_type=group_type,
+                    is_active=True,
+                    last_sync=current_time
+                )
+                db.session.add(ad_group)
+                logger.info(f"Created new AD group: {group_name}")
+            
+            db.session.commit()
+            conn.unbind()
+            
+            logger.info(f"Single group sync completed for: {group_name}")
+            return True
+            
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error syncing single AD group {group_dn}: {str(e)}")
+            return False
+    
     def get_group_members(self, group_dn):
         """Get members of a specific group"""
         try:
