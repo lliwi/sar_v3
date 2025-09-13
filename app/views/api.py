@@ -956,6 +956,16 @@ def cancel_task(task_id):
         
         # Cancel the task
         task.cancel(cancelled_by=current_user, reason=reason)
+
+        # Clean up CSV file if it's an AD verification task
+        if task.task_type == 'ad_verification':
+            try:
+                from app.services.task_service import TaskService
+                task_service = TaskService()
+                task_service.cleanup_csv_file(task)
+            except Exception as e:
+                current_app.logger.warning(f"Error cleaning up CSV file for cancelled task {task.id}: {str(e)}")
+
         db.session.commit()
         
         # Log audit event

@@ -271,6 +271,10 @@ class TaskService:
                     'details': verification_result['details'],
                     'quick_success': True
                 })
+
+                # Clean up CSV file after successful quick AD verification
+                self.cleanup_csv_file(task)
+
                 return True
             else:
                 logger.info(f"Quick AD verification failed for task {task.id}, will be retried by background processor")
@@ -1795,6 +1799,10 @@ class TaskService:
                 )
                 
                 logger.info(f"AD verification task {task.id} completed successfully")
+
+                # Clean up CSV file after successful AD verification
+                self.cleanup_csv_file(task)
+
                 return True
             else:
                 # Schedule retry if not at max attempts
