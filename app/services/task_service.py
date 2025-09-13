@@ -248,7 +248,8 @@ class TaskService:
                 folder_path=permission_request.folder.path,
                 ad_group_name=permission_request.ad_group.name if permission_request.ad_group else None,
                 access_type=permission_request.permission_type,
-                action_type='add'
+                action_type='add',
+                requester_user=permission_request.requester
             )
 
             if verification_result['success']:
@@ -517,7 +518,8 @@ class TaskService:
                 folder_path=permission_request.folder.path,
                 ad_group_name=permission_request.ad_group.name if permission_request.ad_group else None,
                 access_type=permission_request.permission_type,
-                action_type='remove'  # For revocation, we're checking removal
+                action_type='remove',  # For revocation, we're checking removal
+                requester_user=permission_request.requester
             )
 
             if verification_result['success']:
@@ -936,11 +938,16 @@ class TaskService:
                     return False
             
             # Verify AD changes
+            # Get the requester from the permission request
+            from app.models import PermissionRequest
+            permission_request = PermissionRequest.query.get(task.permission_request_id)
+
             verification_result = self.verify_ad_changes(
                 folder_path=expected_changes.get('folder_path'),
                 ad_group_name=expected_changes.get('group'),
                 access_type=expected_changes.get('access_type'),
-                action_type=expected_changes.get('action', task_data.get('action', 'add'))
+                action_type=expected_changes.get('action', task_data.get('action', 'add')),
+                requester_user=permission_request.requester if permission_request else None
             )
             
             if verification_result['success']:
@@ -1000,7 +1007,7 @@ class TaskService:
         finally:
             db.session.commit()
     
-    def verify_ad_changes(self, folder_path, ad_group_name, access_type, action_type='add'):
+    def verify_ad_changes(self, folder_path, ad_group_name, access_type, action_type='add', requester_user=None):
         """Verify that AD changes have been applied"""
         try:
             logger.info(f"Verifying AD changes for {folder_path}, group {ad_group_name}, access {access_type}, action: {action_type}")
@@ -1051,10 +1058,9 @@ class TaskService:
                     'verification_timestamp': datetime.utcnow().isoformat()
                 }
                 
-                # Simulate checking folder permissions
-                # In production, you would use Windows PowerShell commands or 
-                # direct NTFS API calls to verify ACL changes
-                permissions_verified = self._simulate_folder_permission_check(folder_path, ad_group_name, access_type, action_type)
+                # Check if the requester user belongs to the AD group
+                # This is what actually matters for verification
+                permissions_verified = self._check_user_group_membership(requester_user, ad_group_name, action_type)
                 
                 verification_details['permissions_verified'] = permissions_verified
                 verification_details['action_type'] = action_type
@@ -1109,50 +1115,80 @@ class TaskService:
                 'details': {}
             }
     
-    def _simulate_folder_permission_check(self, folder_path, ad_group_name, access_type, action_type='add'):
-        """Simulate checking folder permissions (replace with actual implementation)"""
+    def _check_user_group_membership(self, requester_user, ad_group_name, action_type='add'):
+        """Check if user belongs to AD group using real LDAP query"""
         try:
-            # In a real implementation, this would:
-            # 1. Connect to the file server
-            # 2. Use PowerShell commands like Get-Acl to check folder permissions
-            # 3. Parse the ACL to find the specific group
-            # 4. Verify the access rights match the requested type
-            
-            # For simulation, we'll return True after a small delay
+            if not requester_user:
+                logger.error("No requester user provided for AD group membership check")
+                return False
+
             import time
-            time.sleep(0.5)  # Simulate network/filesystem check delay
-            
+            time.sleep(0.5)  # Simulate network/AD check delay
+
             is_removal_action = action_type in ['remove', 'remove_ad_sync', 'delete']
-            
-            logger.info(f"Simulated permission check for {folder_path}: {ad_group_name} -> {access_type} (action: {action_type})")
-            
-            # Simulate different behaviors for add vs remove operations
-            import random
-            
+
+            logger.info(f"Checking if user '{requester_user.username}' belongs to AD group: {ad_group_name} (action: {action_type})")
+
+            # Try to use LDAP service to check real group membership
+            try:
+                if self.ldap_service:
+                    # Get user's groups from Active Directory
+                    user_groups = self.ldap_service.get_user_groups(requester_user.username)
+
+                    # Check if the target group is in user's groups
+                    user_belongs_to_group = False
+                    if user_groups:
+                        # Look for the group name in the user's groups
+                        for group in user_groups:
+                            if isinstance(group, dict):
+                                group_name = group.get('name', '')
+                            else:
+                                group_name = str(group)
+
+                            if group_name.lower() == ad_group_name.lower():
+                                user_belongs_to_group = True
+                                break
+
+                    logger.info(f"LDAP check result: User '{requester_user.username}' {'belongs' if user_belongs_to_group else 'does not belong'} to group '{ad_group_name}'")
+
+                else:
+                    logger.warning("LDAP service not available, using fallback check")
+                    # Fallback to database check using UserADGroupMembership
+                    user_belongs_to_group = False
+                    for membership in requester_user.ad_group_memberships:
+                        if membership.ad_group.name.lower() == ad_group_name.lower() and membership.is_active:
+                            user_belongs_to_group = True
+                            break
+                    logger.info(f"Database fallback check: User '{requester_user.username}' {'belongs' if user_belongs_to_group else 'does not belong'} to group '{ad_group_name}'")
+
+            except Exception as ldap_error:
+                logger.warning(f"LDAP group membership check failed: {str(ldap_error)}")
+                # Final fallback - assume user does not belong to group for safety
+                user_belongs_to_group = False
+
+            # Apply the correct logic based on action type
             if is_removal_action:
-                # For removal operations, simulate that permissions are usually gone (90% success rate)
-                # Return False means "permission not found" which is success for removal
-                if random.random() < 0.9:
-                    logger.info(f"Simulated removal verification: permission NOT found (success)")
-                    return False  # Permission not found = successful removal
+                # For removal: Success if user does NOT belong to group
+                success = not user_belongs_to_group
+                if success:
+                    logger.info(f"REMOVAL verification SUCCESS: User '{requester_user.username}' no longer belongs to group '{ad_group_name}'")
                 else:
-                    logger.warning(f"Simulated removal verification: permission still exists (failure)")
-                    return True   # Permission still found = failed removal
+                    logger.warning(f"REMOVAL verification FAILED: User '{requester_user.username}' still belongs to group '{ad_group_name}'")
+                return not user_belongs_to_group  # Inverted for removal
             else:
-                # For addition operations, simulate that permissions are usually applied (90% success rate)
-                # Return True means "permission found" which is success for addition
-                if random.random() < 0.9:
-                    logger.info(f"Simulated addition verification: permission found (success)")
-                    return True   # Permission found = successful addition
+                # For addition: Success if user DOES belong to group
+                if user_belongs_to_group:
+                    logger.info(f"ADDITION verification SUCCESS: User '{requester_user.username}' belongs to group '{ad_group_name}'")
                 else:
-                    logger.warning(f"Simulated addition verification: permission NOT found (failure)")
-                    return False  # Permission not found = failed addition
-            
+                    logger.warning(f"ADDITION verification FAILED: User '{requester_user.username}' does not belong to group '{ad_group_name}'")
+                return user_belongs_to_group
+
         except Exception as e:
-            logger.error(f"Error in folder permission check simulation: {str(e)}")
-            # For removal operations, assume success on error
-            # For addition operations, assume failure on error
-            return action_type in ['remove', 'remove_ad_sync', 'delete']
+            logger.error(f"Error checking AD group membership for user '{requester_user.username if requester_user else 'None'}': {str(e)}")
+            # For errors, be conservative:
+            # - Removal operations: assume failure (user still in group)
+            # - Addition operations: assume failure (user not in group)
+            return False
     
     def process_pending_tasks(self):
         """Process all pending and retry tasks that are ready for execution"""
