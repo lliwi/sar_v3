@@ -22,7 +22,10 @@ class TaskService:
             'retry_delay': int(os.getenv('TASK_RETRY_DELAY', 300)),  # 5 minutes
             'cleanup_days': int(os.getenv('TASK_CLEANUP_DAYS', 30)),
             'batch_size': int(os.getenv('TASK_BATCH_SIZE', 10)),
-            'processing_interval': int(os.getenv('TASK_PROCESSING_INTERVAL', 300))
+            'processing_interval': int(os.getenv('TASK_PROCESSING_INTERVAL', 300)),
+            # Immediate execution timeouts
+            'immediate_airflow_timeout': int(os.getenv('IMMEDIATE_AIRFLOW_TIMEOUT', 300)),  # 5 minutes
+            'immediate_verification_timeout': int(os.getenv('IMMEDIATE_VERIFICATION_TIMEOUT', 60))  # 1 minute
         }
     
     def cleanup_csv_file(self, task):
@@ -49,97 +52,592 @@ class TaskService:
             return False
     
     def create_approval_tasks(self, permission_request, validator, csv_file_path=None):
-        """Create tasks when a permission request is approved"""
+        """Create tasks when a permission request is approved - with immediate execution optimization"""
         try:
             config = self.get_config()
-            logger.info(f"Starting task creation for permission request {permission_request.id}")
-            
+            logger.info(f"Starting optimized task creation for permission request {permission_request.id}")
+
             # Check if tasks already exist for this permission request
             from app.models import Task
             existing_tasks = Task.query.filter_by(permission_request_id=permission_request.id).all()
-            
+
             if existing_tasks:
                 logger.warning(f"Tasks already exist for permission request {permission_request.id}. Existing tasks: {[t.id for t in existing_tasks]}")
                 # Return existing tasks instead of creating duplicates
                 return existing_tasks
-            
-            # Task 1: Execute Airflow DAG
-            logger.debug(f"Creating Airflow task for request {permission_request.id}")
-            airflow_task = Task.create_airflow_task(permission_request, validator, csv_file_path)
-            # Update max_attempts from config
-            airflow_task.max_attempts = config['max_retries']
-            db.session.add(airflow_task)
-            db.session.flush()  # Get the ID
-            logger.info(f"Created Airflow task with ID {airflow_task.id} for request {permission_request.id}")
-            
-            # Task 2: Verify AD changes (delayed by retry_delay seconds)
-            logger.debug(f"Creating AD verification task for request {permission_request.id}")
-            verification_task = Task.create_ad_verification_task(permission_request, validator, delay_seconds=config['retry_delay'])
-            # Update max_attempts from config
-            verification_task.max_attempts = config['max_retries']
-            db.session.add(verification_task)
-            db.session.flush()
-            logger.info(f"Created AD verification task with ID {verification_task.id} for request {permission_request.id}")
-            
-            # Link tasks - verification task references airflow task
-            verification_data = verification_task.get_task_data()
-            verification_data['depends_on_task_id'] = airflow_task.id
-            verification_data['csv_file_path'] = os.path.basename(csv_file_path) if csv_file_path else None  # Store only filename for cleanup
-            verification_task.set_task_data(verification_data)
-            
-            db.session.commit()
-            
-            logger.info(f"Successfully created approval tasks for permission request {permission_request.id}: Airflow task {airflow_task.id}, Verification task {verification_task.id}")
-            return [airflow_task, verification_task]
-            
+
+            # OPTIMIZATION: Try immediate execution first
+            immediate_success = self._try_immediate_execution(permission_request, validator, csv_file_path)
+
+            if immediate_success:
+                logger.info(f"Successfully executed tasks immediately for permission request {permission_request.id}")
+                # Create only tracking tasks for audit purposes (already completed)
+                return self._create_completed_tracking_tasks(permission_request, validator, csv_file_path)
+
+            # Fallback: Create traditional queued tasks if immediate execution failed
+            logger.info(f"Immediate execution failed for request {permission_request.id}, falling back to queued tasks")
+            return self._create_queued_tasks(permission_request, validator, csv_file_path)
+
         except Exception as e:
             db.session.rollback()
             logger.error(f"Error creating approval tasks for request {permission_request.id}: {str(e)}")
             import traceback
             logger.error(f"Full traceback: {traceback.format_exc()}")
             return []
+
+    def _try_immediate_execution(self, permission_request, validator, csv_file_path):
+        """Try to execute Airflow DAG and AD verification immediately with proper dependency"""
+        try:
+            logger.info(f"Attempting immediate execution for permission request {permission_request.id}")
+
+            # Step 1: Try to execute Airflow DAG immediately
+            airflow_result = self._execute_airflow_immediately(permission_request, validator, csv_file_path)
+
+            if not airflow_result['success']:
+                logger.warning(f"Immediate Airflow execution failed for request {permission_request.id}")
+                return False
+
+            # Step 2: Wait for Airflow DAG completion with monitoring
+            config = self.get_config()
+            dag_completed = self._wait_for_airflow_completion(airflow_result['run_id'], timeout_seconds=config['immediate_airflow_timeout'])
+
+            if not dag_completed:
+                logger.warning(f"Airflow DAG did not complete successfully within timeout ({config['immediate_airflow_timeout']}s) for request {permission_request.id}")
+                return False
+
+            # Step 3: Now that Airflow has completed successfully, proceed with AD verification
+            verification_success = self._execute_ad_verification_immediately(permission_request)
+
+            if not verification_success:
+                logger.warning(f"Immediate AD verification failed for request {permission_request.id}")
+                return False
+
+            logger.info(f"Both Airflow and AD verification completed immediately for request {permission_request.id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error during immediate execution for request {permission_request.id}: {str(e)}")
+            return False
+
+    def _execute_airflow_immediately(self, permission_request, validator, csv_file_path):
+        """Execute Airflow DAG immediately and return execution details"""
+        try:
+            task_data = {
+                'permission_request_id': permission_request.id,
+                'folder_path': permission_request.folder.path,
+                'ad_group_name': permission_request.ad_group.name if permission_request.ad_group else None,
+                'permission_type': permission_request.permission_type,
+                'requester': permission_request.requester.username,
+                'validator': validator.username,
+                'csv_file_path': os.path.basename(csv_file_path) if csv_file_path else None
+            }
+
+            # Generate unique run ID for tracking
+            run_id = f"immediate__{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}_{permission_request.id}"
+
+            # Prepare configuration for Airflow DAG
+            conf = {
+                'change_file': task_data.get('csv_file_path'),
+                'request_ids': [permission_request.id],
+                'triggered_by': validator.username,
+                'folder_path': task_data.get('folder_path'),
+                'ad_group_name': task_data.get('ad_group_name'),
+                'permission_type': task_data.get('permission_type'),
+                'ad_source_domain': os.getenv('AD_DOMAIN_PREFIX', ''),
+                'ad_target_domain': os.getenv('AD_TARGET_DOMAIN', 'AUDI'),
+                'immediate_execution': True,
+                'custom_run_id': run_id
+            }
+
+            # Trigger Airflow DAG immediately
+            success = self.airflow_service.trigger_dag(conf)
+
+            if success:
+                logger.info(f"Airflow DAG triggered immediately for permission request {permission_request.id} with run_id: {run_id}")
+
+                # Log audit event for immediate execution
+                from app.models.audit_event import AuditEvent
+                AuditEvent.log_event(
+                    user=validator,
+                    event_type='task_execution',
+                    action='immediate_airflow_execution',
+                    resource_type='permission_request',
+                    resource_id=permission_request.id,
+                    description=f'DAG de Airflow ejecutado inmediatamente para solicitud #{permission_request.id}',
+                    metadata={
+                        'execution_type': 'immediate',
+                        'dag_id': self.airflow_service.dag_id,
+                        'run_id': run_id,
+                        'permission_request_id': permission_request.id,
+                        'config_sent': conf
+                    }
+                )
+
+                return {
+                    'success': True,
+                    'run_id': run_id,
+                    'dag_id': self.airflow_service.dag_id,
+                    'triggered_at': datetime.utcnow().isoformat()
+                }
+            else:
+                logger.warning(f"Immediate Airflow execution failed for request {permission_request.id}")
+                return {
+                    'success': False,
+                    'error': 'Failed to trigger Airflow DAG'
+                }
+
+        except Exception as e:
+            logger.error(f"Error in immediate Airflow execution for request {permission_request.id}: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def _wait_for_airflow_completion(self, run_id, timeout_seconds=300):
+        """Wait for Airflow DAG run to complete and return success status"""
+        try:
+            import time
+            start_time = time.time()
+            check_interval = 10  # Check every 10 seconds
+
+            logger.info(f"Waiting for Airflow DAG run {run_id} to complete (timeout: {timeout_seconds}s)")
+
+            while time.time() - start_time < timeout_seconds:
+                # Check DAG run status using Airflow service
+                dag_status = self.airflow_service.get_dag_run_status(run_id)
+
+                if dag_status:
+                    state = dag_status.get('state', '').lower()
+                    logger.debug(f"DAG run {run_id} status: {state}")
+
+                    if state == 'success':
+                        logger.info(f"DAG run {run_id} completed successfully")
+                        return True
+                    elif state in ['failed', 'cancelled', 'skipped']:
+                        logger.error(f"DAG run {run_id} failed with state: {state}")
+                        return False
+                    elif state in ['running', 'queued']:
+                        # Still running, continue waiting
+                        logger.debug(f"DAG run {run_id} still running, waiting...")
+                        time.sleep(check_interval)
+                        continue
+                    else:
+                        # Unknown state, continue monitoring but log warning
+                        logger.warning(f"DAG run {run_id} in unknown state: {state}, continuing to monitor")
+                        time.sleep(check_interval)
+                        continue
+                else:
+                    # Could not get status, might be connectivity issue
+                    logger.warning(f"Could not get status for DAG run {run_id}, retrying...")
+                    time.sleep(check_interval)
+                    continue
+
+            # Timeout reached
+            logger.error(f"Timeout waiting for DAG run {run_id} to complete after {timeout_seconds} seconds")
+            return False
+
+        except Exception as e:
+            logger.error(f"Error waiting for Airflow completion for run {run_id}: {str(e)}")
+            return False
+
+    def _execute_ad_verification_immediately(self, permission_request):
+        """Execute AD verification immediately"""
+        try:
+            # Verify AD changes immediately
+            verification_result = self.verify_ad_changes(
+                folder_path=permission_request.folder.path,
+                ad_group_name=permission_request.ad_group.name if permission_request.ad_group else None,
+                access_type=permission_request.permission_type,
+                action_type='add'
+            )
+
+            if verification_result['success']:
+                logger.info(f"Immediate AD verification successful for permission request {permission_request.id}")
+
+                # Log audit event for immediate verification
+                from app.models.audit_event import AuditEvent
+                AuditEvent.log_event(
+                    user=permission_request.validator,
+                    event_type='task_execution',
+                    action='immediate_ad_verification',
+                    resource_type='permission_request',
+                    resource_id=permission_request.id,
+                    description=f'Verificación AD ejecutada inmediatamente para solicitud #{permission_request.id}',
+                    metadata={
+                        'execution_type': 'immediate',
+                        'verification_details': verification_result['details'],
+                        'permission_request_id': permission_request.id
+                    }
+                )
+
+                return True
+            else:
+                logger.warning(f"Immediate AD verification failed for request {permission_request.id}: {verification_result.get('error')}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error in immediate AD verification for request {permission_request.id}: {str(e)}")
+            return False
+
+    def _create_completed_tracking_tasks(self, permission_request, validator, csv_file_path):
+        """Create tasks that are already marked as completed for tracking purposes"""
+        try:
+            from app.models import Task
+            config = self.get_config()
+
+            # Create Airflow task (already completed)
+            airflow_task = Task.create_airflow_task(permission_request, validator, csv_file_path)
+            airflow_task.max_attempts = config['max_retries']
+            airflow_task.status = 'completed'
+            airflow_task.completed_at = datetime.utcnow()
+            airflow_task.set_result_data({
+                'execution_type': 'immediate',
+                'dag_triggered': True,
+                'execution_time': datetime.utcnow().isoformat(),
+                'immediate_success': True
+            })
+            db.session.add(airflow_task)
+            db.session.flush()
+
+            # Create verification task (already completed)
+            verification_task = Task.create_ad_verification_task(permission_request, validator, delay_seconds=0)
+            verification_task.max_attempts = config['max_retries']
+            verification_task.status = 'completed'
+            verification_task.completed_at = datetime.utcnow()
+            verification_task.set_result_data({
+                'execution_type': 'immediate',
+                'verification_status': 'success',
+                'ad_permissions_applied': True,
+                'verification_time': datetime.utcnow().isoformat(),
+                'immediate_success': True
+            })
+
+            # Link tasks
+            verification_data = verification_task.get_task_data()
+            verification_data['depends_on_task_id'] = airflow_task.id
+            verification_data['csv_file_path'] = os.path.basename(csv_file_path) if csv_file_path else None
+            verification_task.set_task_data(verification_data)
+
+            db.session.add(verification_task)
+            db.session.commit()
+
+            logger.info(f"Created completed tracking tasks for permission request {permission_request.id}")
+            return [airflow_task, verification_task]
+
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error creating completed tracking tasks for request {permission_request.id}: {str(e)}")
+            return []
+
+    def _create_queued_tasks(self, permission_request, validator, csv_file_path):
+        """Create traditional queued tasks (original behavior)"""
+        try:
+            from app.models import Task
+            config = self.get_config()
+
+            # Task 1: Execute Airflow DAG (queued)
+            logger.debug(f"Creating queued Airflow task for request {permission_request.id}")
+            airflow_task = Task.create_airflow_task(permission_request, validator, csv_file_path)
+            airflow_task.max_attempts = config['max_retries']
+            airflow_task.next_execution_at = datetime.utcnow()  # Execute ASAP but through queue
+            db.session.add(airflow_task)
+            db.session.flush()
+            logger.info(f"Created queued Airflow task with ID {airflow_task.id} for request {permission_request.id}")
+
+            # Task 2: Verify AD changes (queued with delay)
+            logger.debug(f"Creating queued AD verification task for request {permission_request.id}")
+            verification_task = Task.create_ad_verification_task(permission_request, validator, delay_seconds=config['retry_delay'])
+            verification_task.max_attempts = config['max_retries']
+            db.session.add(verification_task)
+            db.session.flush()
+            logger.info(f"Created queued AD verification task with ID {verification_task.id} for request {permission_request.id}")
+
+            # Link tasks
+            verification_data = verification_task.get_task_data()
+            verification_data['depends_on_task_id'] = airflow_task.id
+            verification_data['csv_file_path'] = os.path.basename(csv_file_path) if csv_file_path else None
+            verification_task.set_task_data(verification_data)
+
+            db.session.commit()
+
+            logger.info(f"Successfully created queued approval tasks for permission request {permission_request.id}")
+            return [airflow_task, verification_task]
+
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error creating queued tasks for request {permission_request.id}: {str(e)}")
+            return []
     
     def create_revocation_tasks(self, permission_request, validator, csv_file_path=None):
-        """Create tasks when a permission request is revoked"""
+        """Create tasks when a permission request is revoked - with immediate execution optimization"""
         try:
             # Check if revocation tasks already exist for this permission request
             from app.models import Task
             existing_tasks = Task.query.filter_by(permission_request_id=permission_request.id).filter(
                 Task.name.contains('revocation')
             ).all()
-            
+
             if existing_tasks:
                 logger.warning(f"Revocation tasks already exist for permission request {permission_request.id}. Existing tasks: {[t.id for t in existing_tasks]}")
                 return existing_tasks
-                
-            # Task 1: Execute Airflow DAG for revocation
-            airflow_task = Task.create_airflow_task(permission_request, validator, csv_file_path)
-            # Update the task name to reflect it's a revocation
-            airflow_task.name = f"Airflow DAG revocation for request #{permission_request.id}"
-            db.session.add(airflow_task)
-            db.session.flush()  # Get the ID
-            
-            # Task 2: Verify AD changes (delayed 30 seconds)
-            verification_task = Task.create_ad_verification_task(permission_request, validator, delay_seconds=30)
-            # Update the task name to reflect it's a revocation verification
-            verification_task.name = f"AD revocation verification for request #{permission_request.id}"
-            db.session.add(verification_task)
-            db.session.flush()
-            
-            # Link tasks - verification task references airflow task
-            verification_data = verification_task.get_task_data()
-            verification_data['depends_on_task_id'] = airflow_task.id
-            verification_data['csv_file_path'] = os.path.basename(csv_file_path) if csv_file_path else None  # Store only filename for cleanup
-            verification_task.set_task_data(verification_data)
-            
-            db.session.commit()
-            
-            logger.info(f"Created revocation tasks for permission request {permission_request.id}")
-            return [airflow_task, verification_task]
-            
+
+            # OPTIMIZATION: Try immediate execution first for revocation
+            immediate_success = self._try_immediate_revocation_execution(permission_request, validator, csv_file_path)
+
+            if immediate_success:
+                logger.info(f"Successfully executed revocation tasks immediately for permission request {permission_request.id}")
+                # Create only tracking tasks for audit purposes (already completed)
+                return self._create_completed_revocation_tracking_tasks(permission_request, validator, csv_file_path)
+
+            # Fallback: Create traditional queued revocation tasks if immediate execution failed
+            logger.info(f"Immediate revocation execution failed for request {permission_request.id}, falling back to queued tasks")
+            return self._create_queued_revocation_tasks(permission_request, validator, csv_file_path)
+
         except Exception as e:
             db.session.rollback()
             logger.error(f"Error creating revocation tasks: {str(e)}")
+            return []
+
+    def _try_immediate_revocation_execution(self, permission_request, validator, csv_file_path):
+        """Try to execute Airflow DAG and AD verification immediately for revocation with proper dependency"""
+        try:
+            logger.info(f"Attempting immediate revocation execution for permission request {permission_request.id}")
+
+            # Step 1: Try to execute Airflow DAG immediately for revocation
+            airflow_result = self._execute_airflow_revocation_immediately(permission_request, validator, csv_file_path)
+
+            if not airflow_result['success']:
+                logger.warning(f"Immediate Airflow revocation execution failed for request {permission_request.id}")
+                return False
+
+            # Step 2: Wait for Airflow DAG completion with monitoring
+            config = self.get_config()
+            dag_completed = self._wait_for_airflow_completion(airflow_result['run_id'], timeout_seconds=config['immediate_airflow_timeout'])
+
+            if not dag_completed:
+                logger.warning(f"Airflow revocation DAG did not complete successfully within timeout ({config['immediate_airflow_timeout']}s) for request {permission_request.id}")
+                return False
+
+            # Step 3: Now that Airflow has completed successfully, proceed with AD verification
+            verification_success = self._execute_ad_revocation_verification_immediately(permission_request)
+
+            if not verification_success:
+                logger.warning(f"Immediate AD revocation verification failed for request {permission_request.id}")
+                return False
+
+            logger.info(f"Both Airflow revocation and AD verification completed immediately for request {permission_request.id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error during immediate revocation execution for request {permission_request.id}: {str(e)}")
+            return False
+
+    def _execute_airflow_revocation_immediately(self, permission_request, validator, csv_file_path):
+        """Execute Airflow DAG immediately for revocation and return execution details"""
+        try:
+            task_data = {
+                'permission_request_id': permission_request.id,
+                'folder_path': permission_request.folder.path,
+                'ad_group_name': permission_request.ad_group.name if permission_request.ad_group else None,
+                'permission_type': permission_request.permission_type,
+                'requester': permission_request.requester.username,
+                'validator': validator.username,
+                'csv_file_path': os.path.basename(csv_file_path) if csv_file_path else None,
+                'action': 'revoke'
+            }
+
+            # Generate unique run ID for tracking
+            run_id = f"immediate_revoke__{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}_{permission_request.id}"
+
+            # Prepare configuration for Airflow DAG (revocation)
+            conf = {
+                'change_file': task_data.get('csv_file_path'),
+                'request_ids': [permission_request.id],
+                'triggered_by': validator.username,
+                'folder_path': task_data.get('folder_path'),
+                'ad_group_name': task_data.get('ad_group_name'),
+                'permission_type': task_data.get('permission_type'),
+                'action_type': 'revoke',
+                'ad_source_domain': os.getenv('AD_DOMAIN_PREFIX', ''),
+                'ad_target_domain': os.getenv('AD_TARGET_DOMAIN', 'AUDI'),
+                'immediate_execution': True,
+                'custom_run_id': run_id
+            }
+
+            # Trigger Airflow DAG immediately for revocation
+            success = self.airflow_service.trigger_dag(conf)
+
+            if success:
+                logger.info(f"Airflow DAG triggered immediately for revocation of permission request {permission_request.id} with run_id: {run_id}")
+
+                # Log audit event for immediate revocation execution
+                from app.models.audit_event import AuditEvent
+                AuditEvent.log_event(
+                    user=validator,
+                    event_type='task_execution',
+                    action='immediate_airflow_revocation',
+                    resource_type='permission_request',
+                    resource_id=permission_request.id,
+                    description=f'DAG de Airflow ejecutado inmediatamente para revocación de solicitud #{permission_request.id}',
+                    metadata={
+                        'execution_type': 'immediate',
+                        'action_type': 'revoke',
+                        'dag_id': self.airflow_service.dag_id,
+                        'run_id': run_id,
+                        'permission_request_id': permission_request.id,
+                        'config_sent': conf
+                    }
+                )
+
+                return {
+                    'success': True,
+                    'run_id': run_id,
+                    'dag_id': self.airflow_service.dag_id,
+                    'triggered_at': datetime.utcnow().isoformat()
+                }
+            else:
+                logger.warning(f"Immediate Airflow revocation execution failed for request {permission_request.id}")
+                return {
+                    'success': False,
+                    'error': 'Failed to trigger Airflow revocation DAG'
+                }
+
+        except Exception as e:
+            logger.error(f"Error in immediate Airflow revocation execution for request {permission_request.id}: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def _execute_ad_revocation_verification_immediately(self, permission_request):
+        """Execute AD verification immediately for revocation"""
+        try:
+            # Verify AD changes immediately for revocation (check that permissions are removed)
+            verification_result = self.verify_ad_changes(
+                folder_path=permission_request.folder.path,
+                ad_group_name=permission_request.ad_group.name if permission_request.ad_group else None,
+                access_type=permission_request.permission_type,
+                action_type='remove'  # For revocation, we're checking removal
+            )
+
+            if verification_result['success']:
+                logger.info(f"Immediate AD revocation verification successful for permission request {permission_request.id}")
+
+                # Log audit event for immediate revocation verification
+                from app.models.audit_event import AuditEvent
+                AuditEvent.log_event(
+                    user=permission_request.validator,
+                    event_type='task_execution',
+                    action='immediate_ad_revocation_verification',
+                    resource_type='permission_request',
+                    resource_id=permission_request.id,
+                    description=f'Verificación AD de revocación ejecutada inmediatamente para solicitud #{permission_request.id}',
+                    metadata={
+                        'execution_type': 'immediate',
+                        'action_type': 'remove',
+                        'verification_details': verification_result['details'],
+                        'permission_request_id': permission_request.id
+                    }
+                )
+
+                return True
+            else:
+                logger.warning(f"Immediate AD revocation verification failed for request {permission_request.id}: {verification_result.get('error')}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error in immediate AD revocation verification for request {permission_request.id}: {str(e)}")
+            return False
+
+    def _create_completed_revocation_tracking_tasks(self, permission_request, validator, csv_file_path):
+        """Create revocation tasks that are already marked as completed for tracking purposes"""
+        try:
+            from app.models import Task
+            config = self.get_config()
+
+            # Create Airflow revocation task (already completed)
+            airflow_task = Task.create_airflow_task(permission_request, validator, csv_file_path)
+            airflow_task.name = f"Airflow DAG revocation for request #{permission_request.id}"
+            airflow_task.max_attempts = config['max_retries']
+            airflow_task.status = 'completed'
+            airflow_task.completed_at = datetime.utcnow()
+            airflow_task.set_result_data({
+                'execution_type': 'immediate',
+                'action_type': 'revoke',
+                'dag_triggered': True,
+                'execution_time': datetime.utcnow().isoformat(),
+                'immediate_success': True
+            })
+            db.session.add(airflow_task)
+            db.session.flush()
+
+            # Create revocation verification task (already completed)
+            verification_task = Task.create_ad_verification_task(permission_request, validator, delay_seconds=0)
+            verification_task.name = f"AD revocation verification for request #{permission_request.id}"
+            verification_task.max_attempts = config['max_retries']
+            verification_task.status = 'completed'
+            verification_task.completed_at = datetime.utcnow()
+            verification_task.set_result_data({
+                'execution_type': 'immediate',
+                'action_type': 'remove',
+                'verification_status': 'success',
+                'ad_permissions_removed': True,
+                'verification_time': datetime.utcnow().isoformat(),
+                'immediate_success': True
+            })
+
+            # Link tasks
+            verification_data = verification_task.get_task_data()
+            verification_data['depends_on_task_id'] = airflow_task.id
+            verification_data['csv_file_path'] = os.path.basename(csv_file_path) if csv_file_path else None
+            verification_task.set_task_data(verification_data)
+
+            db.session.add(verification_task)
+            db.session.commit()
+
+            logger.info(f"Created completed revocation tracking tasks for permission request {permission_request.id}")
+            return [airflow_task, verification_task]
+
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error creating completed revocation tracking tasks for request {permission_request.id}: {str(e)}")
+            return []
+
+    def _create_queued_revocation_tasks(self, permission_request, validator, csv_file_path):
+        """Create traditional queued revocation tasks (original behavior)"""
+        try:
+            from app.models import Task
+            config = self.get_config()
+
+            # Task 1: Execute Airflow DAG for revocation (queued)
+            airflow_task = Task.create_airflow_task(permission_request, validator, csv_file_path)
+            airflow_task.name = f"Airflow DAG revocation for request #{permission_request.id}"
+            airflow_task.max_attempts = config['max_retries']
+            airflow_task.next_execution_at = datetime.utcnow()  # Execute ASAP but through queue
+            db.session.add(airflow_task)
+            db.session.flush()
+
+            # Task 2: Verify AD changes for revocation (queued with delay)
+            verification_task = Task.create_ad_verification_task(permission_request, validator, delay_seconds=30)
+            verification_task.name = f"AD revocation verification for request #{permission_request.id}"
+            verification_task.max_attempts = config['max_retries']
+            db.session.add(verification_task)
+            db.session.flush()
+
+            # Link tasks
+            verification_data = verification_task.get_task_data()
+            verification_data['depends_on_task_id'] = airflow_task.id
+            verification_data['csv_file_path'] = os.path.basename(csv_file_path) if csv_file_path else None
+            verification_task.set_task_data(verification_data)
+
+            db.session.commit()
+
+            logger.info(f"Created queued revocation tasks for permission request {permission_request.id}")
+            return [airflow_task, verification_task]
+
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error creating queued revocation tasks for request {permission_request.id}: {str(e)}")
             return []
     
     def create_permission_change_tasks(self, permission_request, validator, existing_permission_info):
@@ -340,15 +838,18 @@ class TaskService:
             
             task_data = task.get_task_data()
             
-            # Prepare configuration for Airflow
+            # Prepare configuration for Airflow DAG
+            # Use the expected format for compatibility with Airflow DAG
+            csv_filename = task_data.get('csv_file_path')
             conf = {
-                'permission_request_id': task_data.get('permission_request_id'),
+                'change_file': csv_filename,
+                'request_ids': [task_data.get('permission_request_id')],
+                'triggered_by': task_data.get('validator', 'system'),
                 'folder_path': task_data.get('folder_path'),
                 'ad_group_name': task_data.get('ad_group_name'),
                 'permission_type': task_data.get('permission_type'),
-                'requester': task_data.get('requester'),
-                'validator': task_data.get('validator'),
-                'csv_file_path': task_data.get('csv_file_path'),
+                'ad_source_domain': os.getenv('AD_DOMAIN_PREFIX', ''),
+                'ad_target_domain': os.getenv('AD_TARGET_DOMAIN', 'AUDI'),
                 'task_id': task.id,
                 'execution_timestamp': datetime.utcnow().isoformat()
             }
@@ -358,10 +859,11 @@ class TaskService:
             
             if success:
                 result_data = {
+                    'dag_triggered': True,
                     'dag_execution_status': 'triggered',
                     'dag_id': self.airflow_service.dag_id,
-                    'execution_time': datetime.utcnow().isoformat(),
-                    'config_sent': conf
+                    'configuration': conf,
+                    'execution_time': datetime.utcnow().isoformat()
                 }
                 task.mark_as_completed(result_data)
                 
@@ -381,6 +883,10 @@ class TaskService:
                 )
                 
                 logger.info(f"Airflow task {task.id} completed successfully")
+
+                # Execute dependent tasks immediately
+                self._execute_dependent_tasks_immediately(task)
+
                 return True
             else:
                 error_msg = "Failed to trigger Airflow DAG"
@@ -409,21 +915,24 @@ class TaskService:
     def execute_ad_verification_task(self, task):
         """Execute an AD verification task"""
         try:
+            config = self.get_config()
             task.mark_as_running()
             db.session.commit()
-            
+
             task_data = task.get_task_data()
             expected_changes = task_data.get('expected_changes', {})
-            
+
             # Check if dependent Airflow task is completed
             depends_on_task_id = task_data.get('depends_on_task_id')
             if depends_on_task_id:
                 airflow_task = Task.query.get(depends_on_task_id)
                 if not airflow_task or not airflow_task.is_completed():
                     # Reschedule verification for later
-                    task.schedule_retry(delay_seconds=config['retry_delay'])
+                    retry_scheduled = task.schedule_retry(delay_seconds=config['retry_delay'])
+                    if not retry_scheduled:
+                        task.mark_as_failed(f"Max retries exceeded waiting for Airflow task {depends_on_task_id}")
                     db.session.commit()
-                    logger.info(f"AD verification task {task.id} rescheduled - waiting for Airflow task completion")
+                    logger.info(f"AD verification task {task.id} rescheduled - waiting for Airflow task {depends_on_task_id} completion")
                     return False
             
             # Verify AD changes
@@ -692,132 +1201,7 @@ class TaskService:
             logger.error(f"Error processing pending tasks: {str(e)}")
             return 0
     
-    def execute_airflow_task(self, task):
-        """Execute an Airflow DAG task"""
-        try:
-            task.mark_as_running()
-            db.session.commit()
-            
-            task_data = task.get_task_data()
-            csv_filename = task_data.get('csv_file_path')
-            
-            # Prepare configuration for Airflow DAG
-            # csv_filename now already contains only the filename
-            conf = {
-                'change_file': csv_filename,
-                'request_ids': [task_data.get('permission_request_id')],
-                'triggered_by': task_data.get('validator', 'system'),
-                'folder_path': task_data.get('folder_path'),
-                'ad_group_name': task_data.get('ad_group_name'),
-                'permission_type': task_data.get('permission_type'),
-                'ad_source_domain': os.getenv('AD_DOMAIN_PREFIX', ''),
-                'ad_target_domain': os.getenv('AD_TARGET_DOMAIN', 'AUDI')
-            }
-            
-            # Trigger Airflow DAG
-            success = self.airflow_service.trigger_dag(conf)
-            
-            if success:
-                result_data = {
-                    'dag_triggered': True,
-                    'configuration': conf,
-                    'execution_time': datetime.utcnow().isoformat()
-                }
-                task.mark_as_completed(result_data)
-                logger.info(f"Airflow task {task.id} completed successfully")
-                # Note: CSV cleanup is handled by AD verification task
-            else:
-                task.mark_as_failed("Failed to trigger Airflow DAG")
-                logger.error(f"Airflow task {task.id} failed to trigger DAG")
-                # Note: CSV cleanup is handled by AD verification task
-            
-            db.session.commit()
-            return success
-            
-        except Exception as e:
-            logger.error(f"Error executing Airflow task {task.id}: {str(e)}")
-            task.mark_as_failed(str(e))
-            db.session.commit()
-            return False
     
-    def execute_ad_verification_task(self, task):
-        """Execute an AD verification task"""
-        try:
-            task.mark_as_running()
-            db.session.commit()
-            
-            task_data = task.get_task_data()
-            permission_request_id = task_data.get('permission_request_id')
-            
-            # Get permission request (may be None for temporary objects)
-            permission_request = None
-            if permission_request_id:
-                permission_request = PermissionRequest.query.get(permission_request_id)
-                if not permission_request:
-                    task.mark_as_failed(f"Permission request {permission_request_id} not found")
-                    db.session.commit()
-                    return False
-            # If permission_request_id is None, we continue without the permission_request object
-            # This is normal for temporary objects created during deletion processes
-            
-            # Get folder_id from task_data or permission_request
-            folder_id = task_data.get('folder_id')
-            if not folder_id and permission_request:
-                folder_id = permission_request.folder_id
-            
-            if not folder_id:
-                task.mark_as_failed("No folder_id available for verification")
-                db.session.commit()
-                return False
-            
-            # Use the corrected verify_ad_changes method
-            expected_changes = task_data.get('expected_changes', {})
-            
-            # Verify AD changes using the corrected logic for deletions
-            verification_result = self.verify_ad_changes(
-                folder_path=expected_changes.get('folder_path'),
-                ad_group_name=expected_changes.get('group'),
-                access_type=expected_changes.get('access_type'),
-                action_type=expected_changes.get('action', task_data.get('action', 'add'))
-            )
-            
-            result_data = {
-                'verification_status': 'success' if verification_result['success'] else 'failed',
-                'ad_permissions_applied': verification_result['success'],
-                'verification_time': datetime.utcnow().isoformat(),
-                'details': verification_result['details']
-            }
-            
-            if verification_result['success']:
-                task.mark_as_completed(result_data)
-                logger.info(f"AD verification task {task.id} completed successfully")
-                
-                # Clean up CSV file after successful AD verification
-                self.cleanup_csv_file(task)
-                
-                success = True
-            else:
-                error_msg = verification_result.get('error', 'Unknown verification error')
-                task.mark_as_failed(f"AD verification failed: {error_msg}", result_data)
-                logger.error(f"AD verification task {task.id} failed: {error_msg}")
-                
-                # Clean up CSV file after permanent AD verification failure
-                self.cleanup_csv_file(task)
-                
-                success = False
-            
-            db.session.commit()
-            return success
-            
-        except Exception as e:
-            logger.error(f"Error executing AD verification task {task.id}: {str(e)}")
-            task.mark_as_failed(str(e))
-            
-            # Clean up CSV file after AD verification error
-            self.cleanup_csv_file(task)
-            
-            db.session.commit()
-            return False
     
     def validate_before_approval(self, permission_request):
         """
@@ -1421,3 +1805,51 @@ def create_permission_deletion_task(permission_request, deleted_by, csv_file_pat
         db.session.rollback()
         logger.error(f"Error creating permission request deletion tasks: {str(e)}")
         return None
+
+    def _execute_dependent_tasks_immediately(self, completed_task):
+        """Execute tasks that depend on the completed task immediately"""
+        try:
+            # Find tasks that depend on this completed task
+            from app.models import Task
+            dependent_tasks = Task.query.filter_by(
+                status='pending'
+            ).filter(
+                Task.task_data.contains(f'"depends_on_task_id": {completed_task.id}')
+            ).all()
+
+            if not dependent_tasks:
+                logger.debug(f"No dependent tasks found for completed task {completed_task.id}")
+                return
+
+            logger.info(f"Found {len(dependent_tasks)} dependent tasks for task {completed_task.id}")
+
+            for dependent_task in dependent_tasks:
+                logger.info(f"Executing dependent task {dependent_task.id} immediately")
+
+                try:
+                    # Execute the dependent task immediately based on its type
+                    if dependent_task.task_type == 'ad_verification':
+                        success = self.execute_ad_verification_task(dependent_task)
+                        if success:
+                            logger.info(f"Dependent AD verification task {dependent_task.id} completed immediately")
+                        else:
+                            logger.warning(f"Dependent AD verification task {dependent_task.id} failed immediate execution")
+
+                    elif dependent_task.task_type == 'airflow_dag':
+                        success = self.execute_airflow_task(dependent_task)
+                        if success:
+                            logger.info(f"Dependent Airflow task {dependent_task.id} completed immediately")
+                        else:
+                            logger.warning(f"Dependent Airflow task {dependent_task.id} failed immediate execution")
+
+                    else:
+                        logger.warning(f"Unknown task type {dependent_task.task_type} for dependent task {dependent_task.id}")
+
+                except Exception as e:
+                    logger.error(f"Error executing dependent task {dependent_task.id}: {str(e)}")
+                    # If immediate execution fails, the task will remain in pending status
+                    # and will be picked up by the normal scheduler cycle for retry
+
+        except Exception as e:
+            logger.error(f"Error finding/executing dependent tasks for task {completed_task.id}: {str(e)}")
+            # Don't raise exception to avoid affecting the parent task completion
