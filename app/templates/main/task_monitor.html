@@ -248,10 +248,10 @@
                                                 {% endif %}
                                             </td>
                                             <td>
-                                                <small>{{ task.created_at.strftime('%d/%m/%Y %H:%M') }}</small>
+                                                <small>{{ task.created_at|local_datetime }}</small>
                                             </td>
                                             <td>
-                                                <small>{{ task.updated_at.strftime('%d/%m/%Y %H:%M') if task.updated_at else 'N/A' }}</small>
+                                                <small>{{ task.updated_at|local_datetime if task.updated_at else 'N/A' }}</small>
                                             </td>
                                             <td>
                                                 <span class="badge {% if task.attempt_count >= task.max_attempts %}bg-danger{% elif task.attempt_count > 0 %}bg-warning{% else %}bg-secondary{% endif %}">
@@ -660,12 +660,14 @@ function getStatusText(status) {
 
 function formatDate(dateString) {
     const date = new Date(dateString);
+    // Convert to local timezone that matches server timezone ({{ get_local_timezone() }})
     return date.toLocaleDateString('es-ES', {
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
         hour: '2-digit',
-        minute: '2-digit'
+        minute: '2-digit',
+        timeZone: '{{ get_local_timezone() }}'
     });
 }
 

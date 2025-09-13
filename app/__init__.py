@@ -133,7 +133,20 @@ def create_app(config_name=None):
     app.register_blueprint(main_bp)
     app.register_blueprint(api_bp, url_prefix='/api')
     app.register_blueprint(admin_bp, url_prefix='/admin')
-    
+
+    # Register timezone template filters
+    from app.utils.timezone import format_local_datetime, get_timezone_name
+
+    @app.template_filter('local_datetime')
+    def local_datetime_filter(utc_datetime, format_str='%d/%m/%Y %H:%M'):
+        """Filter to convert UTC datetime to local timezone"""
+        return format_local_datetime(utc_datetime, format_str)
+
+    @app.template_global()
+    def get_local_timezone():
+        """Template global to get timezone name"""
+        return get_timezone_name()
+
     # Create tables and default data only if needed
     with app.app_context():
         # Only create tables if they don't exist (safer for production)

@@ -149,6 +149,15 @@ class Task(db.Model):
         self.set_result_data(cancellation_data)
     
     def to_dict(self):
+        from app.utils.timezone import utc_to_local
+
+        # Convert UTC datetimes to local timezone for JSON serialization
+        def format_datetime(dt):
+            if dt:
+                local_dt = utc_to_local(dt)
+                return local_dt.isoformat() if local_dt else None
+            return None
+
         return {
             'id': self.id,
             'name': self.name,
@@ -156,17 +165,17 @@ class Task(db.Model):
             'status': self.status,
             'attempt_count': self.attempt_count,
             'max_attempts': self.max_attempts,
-            'next_execution_at': self.next_execution_at.isoformat() if self.next_execution_at else None,
+            'next_execution_at': format_datetime(self.next_execution_at),
             'delay_seconds': self.delay_seconds,
             'task_data': self.get_task_data(),
             'result_data': self.get_result_data(),
             'error_message': self.error_message,
             'permission_request_id': self.permission_request_id,
             'created_by': self.created_by.username if self.created_by else None,
-            'created_at': self.created_at.isoformat(),
-            'updated_at': self.updated_at.isoformat(),
-            'started_at': self.started_at.isoformat() if self.started_at else None,
-            'completed_at': self.completed_at.isoformat() if self.completed_at else None
+            'created_at': format_datetime(self.created_at),
+            'updated_at': format_datetime(self.updated_at),
+            'started_at': format_datetime(self.started_at),
+            'completed_at': format_datetime(self.completed_at)
         }
 
     @classmethod
