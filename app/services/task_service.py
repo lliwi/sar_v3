@@ -25,7 +25,10 @@ class TaskService:
             'processing_interval': int(os.getenv('TASK_PROCESSING_INTERVAL', 300)),
             # Immediate execution timeouts
             'immediate_airflow_timeout': int(os.getenv('IMMEDIATE_AIRFLOW_TIMEOUT', 300)),  # 5 minutes
-            'immediate_verification_timeout': int(os.getenv('IMMEDIATE_VERIFICATION_TIMEOUT', 60))  # 1 minute
+            'immediate_verification_timeout': int(os.getenv('IMMEDIATE_VERIFICATION_TIMEOUT', 60)),  # 1 minute
+            # Immediate execution retry delays (shorter for immediate execution)
+            'immediate_airflow_retry_delay': int(os.getenv('IMMEDIATE_AIRFLOW_RETRY_DELAY', 30)),  # 30 seconds
+            'immediate_ad_retry_delay': int(os.getenv('IMMEDIATE_AD_RETRY_DELAY', 60))  # 60 seconds
         }
     
     def cleanup_csv_file(self, task):
@@ -66,24 +69,434 @@ class TaskService:
                 # Return existing tasks instead of creating duplicates
                 return existing_tasks
 
-            # OPTIMIZATION: Try immediate execution first
-            immediate_success = self._try_immediate_execution(permission_request, validator, csv_file_path)
+            # OPTIMIZATION: Try immediate execution first by creating tasks and executing them immediately
+            immediate_result = self._try_immediate_execution_with_tasks(permission_request, validator, csv_file_path)
 
-            if immediate_success:
+            if immediate_result['success']:
                 logger.info(f"Successfully executed tasks immediately for permission request {permission_request.id}")
-                # Create only tracking tasks for audit purposes (already completed)
-                return self._create_completed_tracking_tasks(permission_request, validator, csv_file_path)
+                return immediate_result['tasks']
 
-            # Fallback: Create traditional queued tasks if immediate execution failed
-            logger.info(f"Immediate execution failed for request {permission_request.id}, falling back to queued tasks")
-            return self._create_queued_tasks(permission_request, validator, csv_file_path)
+            # Fallback: If immediate execution failed, convert existing tasks to queued mode
+            logger.info(f"Immediate execution failed for request {permission_request.id}, converting tasks to queued mode")
+            return self._convert_tasks_to_queued_mode(immediate_result['tasks'], permission_request, validator)
 
         except Exception as e:
             db.session.rollback()
             logger.error(f"Error creating approval tasks for request {permission_request.id}: {str(e)}")
             import traceback
             logger.error(f"Full traceback: {traceback.format_exc()}")
-            return []
+
+            # Final fallback: try to create simple queued tasks
+            try:
+                logger.info(f"Attempting fallback task creation for request {permission_request.id}")
+                return self._create_queued_tasks(permission_request, validator, csv_file_path)
+            except Exception as fallback_error:
+                logger.error(f"Fallback task creation also failed for request {permission_request.id}: {str(fallback_error)}")
+                return []
+
+    def _try_immediate_execution_with_tasks(self, permission_request, validator, csv_file_path):
+        """Create tasks and try to execute them immediately with proper attempt tracking"""
+        try:
+            from app.models import Task
+            config = self.get_config()
+            logger.info(f"Creating tasks and attempting immediate execution for permission request {permission_request.id}")
+
+            # Step 1: Create tasks first (so we can track attempts in DB)
+            airflow_task = Task.create_airflow_task(permission_request, validator, csv_file_path)
+            airflow_task.max_attempts = config['max_retries']
+            airflow_task.next_execution_at = datetime.utcnow()
+            db.session.add(airflow_task)
+            db.session.flush()
+
+            verification_task = Task.create_ad_verification_task(permission_request, validator, delay_seconds=0)
+            verification_task.max_attempts = config['max_retries']
+            # Link tasks
+            verification_data = verification_task.get_task_data()
+            verification_data['depends_on_task_id'] = airflow_task.id
+            verification_data['csv_file_path'] = os.path.basename(csv_file_path) if csv_file_path else None
+            verification_task.set_task_data(verification_data)
+            db.session.add(verification_task)
+            db.session.flush()
+
+            # Step 2: Try quick Airflow execution (single attempt, no blocking)
+            airflow_success = self._try_quick_airflow_execution(airflow_task, permission_request, validator, csv_file_path)
+
+            if airflow_success:
+                # Step 3: Try quick AD verification (single attempt, no blocking)
+                verification_success = self._try_quick_ad_verification(verification_task, permission_request)
+
+                if verification_success:
+                    logger.info(f"Both Airflow and AD verification completed quickly for request {permission_request.id}")
+                    db.session.commit()
+                    return {'success': True, 'tasks': [airflow_task, verification_task]}
+                else:
+                    logger.info(f"Quick AD verification failed for request {permission_request.id}, will retry later")
+            else:
+                logger.info(f"Quick Airflow execution failed for request {permission_request.id}, will retry later")
+
+            # If quick execution failed, schedule tasks for background processing
+            logger.info(f"Scheduling tasks for background execution for request {permission_request.id}")
+            airflow_task.status = 'pending'
+            airflow_task.next_execution_at = datetime.utcnow()  # Execute ASAP
+
+            # AD verification task should NOT be scheduled for execution yet
+            # It will be scheduled automatically by the dependency system when Airflow completes
+            verification_task.status = 'pending'
+            verification_task.next_execution_at = None  # Will be set by dependency system
+
+            logger.info(f"AD verification task {verification_task.id} will be scheduled when Airflow task {airflow_task.id} completes")
+
+            db.session.commit()
+            return {'success': True, 'tasks': [airflow_task, verification_task]}
+
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error during immediate execution with tasks for request {permission_request.id}: {str(e)}")
+            return {'success': False, 'tasks': []}
+
+    def _convert_tasks_to_queued_mode(self, tasks, permission_request, validator):
+        """Convert failed immediate execution tasks to queued mode"""
+        try:
+            config = self.get_config()
+
+            if not tasks:
+                # If no tasks were created, create new queued tasks
+                return self._create_queued_tasks(permission_request, validator, None)
+
+            for task in tasks:
+                # Reset task state for queued execution
+                if task.status in ['failed', 'running']:
+                    task.status = 'pending'
+                    task.error_message = None
+                    task.started_at = None
+                    task.completed_at = None
+
+                    # Reset for next execution but keep attempt count history
+                    task.next_execution_at = datetime.utcnow()
+                    task.updated_at = datetime.utcnow()
+
+                    # For AD verification task, add delay
+                    if task.task_type == 'ad_verification':
+                        task.next_execution_at = datetime.utcnow() + timedelta(seconds=config['retry_delay'])
+
+                    logger.info(f"Converted task {task.id} ({task.task_type}) to queued mode with {task.attempt_count} previous attempts")
+
+            db.session.commit()
+            logger.info(f"Converted {len(tasks)} tasks to queued mode for permission request {permission_request.id}")
+            return tasks
+
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error converting tasks to queued mode for request {permission_request.id}: {str(e)}")
+            # Final fallback: create new queued tasks
+            return self._create_queued_tasks(permission_request, validator, None)
+
+    def _try_quick_airflow_execution(self, task, permission_request, validator, csv_file_path):
+        """Try a single quick Airflow execution without blocking or retries"""
+        try:
+            task_data = task.get_task_data()
+            conf = {
+                'change_file': task_data.get('csv_file_path'),
+                'request_ids': [permission_request.id],
+                'triggered_by': validator.username,
+                'folder_path': task_data.get('folder_path'),
+                'ad_group_name': task_data.get('ad_group_name'),
+                'permission_type': task_data.get('permission_type'),
+                'ad_source_domain': os.getenv('AD_DOMAIN_PREFIX', ''),
+                'ad_target_domain': os.getenv('AD_TARGET_DOMAIN', 'AUDI'),
+                'immediate_execution': True,
+                'custom_run_id': f"quick__{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}_{permission_request.id}"
+            }
+
+            # Mark task as running and increment attempt
+            task.mark_as_running()
+            task.increment_attempt_count()
+
+            logger.info(f"Attempting quick Airflow execution for task {task.id}")
+
+            # Single attempt - no retries, no waiting for completion
+            success = self.airflow_service.trigger_dag(conf)
+
+            if success:
+                logger.info(f"Quick Airflow execution successful for task {task.id}")
+                task.mark_as_completed({
+                    'execution_type': 'quick',
+                    'dag_triggered': True,
+                    'execution_time': datetime.utcnow().isoformat(),
+                    'run_id': conf['custom_run_id'],
+                    'quick_success': True
+                })
+
+                # Execute dependent tasks immediately when Airflow completes successfully
+                self._execute_dependent_tasks_immediately(task)
+
+                return True
+            else:
+                logger.info(f"Quick Airflow execution failed for task {task.id}, will be retried by background processor")
+                task.status = 'pending'  # Reset to pending for background retry
+                task.started_at = None
+                return False
+
+        except Exception as e:
+            logger.error(f"Error in quick Airflow execution for task {task.id}: {str(e)}")
+            task.status = 'pending'  # Reset to pending for background retry
+            task.started_at = None
+            return False
+
+    def _try_quick_ad_verification(self, task, permission_request):
+        """Try a single quick AD verification without blocking or retries"""
+        try:
+            # Mark task as running and increment attempt
+            task.mark_as_running()
+            task.increment_attempt_count()
+
+            logger.info(f"Attempting quick AD verification for task {task.id}")
+
+            # Single attempt - no retries
+            verification_result = self.verify_ad_changes(
+                folder_path=permission_request.folder.path,
+                ad_group_name=permission_request.ad_group.name if permission_request.ad_group else None,
+                access_type=permission_request.permission_type,
+                action_type='add',
+                requester_user=permission_request.requester
+            )
+
+            if verification_result['success']:
+                logger.info(f"Quick AD verification successful for task {task.id}")
+                task.mark_as_completed({
+                    'execution_type': 'quick',
+                    'verification_status': 'success',
+                    'ad_permissions_applied': True,
+                    'verification_time': datetime.utcnow().isoformat(),
+                    'details': verification_result['details'],
+                    'quick_success': True
+                })
+                return True
+            else:
+                logger.info(f"Quick AD verification failed for task {task.id}, will be retried by background processor")
+                task.status = 'pending'  # Reset to pending for background retry
+                task.started_at = None
+                return False
+
+        except Exception as e:
+            logger.error(f"Error in quick AD verification for task {task.id}: {str(e)}")
+            task.status = 'pending'  # Reset to pending for background retry
+            task.started_at = None
+            return False
+
+    def _execute_airflow_task_immediately(self, task, permission_request, validator, csv_file_path):
+        """Execute Airflow task immediately with proper attempt tracking in database"""
+        config = self.get_config()
+        max_attempts = config['max_retries']
+        retry_delay = config['immediate_airflow_retry_delay']
+
+        task_data = task.get_task_data()
+        conf = {
+            'change_file': task_data.get('csv_file_path'),
+            'request_ids': [permission_request.id],
+            'triggered_by': validator.username,
+            'folder_path': task_data.get('folder_path'),
+            'ad_group_name': task_data.get('ad_group_name'),
+            'permission_type': task_data.get('permission_type'),
+            'ad_source_domain': os.getenv('AD_DOMAIN_PREFIX', ''),
+            'ad_target_domain': os.getenv('AD_TARGET_DOMAIN', 'AUDI'),
+            'immediate_execution': True
+        }
+
+        # Mark task as running
+        task.mark_as_running()
+        db.session.commit()
+
+        # Perform up to 3 attempts
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # Update attempt count in database
+                task.increment_attempt_count()
+                db.session.commit()
+
+                # Generate unique run ID for this attempt
+                run_id = f"immediate__{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}_attempt{attempt}_{permission_request.id}"
+                conf['custom_run_id'] = run_id
+
+                logger.info(f"Airflow execution attempt {attempt}/{max_attempts} for task {task.id}")
+
+                # Trigger Airflow DAG
+                success = self.airflow_service.trigger_dag(conf)
+
+                if success:
+                    logger.info(f"Airflow DAG triggered successfully on attempt {attempt}/{max_attempts} for task {task.id}")
+
+                    # Mark task as completed and wait for DAG completion
+                    result_data = {
+                        'execution_type': 'immediate',
+                        'attempt': attempt,
+                        'max_attempts': max_attempts,
+                        'dag_id': self.airflow_service.dag_id,
+                        'run_id': run_id,
+                        'dag_triggered': True,
+                        'execution_time': datetime.utcnow().isoformat()
+                    }
+
+                    # Wait for DAG completion
+                    config = self.get_config()
+                    dag_completed = self._wait_for_airflow_completion(run_id, timeout_seconds=config['immediate_airflow_timeout'])
+
+                    if dag_completed:
+                        task.mark_as_completed(result_data)
+                        db.session.commit()
+
+                        # Log audit event
+                        from app.models.audit_event import AuditEvent
+                        AuditEvent.log_event(
+                            user=validator,
+                            event_type='task_execution',
+                            action='immediate_airflow_execution_success',
+                            resource_type='permission_request',
+                            resource_id=permission_request.id,
+                            description=f'DAG de Airflow ejecutado exitosamente en intento {attempt}/{max_attempts} para solicitud #{permission_request.id}',
+                            metadata={
+                                'execution_type': 'immediate',
+                                'attempt': attempt,
+                                'max_attempts': max_attempts,
+                                'task_id': task.id,
+                                'run_id': run_id
+                            }
+                        )
+                        return True
+                    else:
+                        logger.warning(f"DAG completion timeout on attempt {attempt}/{max_attempts} for task {task.id}")
+
+                else:
+                    logger.warning(f"Airflow execution attempt {attempt}/{max_attempts} failed for task {task.id}")
+
+                # If this is not the last attempt, wait before retrying
+                if attempt < max_attempts:
+                    import time
+                    logger.info(f"Waiting {retry_delay} seconds before retry attempt {attempt + 1}")
+                    time.sleep(retry_delay)
+
+            except Exception as e:
+                logger.error(f"Exception in Airflow execution attempt {attempt}/{max_attempts} for task {task.id}: {str(e)}")
+
+                # If this is not the last attempt, wait before retrying
+                if attempt < max_attempts:
+                    import time
+                    logger.info(f"Waiting {retry_delay} seconds before retry attempt {attempt + 1}")
+                    time.sleep(retry_delay)
+
+        # All attempts failed
+        logger.error(f"All {max_attempts} Airflow execution attempts failed for task {task.id}")
+
+        # Mark task as failed and send notification
+        error_msg = f'Failed to trigger Airflow DAG after {max_attempts} attempts'
+        task.mark_as_failed(error_msg, {
+            'execution_type': 'immediate',
+            'max_attempts': max_attempts,
+            'final_result': 'failed',
+            'dag_id': self.airflow_service.dag_id
+        })
+
+        # Send notification using the task-based method
+        self._send_queued_airflow_failure_notification(task)
+        db.session.commit()
+        return False
+
+    def _execute_ad_verification_task_immediately(self, task, permission_request):
+        """Execute AD verification task immediately with proper attempt tracking in database"""
+        config = self.get_config()
+        max_attempts = config['max_retries']
+        retry_delay = config['immediate_ad_retry_delay']
+
+        # Mark task as running
+        task.mark_as_running()
+        db.session.commit()
+
+        # Perform up to 3 attempts
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # Update attempt count in database
+                task.increment_attempt_count()
+                db.session.commit()
+
+                logger.info(f"AD verification attempt {attempt}/{max_attempts} for task {task.id}")
+
+                # Verify AD changes
+                verification_result = self.verify_ad_changes(
+                    folder_path=permission_request.folder.path,
+                    ad_group_name=permission_request.ad_group.name if permission_request.ad_group else None,
+                    access_type=permission_request.permission_type,
+                    action_type='add',
+                    requester_user=permission_request.requester
+                )
+
+                if verification_result['success']:
+                    logger.info(f"AD verification successful on attempt {attempt}/{max_attempts} for task {task.id}")
+
+                    # Mark task as completed
+                    result_data = {
+                        'execution_type': 'immediate',
+                        'attempt': attempt,
+                        'max_attempts': max_attempts,
+                        'verification_status': 'success',
+                        'ad_permissions_applied': True,
+                        'verification_time': datetime.utcnow().isoformat(),
+                        'details': verification_result['details']
+                    }
+                    task.mark_as_completed(result_data)
+                    db.session.commit()
+
+                    # Log audit event
+                    from app.models.audit_event import AuditEvent
+                    AuditEvent.log_event(
+                        user=permission_request.validator,
+                        event_type='task_execution',
+                        action='immediate_ad_verification_success',
+                        resource_type='permission_request',
+                        resource_id=permission_request.id,
+                        description=f'Verificación AD exitosa en intento {attempt}/{max_attempts} para solicitud #{permission_request.id}',
+                        metadata={
+                            'execution_type': 'immediate',
+                            'attempt': attempt,
+                            'max_attempts': max_attempts,
+                            'task_id': task.id,
+                            'verification_details': verification_result['details']
+                        }
+                    )
+                    return True
+                else:
+                    logger.warning(f"AD verification attempt {attempt}/{max_attempts} failed for task {task.id}: {verification_result.get('error')}")
+
+                # If this is not the last attempt, wait before retrying
+                if attempt < max_attempts:
+                    import time
+                    logger.info(f"Waiting {retry_delay} seconds before AD verification retry attempt {attempt + 1}")
+                    time.sleep(retry_delay)
+
+            except Exception as e:
+                logger.error(f"Exception in AD verification attempt {attempt}/{max_attempts} for task {task.id}: {str(e)}")
+
+                # If this is not the last attempt, wait before retrying
+                if attempt < max_attempts:
+                    import time
+                    logger.info(f"Waiting {retry_delay} seconds before AD verification retry attempt {attempt + 1}")
+                    time.sleep(retry_delay)
+
+        # All attempts failed
+        logger.error(f"All {max_attempts} AD verification attempts failed for task {task.id}")
+
+        # Mark task as failed and send notification
+        error_msg = f'AD verification failed after {max_attempts} attempts'
+        task.mark_as_failed(error_msg, {
+            'execution_type': 'immediate',
+            'max_attempts': max_attempts,
+            'final_result': 'failed',
+            'verification_status': 'failed'
+        })
+
+        # Send notification using the task-based method
+        self._send_queued_ad_verification_failure_notification(task)
+        db.session.commit()
+        return False
 
     def _try_immediate_execution(self, permission_request, validator, csv_file_path):
         """Try to execute Airflow DAG and AD verification immediately with proper dependency"""
@@ -120,78 +533,151 @@ class TaskService:
             return False
 
     def _execute_airflow_immediately(self, permission_request, validator, csv_file_path):
-        """Execute Airflow DAG immediately and return execution details"""
-        try:
-            task_data = {
-                'permission_request_id': permission_request.id,
-                'folder_path': permission_request.folder.path,
-                'ad_group_name': permission_request.ad_group.name if permission_request.ad_group else None,
-                'permission_type': permission_request.permission_type,
-                'requester': permission_request.requester.username,
-                'validator': validator.username,
-                'csv_file_path': os.path.basename(csv_file_path) if csv_file_path else None
-            }
+        """Execute Airflow DAG immediately with 3 retry attempts and return execution details"""
+        max_attempts = 3
+        retry_delay = 5  # seconds between retries
 
-            # Generate unique run ID for tracking
-            run_id = f"immediate__{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}_{permission_request.id}"
+        task_data = {
+            'permission_request_id': permission_request.id,
+            'folder_path': permission_request.folder.path,
+            'ad_group_name': permission_request.ad_group.name if permission_request.ad_group else None,
+            'permission_type': permission_request.permission_type,
+            'requester': permission_request.requester.username,
+            'validator': validator.username,
+            'csv_file_path': os.path.basename(csv_file_path) if csv_file_path else None
+        }
 
-            # Prepare configuration for Airflow DAG
-            conf = {
-                'change_file': task_data.get('csv_file_path'),
-                'request_ids': [permission_request.id],
-                'triggered_by': validator.username,
-                'folder_path': task_data.get('folder_path'),
-                'ad_group_name': task_data.get('ad_group_name'),
-                'permission_type': task_data.get('permission_type'),
-                'ad_source_domain': os.getenv('AD_DOMAIN_PREFIX', ''),
-                'ad_target_domain': os.getenv('AD_TARGET_DOMAIN', 'AUDI'),
-                'immediate_execution': True,
-                'custom_run_id': run_id
-            }
+        # Prepare configuration for Airflow DAG
+        conf = {
+            'change_file': task_data.get('csv_file_path'),
+            'request_ids': [permission_request.id],
+            'triggered_by': validator.username,
+            'folder_path': task_data.get('folder_path'),
+            'ad_group_name': task_data.get('ad_group_name'),
+            'permission_type': task_data.get('permission_type'),
+            'ad_source_domain': os.getenv('AD_DOMAIN_PREFIX', ''),
+            'ad_target_domain': os.getenv('AD_TARGET_DOMAIN', 'AUDI'),
+            'immediate_execution': True
+        }
 
-            # Trigger Airflow DAG immediately
-            success = self.airflow_service.trigger_dag(conf)
+        # Perform up to 3 attempts
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # Generate unique run ID for this attempt
+                run_id = f"immediate__{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}_attempt{attempt}_{permission_request.id}"
+                conf['custom_run_id'] = run_id
 
-            if success:
-                logger.info(f"Airflow DAG triggered immediately for permission request {permission_request.id} with run_id: {run_id}")
+                logger.info(f"Airflow execution attempt {attempt}/{max_attempts} for permission request {permission_request.id}")
 
-                # Log audit event for immediate execution
-                from app.models.audit_event import AuditEvent
-                AuditEvent.log_event(
-                    user=validator,
-                    event_type='task_execution',
-                    action='immediate_airflow_execution',
-                    resource_type='permission_request',
-                    resource_id=permission_request.id,
-                    description=f'DAG de Airflow ejecutado inmediatamente para solicitud #{permission_request.id}',
-                    metadata={
-                        'execution_type': 'immediate',
-                        'dag_id': self.airflow_service.dag_id,
+                # Trigger Airflow DAG
+                success = self.airflow_service.trigger_dag(conf)
+
+                if success:
+                    logger.info(f"Airflow DAG triggered successfully on attempt {attempt}/{max_attempts} for permission request {permission_request.id} with run_id: {run_id}")
+
+                    # Log audit event for successful execution
+                    from app.models.audit_event import AuditEvent
+                    AuditEvent.log_event(
+                        user=validator,
+                        event_type='task_execution',
+                        action='immediate_airflow_execution_success',
+                        resource_type='permission_request',
+                        resource_id=permission_request.id,
+                        description=f'DAG de Airflow ejecutado exitosamente en intento {attempt}/{max_attempts} para solicitud #{permission_request.id}',
+                        metadata={
+                            'execution_type': 'immediate',
+                            'attempt': attempt,
+                            'max_attempts': max_attempts,
+                            'dag_id': self.airflow_service.dag_id,
+                            'run_id': run_id,
+                            'permission_request_id': permission_request.id,
+                            'config_sent': conf
+                        }
+                    )
+
+                    return {
+                        'success': True,
                         'run_id': run_id,
-                        'permission_request_id': permission_request.id,
-                        'config_sent': conf
+                        'dag_id': self.airflow_service.dag_id,
+                        'triggered_at': datetime.utcnow().isoformat(),
+                        'attempt': attempt
                     }
-                )
+                else:
+                    logger.warning(f"Airflow execution attempt {attempt}/{max_attempts} failed for request {permission_request.id}")
 
-                return {
-                    'success': True,
-                    'run_id': run_id,
-                    'dag_id': self.airflow_service.dag_id,
-                    'triggered_at': datetime.utcnow().isoformat()
-                }
-            else:
-                logger.warning(f"Immediate Airflow execution failed for request {permission_request.id}")
-                return {
-                    'success': False,
-                    'error': 'Failed to trigger Airflow DAG'
-                }
+                    # If this is not the last attempt, wait before retrying
+                    if attempt < max_attempts:
+                        import time
+                        logger.info(f"Waiting {retry_delay} seconds before retry attempt {attempt + 1}")
+                        time.sleep(retry_delay)
+                        continue
+
+            except Exception as e:
+                logger.error(f"Exception in Airflow execution attempt {attempt}/{max_attempts} for request {permission_request.id}: {str(e)}")
+
+                # If this is not the last attempt, wait before retrying
+                if attempt < max_attempts:
+                    import time
+                    logger.info(f"Waiting {retry_delay} seconds before retry attempt {attempt + 1}")
+                    time.sleep(retry_delay)
+                    continue
+
+        # All attempts failed - log final failure and send notification
+        logger.error(f"All {max_attempts} Airflow execution attempts failed for permission request {permission_request.id}")
+
+        # Send admin notification after all attempts failed
+        self._send_airflow_failure_notification(permission_request, validator, max_attempts)
+
+        # Log audit event for final failure
+        from app.models.audit_event import AuditEvent
+        AuditEvent.log_event(
+            user=validator,
+            event_type='task_execution',
+            action='immediate_airflow_execution_failed',
+            resource_type='permission_request',
+            resource_id=permission_request.id,
+            description=f'DAG de Airflow falló después de {max_attempts} intentos para solicitud #{permission_request.id}',
+            metadata={
+                'execution_type': 'immediate',
+                'max_attempts': max_attempts,
+                'final_result': 'failed',
+                'permission_request_id': permission_request.id,
+                'dag_id': self.airflow_service.dag_id
+            }
+        )
+
+        return {
+            'success': False,
+            'error': f'Failed to trigger Airflow DAG after {max_attempts} attempts',
+            'attempts_made': max_attempts
+        }
+
+    def _send_airflow_failure_notification(self, permission_request, validator, max_attempts):
+        """Send notification after Airflow execution fails after all retry attempts"""
+        try:
+            from app.services.email_service import send_admin_error_notification
+            error_message = (
+                f"El DAG de Airflow falló después de {max_attempts} intentos para la solicitud de permisos #{permission_request.id}\n\n"
+                f"Detalles:\n"
+                f"- Carpeta: {permission_request.folder.path}\n"
+                f"- Grupo AD: {permission_request.ad_group.name if permission_request.ad_group else 'N/A'}\n"
+                f"- Tipo de permiso: {permission_request.permission_type}\n"
+                f"- Solicitante: {permission_request.requester.username}\n"
+                f"- Validador: {validator.username}\n"
+                f"- DAG ID: {self.airflow_service.dag_id}\n"
+                f"- API URL: {self.airflow_service.api_url}"
+            )
+
+            send_admin_error_notification(
+                error_type="DAG_EXECUTION_FAILED_AFTER_RETRIES",
+                service_name="Airflow",
+                error_message=error_message
+            )
+
+            logger.info(f"Airflow failure notification sent after {max_attempts} failed attempts for request {permission_request.id}")
 
         except Exception as e:
-            logger.error(f"Error in immediate Airflow execution for request {permission_request.id}: {str(e)}")
-            return {
-                'success': False,
-                'error': str(e)
-            }
+            logger.error(f"Error sending Airflow failure notification: {str(e)}")
 
     def _wait_for_airflow_completion(self, run_id, timeout_seconds=300):
         """Wait for Airflow DAG run to complete and return success status"""
@@ -241,44 +727,117 @@ class TaskService:
             return False
 
     def _execute_ad_verification_immediately(self, permission_request):
-        """Execute AD verification immediately"""
-        try:
-            # Verify AD changes immediately
-            verification_result = self.verify_ad_changes(
-                folder_path=permission_request.folder.path,
-                ad_group_name=permission_request.ad_group.name if permission_request.ad_group else None,
-                access_type=permission_request.permission_type,
-                action_type='add',
-                requester_user=permission_request.requester
-            )
+        """Execute AD verification immediately with 3 retry attempts"""
+        max_attempts = 3
+        retry_delay = 10  # seconds between retries for AD verification
 
-            if verification_result['success']:
-                logger.info(f"Immediate AD verification successful for permission request {permission_request.id}")
+        # Perform up to 3 attempts
+        for attempt in range(1, max_attempts + 1):
+            try:
+                logger.info(f"AD verification attempt {attempt}/{max_attempts} for permission request {permission_request.id}")
 
-                # Log audit event for immediate verification
-                from app.models.audit_event import AuditEvent
-                AuditEvent.log_event(
-                    user=permission_request.validator,
-                    event_type='task_execution',
-                    action='immediate_ad_verification',
-                    resource_type='permission_request',
-                    resource_id=permission_request.id,
-                    description=f'Verificación AD ejecutada inmediatamente para solicitud #{permission_request.id}',
-                    metadata={
-                        'execution_type': 'immediate',
-                        'verification_details': verification_result['details'],
-                        'permission_request_id': permission_request.id
-                    }
+                # Verify AD changes
+                verification_result = self.verify_ad_changes(
+                    folder_path=permission_request.folder.path,
+                    ad_group_name=permission_request.ad_group.name if permission_request.ad_group else None,
+                    access_type=permission_request.permission_type,
+                    action_type='add',
+                    requester_user=permission_request.requester
                 )
 
-                return True
-            else:
-                logger.warning(f"Immediate AD verification failed for request {permission_request.id}: {verification_result.get('error')}")
-                return False
+                if verification_result['success']:
+                    logger.info(f"AD verification successful on attempt {attempt}/{max_attempts} for permission request {permission_request.id}")
+
+                    # Log audit event for successful verification
+                    from app.models.audit_event import AuditEvent
+                    AuditEvent.log_event(
+                        user=permission_request.validator,
+                        event_type='task_execution',
+                        action='immediate_ad_verification_success',
+                        resource_type='permission_request',
+                        resource_id=permission_request.id,
+                        description=f'Verificación AD exitosa en intento {attempt}/{max_attempts} para solicitud #{permission_request.id}',
+                        metadata={
+                            'execution_type': 'immediate',
+                            'attempt': attempt,
+                            'max_attempts': max_attempts,
+                            'verification_details': verification_result['details'],
+                            'permission_request_id': permission_request.id
+                        }
+                    )
+
+                    return True
+                else:
+                    logger.warning(f"AD verification attempt {attempt}/{max_attempts} failed for request {permission_request.id}: {verification_result.get('error')}")
+
+                    # If this is not the last attempt, wait before retrying
+                    if attempt < max_attempts:
+                        import time
+                        logger.info(f"Waiting {retry_delay} seconds before AD verification retry attempt {attempt + 1}")
+                        time.sleep(retry_delay)
+                        continue
+
+            except Exception as e:
+                logger.error(f"Exception in AD verification attempt {attempt}/{max_attempts} for request {permission_request.id}: {str(e)}")
+
+                # If this is not the last attempt, wait before retrying
+                if attempt < max_attempts:
+                    import time
+                    logger.info(f"Waiting {retry_delay} seconds before AD verification retry attempt {attempt + 1}")
+                    time.sleep(retry_delay)
+                    continue
+
+        # All attempts failed - log final failure and send notification
+        logger.error(f"All {max_attempts} AD verification attempts failed for permission request {permission_request.id}")
+
+        # Send admin notification after all attempts failed
+        self._send_ad_verification_failure_notification(permission_request, max_attempts)
+
+        # Log audit event for final failure
+        from app.models.audit_event import AuditEvent
+        AuditEvent.log_event(
+            user=permission_request.validator,
+            event_type='task_execution',
+            action='immediate_ad_verification_failed',
+            resource_type='permission_request',
+            resource_id=permission_request.id,
+            description=f'Verificación AD falló después de {max_attempts} intentos para solicitud #{permission_request.id}',
+            metadata={
+                'execution_type': 'immediate',
+                'max_attempts': max_attempts,
+                'final_result': 'failed',
+                'permission_request_id': permission_request.id
+            }
+        )
+
+        return False
+
+    def _send_ad_verification_failure_notification(self, permission_request, max_attempts):
+        """Send notification after AD verification fails after all retry attempts"""
+        try:
+            from app.services.email_service import send_admin_error_notification
+            error_message = (
+                f"La verificación AD falló después de {max_attempts} intentos para la solicitud de permisos #{permission_request.id}\n\n"
+                f"Detalles:\n"
+                f"- Carpeta: {permission_request.folder.path}\n"
+                f"- Grupo AD: {permission_request.ad_group.name if permission_request.ad_group else 'N/A'}\n"
+                f"- Tipo de permiso: {permission_request.permission_type}\n"
+                f"- Solicitante: {permission_request.requester.username}\n"
+                f"- Validador: {permission_request.validator.username if permission_request.validator else 'N/A'}\n\n"
+                f"La tarea de Airflow fue exitosa, pero la verificación AD no pudo confirmar que los cambios se aplicaron correctamente.\n"
+                f"Se recomienda verificar manualmente el estado de los permisos en Active Directory."
+            )
+
+            send_admin_error_notification(
+                error_type="AD_VERIFICATION_FAILED_AFTER_RETRIES",
+                service_name="Active Directory",
+                error_message=error_message
+            )
+
+            logger.info(f"AD verification failure notification sent after {max_attempts} failed attempts for request {permission_request.id}")
 
         except Exception as e:
-            logger.error(f"Error in immediate AD verification for request {permission_request.id}: {str(e)}")
-            return False
+            logger.error(f"Error sending AD verification failure notification: {str(e)}")
 
     def _create_completed_tracking_tasks(self, permission_request, validator, csv_file_path):
         """Create tasks that are already marked as completed for tracking purposes"""
@@ -382,17 +941,16 @@ class TaskService:
                 logger.warning(f"Revocation tasks already exist for permission request {permission_request.id}. Existing tasks: {[t.id for t in existing_tasks]}")
                 return existing_tasks
 
-            # OPTIMIZATION: Try immediate execution first for revocation
-            immediate_success = self._try_immediate_revocation_execution(permission_request, validator, csv_file_path)
+            # OPTIMIZATION: Try immediate execution first for revocation using the same pattern as approval
+            immediate_result = self._try_immediate_revocation_execution_with_tasks(permission_request, validator, csv_file_path)
 
-            if immediate_success:
+            if immediate_result['success']:
                 logger.info(f"Successfully executed revocation tasks immediately for permission request {permission_request.id}")
-                # Create only tracking tasks for audit purposes (already completed)
-                return self._create_completed_revocation_tracking_tasks(permission_request, validator, csv_file_path)
+                return immediate_result['tasks']
 
-            # Fallback: Create traditional queued revocation tasks if immediate execution failed
-            logger.info(f"Immediate revocation execution failed for request {permission_request.id}, falling back to queued tasks")
-            return self._create_queued_revocation_tasks(permission_request, validator, csv_file_path)
+            # Fallback: If immediate execution failed, convert existing tasks to queued mode
+            logger.info(f"Immediate revocation execution failed for request {permission_request.id}, converting tasks to queued mode")
+            return self._convert_tasks_to_queued_mode(immediate_result['tasks'], permission_request, validator)
 
         except Exception as e:
             db.session.rollback()
@@ -434,122 +992,376 @@ class TaskService:
             return False
 
     def _execute_airflow_revocation_immediately(self, permission_request, validator, csv_file_path):
-        """Execute Airflow DAG immediately for revocation and return execution details"""
-        try:
-            task_data = {
-                'permission_request_id': permission_request.id,
-                'folder_path': permission_request.folder.path,
-                'ad_group_name': permission_request.ad_group.name if permission_request.ad_group else None,
-                'permission_type': permission_request.permission_type,
-                'requester': permission_request.requester.username,
-                'validator': validator.username,
-                'csv_file_path': os.path.basename(csv_file_path) if csv_file_path else None,
-                'action': 'revoke'
-            }
+        """Execute Airflow DAG immediately for revocation with 3 retry attempts and return execution details"""
+        max_attempts = 3
+        retry_delay = 5  # seconds between retries
 
-            # Generate unique run ID for tracking
-            run_id = f"immediate_revoke__{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}_{permission_request.id}"
+        task_data = {
+            'permission_request_id': permission_request.id,
+            'folder_path': permission_request.folder.path,
+            'ad_group_name': permission_request.ad_group.name if permission_request.ad_group else None,
+            'permission_type': permission_request.permission_type,
+            'requester': permission_request.requester.username,
+            'validator': validator.username,
+            'csv_file_path': os.path.basename(csv_file_path) if csv_file_path else None,
+            'action': 'revoke'
+        }
 
-            # Prepare configuration for Airflow DAG (revocation)
-            conf = {
-                'change_file': task_data.get('csv_file_path'),
-                'request_ids': [permission_request.id],
-                'triggered_by': validator.username,
-                'folder_path': task_data.get('folder_path'),
-                'ad_group_name': task_data.get('ad_group_name'),
-                'permission_type': task_data.get('permission_type'),
-                'action_type': 'revoke',
-                'ad_source_domain': os.getenv('AD_DOMAIN_PREFIX', ''),
-                'ad_target_domain': os.getenv('AD_TARGET_DOMAIN', 'AUDI'),
-                'immediate_execution': True,
-                'custom_run_id': run_id
-            }
+        # Prepare configuration for Airflow DAG (revocation)
+        conf = {
+            'change_file': task_data.get('csv_file_path'),
+            'request_ids': [permission_request.id],
+            'triggered_by': validator.username,
+            'folder_path': task_data.get('folder_path'),
+            'ad_group_name': task_data.get('ad_group_name'),
+            'permission_type': task_data.get('permission_type'),
+            'action_type': 'revoke',
+            'ad_source_domain': os.getenv('AD_DOMAIN_PREFIX', ''),
+            'ad_target_domain': os.getenv('AD_TARGET_DOMAIN', 'AUDI'),
+            'immediate_execution': True
+        }
 
-            # Trigger Airflow DAG immediately for revocation
-            success = self.airflow_service.trigger_dag(conf)
+        # Perform up to 3 attempts
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # Generate unique run ID for this attempt
+                run_id = f"immediate_revoke__{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}_attempt{attempt}_{permission_request.id}"
+                conf['custom_run_id'] = run_id
 
-            if success:
-                logger.info(f"Airflow DAG triggered immediately for revocation of permission request {permission_request.id} with run_id: {run_id}")
+                logger.info(f"Airflow revocation execution attempt {attempt}/{max_attempts} for permission request {permission_request.id}")
 
-                # Log audit event for immediate revocation execution
-                from app.models.audit_event import AuditEvent
-                AuditEvent.log_event(
-                    user=validator,
-                    event_type='task_execution',
-                    action='immediate_airflow_revocation',
-                    resource_type='permission_request',
-                    resource_id=permission_request.id,
-                    description=f'DAG de Airflow ejecutado inmediatamente para revocación de solicitud #{permission_request.id}',
-                    metadata={
-                        'execution_type': 'immediate',
-                        'action_type': 'revoke',
-                        'dag_id': self.airflow_service.dag_id,
+                # Trigger Airflow DAG for revocation
+                success = self.airflow_service.trigger_dag(conf)
+
+                if success:
+                    logger.info(f"Airflow revocation DAG triggered successfully on attempt {attempt}/{max_attempts} for permission request {permission_request.id} with run_id: {run_id}")
+
+                    # Log audit event for successful revocation execution
+                    from app.models.audit_event import AuditEvent
+                    AuditEvent.log_event(
+                        user=validator,
+                        event_type='task_execution',
+                        action='immediate_airflow_revocation_success',
+                        resource_type='permission_request',
+                        resource_id=permission_request.id,
+                        description=f'DAG de Airflow para revocación ejecutado exitosamente en intento {attempt}/{max_attempts} para solicitud #{permission_request.id}',
+                        metadata={
+                            'execution_type': 'immediate',
+                            'action_type': 'revoke',
+                            'attempt': attempt,
+                            'max_attempts': max_attempts,
+                            'dag_id': self.airflow_service.dag_id,
+                            'run_id': run_id,
+                            'permission_request_id': permission_request.id,
+                            'config_sent': conf
+                        }
+                    )
+
+                    return {
+                        'success': True,
                         'run_id': run_id,
-                        'permission_request_id': permission_request.id,
-                        'config_sent': conf
+                        'dag_id': self.airflow_service.dag_id,
+                        'triggered_at': datetime.utcnow().isoformat(),
+                        'attempt': attempt
                     }
-                )
+                else:
+                    logger.warning(f"Airflow revocation execution attempt {attempt}/{max_attempts} failed for request {permission_request.id}")
 
-                return {
-                    'success': True,
-                    'run_id': run_id,
-                    'dag_id': self.airflow_service.dag_id,
-                    'triggered_at': datetime.utcnow().isoformat()
-                }
-            else:
-                logger.warning(f"Immediate Airflow revocation execution failed for request {permission_request.id}")
-                return {
-                    'success': False,
-                    'error': 'Failed to trigger Airflow revocation DAG'
-                }
+                    # If this is not the last attempt, wait before retrying
+                    if attempt < max_attempts:
+                        import time
+                        logger.info(f"Waiting {retry_delay} seconds before revocation retry attempt {attempt + 1}")
+                        time.sleep(retry_delay)
+                        continue
 
-        except Exception as e:
-            logger.error(f"Error in immediate Airflow revocation execution for request {permission_request.id}: {str(e)}")
-            return {
-                'success': False,
-                'error': str(e)
+            except Exception as e:
+                logger.error(f"Exception in Airflow revocation execution attempt {attempt}/{max_attempts} for request {permission_request.id}: {str(e)}")
+
+                # If this is not the last attempt, wait before retrying
+                if attempt < max_attempts:
+                    import time
+                    logger.info(f"Waiting {retry_delay} seconds before revocation retry attempt {attempt + 1}")
+                    time.sleep(retry_delay)
+                    continue
+
+        # All attempts failed - log final failure and send notification
+        logger.error(f"All {max_attempts} Airflow revocation execution attempts failed for permission request {permission_request.id}")
+
+        # Send admin notification after all attempts failed
+        self._send_airflow_revocation_failure_notification(permission_request, validator, max_attempts)
+
+        # Log audit event for final failure
+        from app.models.audit_event import AuditEvent
+        AuditEvent.log_event(
+            user=validator,
+            event_type='task_execution',
+            action='immediate_airflow_revocation_failed',
+            resource_type='permission_request',
+            resource_id=permission_request.id,
+            description=f'DAG de Airflow para revocación falló después de {max_attempts} intentos para solicitud #{permission_request.id}',
+            metadata={
+                'execution_type': 'immediate',
+                'action_type': 'revoke',
+                'max_attempts': max_attempts,
+                'final_result': 'failed',
+                'permission_request_id': permission_request.id,
+                'dag_id': self.airflow_service.dag_id
             }
+        )
 
-    def _execute_ad_revocation_verification_immediately(self, permission_request):
-        """Execute AD verification immediately for revocation"""
+        return {
+            'success': False,
+            'error': f'Failed to trigger Airflow revocation DAG after {max_attempts} attempts',
+            'attempts_made': max_attempts
+        }
+
+    def _send_airflow_revocation_failure_notification(self, permission_request, validator, max_attempts):
+        """Send notification after Airflow revocation execution fails after all retry attempts"""
         try:
-            # Verify AD changes immediately for revocation (check that permissions are removed)
-            verification_result = self.verify_ad_changes(
-                folder_path=permission_request.folder.path,
-                ad_group_name=permission_request.ad_group.name if permission_request.ad_group else None,
-                access_type=permission_request.permission_type,
-                action_type='remove',  # For revocation, we're checking removal
-                requester_user=permission_request.requester
+            from app.services.email_service import send_admin_error_notification
+            error_message = (
+                f"El DAG de Airflow para revocación falló después de {max_attempts} intentos para la solicitud de permisos #{permission_request.id}\n\n"
+                f"Detalles:\n"
+                f"- Carpeta: {permission_request.folder.path}\n"
+                f"- Grupo AD: {permission_request.ad_group.name if permission_request.ad_group else 'N/A'}\n"
+                f"- Tipo de permiso: {permission_request.permission_type}\n"
+                f"- Solicitante: {permission_request.requester.username}\n"
+                f"- Validador: {validator.username}\n"
+                f"- Acción: Revocación\n"
+                f"- DAG ID: {self.airflow_service.dag_id}\n"
+                f"- API URL: {self.airflow_service.api_url}"
             )
 
-            if verification_result['success']:
-                logger.info(f"Immediate AD revocation verification successful for permission request {permission_request.id}")
+            send_admin_error_notification(
+                error_type="DAG_REVOCATION_FAILED_AFTER_RETRIES",
+                service_name="Airflow",
+                error_message=error_message
+            )
 
-                # Log audit event for immediate revocation verification
-                from app.models.audit_event import AuditEvent
-                AuditEvent.log_event(
-                    user=permission_request.validator,
-                    event_type='task_execution',
-                    action='immediate_ad_revocation_verification',
-                    resource_type='permission_request',
-                    resource_id=permission_request.id,
-                    description=f'Verificación AD de revocación ejecutada inmediatamente para solicitud #{permission_request.id}',
-                    metadata={
-                        'execution_type': 'immediate',
-                        'action_type': 'remove',
-                        'verification_details': verification_result['details'],
-                        'permission_request_id': permission_request.id
-                    }
-                )
-
-                return True
-            else:
-                logger.warning(f"Immediate AD revocation verification failed for request {permission_request.id}: {verification_result.get('error')}")
-                return False
+            logger.info(f"Airflow revocation failure notification sent after {max_attempts} failed attempts for request {permission_request.id}")
 
         except Exception as e:
-            logger.error(f"Error in immediate AD revocation verification for request {permission_request.id}: {str(e)}")
-            return False
+            logger.error(f"Error sending Airflow revocation failure notification: {str(e)}")
+
+    def _execute_ad_revocation_verification_immediately(self, permission_request):
+        """Execute AD verification immediately for revocation with 3 retry attempts"""
+        max_attempts = 3
+        retry_delay = 10  # seconds between retries for AD verification
+
+        # Perform up to 3 attempts
+        for attempt in range(1, max_attempts + 1):
+            try:
+                logger.info(f"AD revocation verification attempt {attempt}/{max_attempts} for permission request {permission_request.id}")
+
+                # Verify AD changes for revocation (check that permissions are removed)
+                verification_result = self.verify_ad_changes(
+                    folder_path=permission_request.folder.path,
+                    ad_group_name=permission_request.ad_group.name if permission_request.ad_group else None,
+                    access_type=permission_request.permission_type,
+                    action_type='remove',  # For revocation, we're checking removal
+                    requester_user=permission_request.requester
+                )
+
+                if verification_result['success']:
+                    logger.info(f"AD revocation verification successful on attempt {attempt}/{max_attempts} for permission request {permission_request.id}")
+
+                    # Log audit event for successful revocation verification
+                    from app.models.audit_event import AuditEvent
+                    AuditEvent.log_event(
+                        user=permission_request.validator,
+                        event_type='task_execution',
+                        action='immediate_ad_revocation_verification_success',
+                        resource_type='permission_request',
+                        resource_id=permission_request.id,
+                        description=f'Verificación AD de revocación exitosa en intento {attempt}/{max_attempts} para solicitud #{permission_request.id}',
+                        metadata={
+                            'execution_type': 'immediate',
+                            'action_type': 'remove',
+                            'attempt': attempt,
+                            'max_attempts': max_attempts,
+                            'verification_details': verification_result['details'],
+                            'permission_request_id': permission_request.id
+                        }
+                    )
+
+                    return True
+                else:
+                    logger.warning(f"AD revocation verification attempt {attempt}/{max_attempts} failed for request {permission_request.id}: {verification_result.get('error')}")
+
+                    # If this is not the last attempt, wait before retrying
+                    if attempt < max_attempts:
+                        import time
+                        logger.info(f"Waiting {retry_delay} seconds before AD revocation verification retry attempt {attempt + 1}")
+                        time.sleep(retry_delay)
+                        continue
+
+            except Exception as e:
+                logger.error(f"Exception in AD revocation verification attempt {attempt}/{max_attempts} for request {permission_request.id}: {str(e)}")
+
+                # If this is not the last attempt, wait before retrying
+                if attempt < max_attempts:
+                    import time
+                    logger.info(f"Waiting {retry_delay} seconds before AD revocation verification retry attempt {attempt + 1}")
+                    time.sleep(retry_delay)
+                    continue
+
+        # All attempts failed - log final failure and send notification
+        logger.error(f"All {max_attempts} AD revocation verification attempts failed for permission request {permission_request.id}")
+
+        # Send admin notification after all attempts failed
+        self._send_ad_revocation_verification_failure_notification(permission_request, max_attempts)
+
+        # Log audit event for final failure
+        from app.models.audit_event import AuditEvent
+        AuditEvent.log_event(
+            user=permission_request.validator,
+            event_type='task_execution',
+            action='immediate_ad_revocation_verification_failed',
+            resource_type='permission_request',
+            resource_id=permission_request.id,
+            description=f'Verificación AD de revocación falló después de {max_attempts} intentos para solicitud #{permission_request.id}',
+            metadata={
+                'execution_type': 'immediate',
+                'action_type': 'remove',
+                'max_attempts': max_attempts,
+                'final_result': 'failed',
+                'permission_request_id': permission_request.id
+            }
+        )
+
+        return False
+
+    def _send_ad_revocation_verification_failure_notification(self, permission_request, max_attempts):
+        """Send notification after AD revocation verification fails after all retry attempts"""
+        try:
+            from app.services.email_service import send_admin_error_notification
+            error_message = (
+                f"La verificación AD de revocación falló después de {max_attempts} intentos para la solicitud de permisos #{permission_request.id}\n\n"
+                f"Detalles:\n"
+                f"- Carpeta: {permission_request.folder.path}\n"
+                f"- Grupo AD: {permission_request.ad_group.name if permission_request.ad_group else 'N/A'}\n"
+                f"- Tipo de permiso: {permission_request.permission_type}\n"
+                f"- Solicitante: {permission_request.requester.username}\n"
+                f"- Validador: {permission_request.validator.username if permission_request.validator else 'N/A'}\n"
+                f"- Acción: Revocación\n\n"
+                f"La tarea de Airflow para revocación fue exitosa, pero la verificación AD no pudo confirmar que los permisos fueron removidos correctamente.\n"
+                f"Se recomienda verificar manualmente que los permisos han sido revocados en Active Directory."
+            )
+
+            send_admin_error_notification(
+                error_type="AD_REVOCATION_VERIFICATION_FAILED_AFTER_RETRIES",
+                service_name="Active Directory",
+                error_message=error_message
+            )
+
+            logger.info(f"AD revocation verification failure notification sent after {max_attempts} failed attempts for request {permission_request.id}")
+
+        except Exception as e:
+            logger.error(f"Error sending AD revocation verification failure notification: {str(e)}")
+
+    def _send_queued_airflow_failure_notification(self, task):
+        """Send notification after queued Airflow task fails after all retry attempts"""
+        try:
+            # Get permission request details if available
+            permission_request = None
+            if task.permission_request_id:
+                from app.models import PermissionRequest
+                permission_request = PermissionRequest.query.get(task.permission_request_id)
+
+            task_data = task.get_task_data()
+
+            error_message = (
+                f"La tarea de Airflow en cola falló después de {task.max_attempts} intentos\n\n"
+                f"Detalles de la tarea:\n"
+                f"- ID de tarea: {task.id}\n"
+                f"- Nombre: {task.name}\n"
+                f"- Tipo: {task.task_type}\n"
+                f"- Intentos realizados: {task.attempt_count}\n"
+                f"- Error: {task.error_message}\n\n"
+            )
+
+            if permission_request:
+                error_message += (
+                    f"Detalles de la solicitud:\n"
+                    f"- Solicitud ID: {permission_request.id}\n"
+                    f"- Carpeta: {permission_request.folder.path}\n"
+                    f"- Grupo AD: {permission_request.ad_group.name if permission_request.ad_group else 'N/A'}\n"
+                    f"- Tipo de permiso: {permission_request.permission_type}\n"
+                    f"- Solicitante: {permission_request.requester.username}\n"
+                )
+            else:
+                error_message += (
+                    f"Detalles de la tarea (sin solicitud asociada):\n"
+                    f"- Carpeta: {task_data.get('folder_path', 'N/A')}\n"
+                    f"- Grupo AD: {task_data.get('ad_group_name', 'N/A')}\n"
+                    f"- Acción: {task_data.get('action', 'N/A')}\n"
+                )
+
+            error_message += f"- DAG ID: {self.airflow_service.dag_id}\n- API URL: {self.airflow_service.api_url}"
+
+            from app.services.email_service import send_admin_error_notification
+            send_admin_error_notification(
+                error_type="QUEUED_AIRFLOW_TASK_FAILED_AFTER_RETRIES",
+                service_name="Airflow",
+                error_message=error_message
+            )
+
+            logger.info(f"Queued Airflow task failure notification sent for task {task.id}")
+
+        except Exception as e:
+            logger.error(f"Error sending queued Airflow task failure notification: {str(e)}")
+
+    def _send_queued_ad_verification_failure_notification(self, task):
+        """Send notification after queued AD verification task fails after all retry attempts"""
+        try:
+            # Get permission request details if available
+            permission_request = None
+            if task.permission_request_id:
+                from app.models import PermissionRequest
+                permission_request = PermissionRequest.query.get(task.permission_request_id)
+
+            task_data = task.get_task_data()
+
+            error_message = (
+                f"La tarea de verificación AD en cola falló después de {task.max_attempts} intentos\n\n"
+                f"Detalles de la tarea:\n"
+                f"- ID de tarea: {task.id}\n"
+                f"- Nombre: {task.name}\n"
+                f"- Tipo: {task.task_type}\n"
+                f"- Intentos realizados: {task.attempt_count}\n"
+                f"- Error: {task.error_message}\n\n"
+            )
+
+            if permission_request:
+                error_message += (
+                    f"Detalles de la solicitud:\n"
+                    f"- Solicitud ID: {permission_request.id}\n"
+                    f"- Carpeta: {permission_request.folder.path}\n"
+                    f"- Grupo AD: {permission_request.ad_group.name if permission_request.ad_group else 'N/A'}\n"
+                    f"- Tipo de permiso: {permission_request.permission_type}\n"
+                    f"- Solicitante: {permission_request.requester.username}\n"
+                )
+            else:
+                error_message += (
+                    f"Detalles de la tarea (sin solicitud asociada):\n"
+                    f"- Carpeta: {task_data.get('folder_path', 'N/A')}\n"
+                    f"- Grupo AD: {task_data.get('ad_group_name', 'N/A')}\n"
+                    f"- Acción: {task_data.get('action', 'N/A')}\n"
+                )
+
+            error_message += f"\nLa tarea de Airflow previa pudo haber sido exitosa, pero no se pudo verificar que los cambios se aplicaron correctamente en Active Directory.\nSe recomienda verificar manualmente el estado de los permisos."
+
+            from app.services.email_service import send_admin_error_notification
+            send_admin_error_notification(
+                error_type="QUEUED_AD_VERIFICATION_TASK_FAILED_AFTER_RETRIES",
+                service_name="Active Directory",
+                error_message=error_message
+            )
+
+            logger.info(f"Queued AD verification task failure notification sent for task {task.id}")
+
+        except Exception as e:
+            logger.error(f"Error sending queued AD verification task failure notification: {str(e)}")
 
     def _create_completed_revocation_tracking_tasks(self, permission_request, validator, csv_file_path):
         """Create revocation tasks that are already marked as completed for tracking purposes"""
@@ -893,22 +1705,24 @@ class TaskService:
             else:
                 error_msg = "Failed to trigger Airflow DAG"
                 retry_scheduled = task.schedule_retry(delay_seconds=config['retry_delay'])
-                
+
                 if not retry_scheduled:
                     task.mark_as_failed(error_msg)
-                    # Note: CSV cleanup is handled by AD verification task
-                
+                    # Send notification after all retries exhausted
+                    self._send_queued_airflow_failure_notification(task)
+
                 logger.error(f"Airflow task {task.id} failed: {error_msg}")
                 return False
                 
         except Exception as e:
             error_msg = f"Error executing Airflow task: {str(e)}"
             retry_scheduled = task.schedule_retry(delay_seconds=60)
-            
+
             if not retry_scheduled:
                 task.mark_as_failed(error_msg)
-                # Note: CSV cleanup is handled by AD verification task
-            
+                # Send notification after all retries exhausted
+                self._send_queued_airflow_failure_notification(task)
+
             logger.error(error_msg)
             return False
         finally:
@@ -942,11 +1756,17 @@ class TaskService:
             from app.models import PermissionRequest
             permission_request = PermissionRequest.query.get(task.permission_request_id)
 
+            # Determine action type: for standard permission requests, it's 'add'
+            # For revocations, the action would be stored differently
+            action_type = expected_changes.get('action',
+                         task_data.get('action',
+                         task_data.get('action_type', 'add')))  # Default to 'add' for permission grants
+
             verification_result = self.verify_ad_changes(
-                folder_path=expected_changes.get('folder_path'),
-                ad_group_name=expected_changes.get('group'),
-                access_type=expected_changes.get('access_type'),
-                action_type=expected_changes.get('action', task_data.get('action', 'add')),
+                folder_path=expected_changes.get('folder_path') or task_data.get('folder_path'),
+                ad_group_name=expected_changes.get('group') or task_data.get('ad_group_name'),
+                access_type=expected_changes.get('access_type') or task_data.get('permission_type'),
+                action_type=action_type,
                 requester_user=permission_request.requester if permission_request else None
             )
             
@@ -987,6 +1807,8 @@ class TaskService:
                         'last_error': verification_result['error'],
                         'verification_time': datetime.utcnow().isoformat()
                     })
+                    # Send notification after all retries exhausted
+                    self._send_queued_ad_verification_failure_notification(task)
                     # Clean up CSV file after permanent AD verification failure
                     self.cleanup_csv_file(task)
                 
@@ -999,6 +1821,8 @@ class TaskService:
             
             if not retry_scheduled:
                 task.mark_as_failed(error_msg)
+                # Send notification after all retries exhausted
+                self._send_queued_ad_verification_failure_notification(task)
                 # Clean up CSV file after permanent AD verification failure
                 self.cleanup_csv_file(task)
             
@@ -1143,7 +1967,12 @@ class TaskService:
                             if isinstance(group, dict):
                                 group_name = group.get('name', '')
                             else:
-                                group_name = str(group)
+                                group_dn = str(group)
+                                # Extract CN from DN (e.g., "CN=SU-edu-admingroup1,OU=Groups..." -> "SU-edu-admingroup1")
+                                if group_dn.upper().startswith('CN='):
+                                    group_name = group_dn.split(',')[0].replace('CN=', '').strip()
+                                else:
+                                    group_name = group_dn
 
                             if group_name.lower() == ad_group_name.lower():
                                 user_belongs_to_group = True
@@ -1860,31 +2689,43 @@ def create_permission_deletion_task(permission_request, deleted_by, csv_file_pat
             logger.info(f"Found {len(dependent_tasks)} dependent tasks for task {completed_task.id}")
 
             for dependent_task in dependent_tasks:
-                logger.info(f"Executing dependent task {dependent_task.id} immediately")
+                logger.info(f"Scheduling dependent task {dependent_task.id} for immediate execution")
 
                 try:
-                    # Execute the dependent task immediately based on its type
+                    # Schedule the dependent task for immediate execution
+                    dependent_task.next_execution_at = datetime.utcnow()
+                    dependent_task.updated_at = datetime.utcnow()
+
+                    # Log the dependency resolution
+                    logger.info(f"Dependent task {dependent_task.id} ({dependent_task.task_type}) scheduled for execution after completion of task {completed_task.id}")
+
+                    # Try quick execution for AD verification tasks if possible
                     if dependent_task.task_type == 'ad_verification':
-                        success = self.execute_ad_verification_task(dependent_task)
-                        if success:
-                            logger.info(f"Dependent AD verification task {dependent_task.id} completed immediately")
-                        else:
-                            logger.warning(f"Dependent AD verification task {dependent_task.id} failed immediate execution")
+                        logger.info(f"Attempting quick AD verification for dependent task {dependent_task.id}")
 
-                    elif dependent_task.task_type == 'airflow_dag':
-                        success = self.execute_airflow_task(dependent_task)
-                        if success:
-                            logger.info(f"Dependent Airflow task {dependent_task.id} completed immediately")
-                        else:
-                            logger.warning(f"Dependent Airflow task {dependent_task.id} failed immediate execution")
+                        # Try quick execution
+                        permission_request = dependent_task.permission_request
+                        if permission_request:
+                            quick_success = self._try_quick_ad_verification(dependent_task, permission_request)
+                            if quick_success:
+                                logger.info(f"Quick AD verification successful for dependent task {dependent_task.id}")
+                                continue  # Task completed, no need for background processing
+                            else:
+                                logger.info(f"Quick AD verification failed for dependent task {dependent_task.id}, will be processed by background")
 
-                    else:
-                        logger.warning(f"Unknown task type {dependent_task.task_type} for dependent task {dependent_task.id}")
+                    # If quick execution failed or not applicable, ensure task is scheduled for background processing
+                    dependent_task.status = 'pending'
+                    logger.info(f"Dependent task {dependent_task.id} scheduled for background processing")
 
                 except Exception as e:
-                    logger.error(f"Error executing dependent task {dependent_task.id}: {str(e)}")
-                    # If immediate execution fails, the task will remain in pending status
-                    # and will be picked up by the normal scheduler cycle for retry
+                    logger.error(f"Error scheduling dependent task {dependent_task.id}: {str(e)}")
+                    # Ensure task is still scheduled for execution even if quick execution failed
+                    dependent_task.status = 'pending'
+                    dependent_task.next_execution_at = datetime.utcnow()
+
+            # Commit all dependency scheduling changes
+            db.session.commit()
+            logger.info(f"Successfully processed {len(dependent_tasks)} dependent tasks for completed task {completed_task.id}")
 
         except Exception as e:
             logger.error(f"Error finding/executing dependent tasks for task {completed_task.id}: {str(e)}")

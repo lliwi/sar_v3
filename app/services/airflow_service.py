@@ -71,16 +71,7 @@ class AirflowService:
                 
         except Exception as e:
             logger.error(f"Error triggering Airflow DAG: {str(e)}")
-            # Send admin notification for Airflow errors
-            try:
-                from app.services.email_service import send_admin_error_notification
-                send_admin_error_notification(
-                    error_type="DAG_TRIGGER_FAILED",
-                    service_name="Airflow",
-                    error_message=f"Failed to trigger DAG {self.dag_id}: {str(e)}\nAPI URL: {self.api_url}"
-                )
-            except:
-                pass  # Don't let notification errors break the main flow
+            # Note: Admin notification is now handled by TaskService after retry logic
             return False
     
     def create_permission_change_file(self, permission_requests):

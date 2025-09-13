@@ -791,14 +791,14 @@ def mark_task_manual(task_id):
         if task.task_type != 'airflow_dag':
             return jsonify({
                 'success': False,
-                'message': 'Solo se pueden marcar tareas de Airflow como realizadas manualmente'
+                'message': f'Solo se pueden marcar tareas de Airflow como realizadas manualmente. Tipo actual: {task.task_type}'
             }), 400
-        
-        # Only allow marking pending, failed, or retry tasks
-        if task.status not in ['pending', 'failed', 'retry']:
+
+        # Only allow marking pending, failed, retry, or running tasks
+        if task.status not in ['pending', 'failed', 'retry', 'running']:
             return jsonify({
                 'success': False,
-                'message': 'Solo se pueden marcar como manuales tareas pendientes, fallidas o en reintento'
+                'message': f'Solo se pueden marcar como manuales tareas pendientes, fallidas, en reintento o en ejecución. Estado actual: {task.status}'
             }), 400
         
         # Mark task as completed with manual execution flag
@@ -813,8 +813,29 @@ def mark_task_manual(task_id):
         }
         
         task.mark_as_completed(result_data)
+
+        # Execute dependent tasks immediately when manually completing a task
+        try:
+            from app.services.task_service import TaskService
+            task_service = TaskService()
+            if hasattr(task_service, '_execute_dependent_tasks_immediately'):
+                task_service._execute_dependent_tasks_immediately(task)
+            else:
+                # Fallback: manually activate dependent tasks
+                dependent_tasks = Task.query.filter_by(status='pending').filter(
+                    Task.task_data.contains(f'"depends_on_task_id": {task.id}')
+                ).all()
+
+                for dep_task in dependent_tasks:
+                    dep_task.next_execution_at = datetime.utcnow()
+                    current_app.logger.info(f"Manually scheduled dependent task {dep_task.id} after completing task {task.id}")
+
+        except Exception as e:
+            current_app.logger.error(f"Error executing dependent tasks: {str(e)}")
+            # Don't fail the main operation if dependency scheduling fails
+
         db.session.commit()
-        
+
         # Log audit event
         AuditEvent.log_event(
             user=current_user,
@@ -842,6 +863,72 @@ def mark_task_manual(task_id):
         db.session.rollback()
         current_app.logger.error(f"Error marking task {task_id} as manual: {str(e)}")
         return jsonify({'error': f'Error interno: {str(e)}'}), 500
+
+@api_bp.route('/tasks/activate-dependencies/<int:task_id>', methods=['POST'])
+@login_required
+@admin_required
+def activate_task_dependencies(task_id):
+    """Activate dependent tasks for a completed task (useful for fixing dependency issues)"""
+    try:
+        task = Task.query.get_or_404(task_id)
+
+        if not task.is_completed():
+            return jsonify({
+                'success': False,
+                'message': 'Solo se pueden activar dependencias de tareas completadas'
+            }), 400
+
+        # Execute dependent tasks immediately
+        try:
+            from app.services.task_service import TaskService
+            task_service = TaskService()
+            if hasattr(task_service, '_execute_dependent_tasks_immediately'):
+                task_service._execute_dependent_tasks_immediately(task)
+            else:
+                # Fallback: manually activate dependent tasks
+                dependent_tasks = Task.query.filter_by(status='pending').filter(
+                    Task.task_data.contains(f'"depends_on_task_id": {task.id}')
+                ).all()
+
+                for dep_task in dependent_tasks:
+                    dep_task.next_execution_at = datetime.utcnow()
+                    current_app.logger.info(f"Manually scheduled dependent task {dep_task.id} after completing task {task.id}")
+
+        except Exception as e:
+            current_app.logger.error(f"Error executing dependent tasks: {str(e)}")
+            # Don't fail the main operation if dependency scheduling fails
+
+        db.session.commit()
+
+        # Log audit event
+        AuditEvent.log_event(
+            user=current_user,
+            event_type='task_management',
+            action='activate_dependencies',
+            resource_type='task',
+            resource_id=task.id,
+            description=f'Dependencias activadas manualmente para tarea {task.name}',
+            metadata={
+                'task_id': task.id,
+                'task_type': task.task_type,
+                'activation_user': current_user.username,
+                'activation_time': datetime.utcnow().isoformat()
+            }
+        )
+
+        return jsonify({
+            'success': True,
+            'message': f'Dependencias activadas para tarea {task.id}',
+            'task_id': task.id
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error activating dependencies for task {task_id}: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error al activar dependencias: {str(e)}'
+        }), 500
 
 @api_bp.route('/tasks/cancel/<int:task_id>', methods=['POST'])
 @login_required

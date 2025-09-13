@@ -92,16 +92,22 @@ class Task(db.Model):
     def schedule_retry(self, delay_seconds=30):
         """Schedule task for retry"""
         self.attempt_count += 1
-        
+
         if self.attempt_count >= self.max_attempts:
-            self.mark_as_failed("Maximum retry attempts exceeded")
+            # Don't call mark_as_failed here - let the calling code handle it
+            # This prevents double-calling mark_as_failed and duplicate notifications
             return False
-        
+
         self.status = 'retry'
         self.next_execution_at = datetime.utcnow() + timedelta(seconds=delay_seconds)
         self.updated_at = datetime.utcnow()
         return True
-    
+
+    def increment_attempt_count(self):
+        """Increment attempt count for immediate execution tracking"""
+        self.attempt_count += 1
+        self.updated_at = datetime.utcnow()
+
     def can_execute(self):
         """Check if task can be executed now"""
         if self.status not in ['pending', 'retry']:
