@@ -28,6 +28,7 @@ class SchedulerService:
         self.last_user_sync: Optional[datetime] = None
         self.last_group_sync: Optional[datetime] = None
         self.last_user_permissions_sync: Optional[datetime] = None
+        self.last_active_permissions_sync: Optional[datetime] = None
         self._sync_lock = threading.Lock()
         self._instance_id = id(self)
         
@@ -38,6 +39,7 @@ class SchedulerService:
             'user_sync_interval': int(os.getenv('AD_USER_SYNC_INTERVAL', 600)),  # 10 minutos por defecto
             'group_sync_interval': int(os.getenv('AD_GROUP_SYNC_INTERVAL', 300)),  # 5 minutos por defecto
             'user_permissions_sync_interval': int(os.getenv('AD_USER_PERMISSIONS_SYNC_INTERVAL', 900)),  # 15 minutos por defecto
+            'active_permissions_sync_interval': int(os.getenv('AD_ACTIVE_PERMISSIONS_SYNC_INTERVAL', 1800)),  # 30 minutos por defecto
             
             # Intervalo general para compatibilidad (usado por task scheduler)
             'processing_interval': int(os.getenv('TASK_PROCESSING_INTERVAL', 300)),  # 5 minutos por defecto
@@ -46,6 +48,7 @@ class SchedulerService:
             'user_sync_enabled': os.getenv('AD_USER_SYNC_ENABLED', 'true').lower() == 'true',
             'group_sync_enabled': os.getenv('AD_GROUP_SYNC_ENABLED', 'true').lower() == 'true',
             'user_permissions_sync_enabled': os.getenv('AD_USER_PERMISSIONS_SYNC_ENABLED', 'true').lower() == 'true',
+            'active_permissions_sync_enabled': os.getenv('AD_ACTIVE_PERMISSIONS_SYNC_ENABLED', 'true').lower() == 'true',
             
             # Configuraciones de reintentos
             'max_retries': int(os.getenv('SYNC_MAX_RETRIES', 3)),
@@ -124,6 +127,12 @@ class SchedulerService:
                 permissions_interval_minutes = config['user_permissions_sync_interval'] / 60
                 if self._should_sync('user_permissions', now, permissions_interval_minutes):
                     self._sync_user_permissions()
+
+            # Sincronización de permisos activos (sync_users_from_ad_old)
+            if config['active_permissions_sync_enabled']:
+                active_permissions_interval_minutes = config['active_permissions_sync_interval'] / 60
+                if self._should_sync('active_permissions', now, active_permissions_interval_minutes):
+                    self._sync_active_permissions()
         finally:
             self._sync_lock.release()
     
@@ -302,7 +311,207 @@ class SchedulerService:
                     'sync_type': 'automatic'
                 }
             )
-    
+
+    def _sync_active_permissions(self):
+        """Ejecuta la sincronización completa de usuarios con permisos activos desde AD"""
+        try:
+            logger.info("Starting automatic active permissions synchronization (sync_users_from_ad_old)")
+
+            # Crear usuario del sistema para el audit log
+            system_user = self._get_or_create_system_user()
+
+            # Test LDAP connection first
+            conn = self.ldap_service.get_connection()
+            if not conn:
+                raise Exception("No se pudo conectar a LDAP")
+            conn.unbind()
+
+            # Import and execute the sync_users_from_ad_old function logic
+            from app.models import Folder, User, FolderPermission, UserADGroupMembership, ADGroup
+            import ldap3
+
+            results = {
+                'success': True,
+                'folders_processed': 0,
+                'users_synced': 0,
+                'memberships_created': 0,
+                'errors': []
+            }
+
+            # Get all active folders
+            folders = Folder.query.filter_by(is_active=True).all()
+            logger.info(f"🚀 AUTOMATIC active permissions sync: {len(folders)} folders")
+
+            ldap_conn = self.ldap_service.get_connection()
+            if not ldap_conn:
+                raise Exception("No se pudo conectar a LDAP para sincronización activa")
+
+            # Pre-cache existing users to avoid repeated queries
+            existing_users = {}
+            for user in User.query.all():
+                if user.username:
+                    existing_users[user.username.lower()] = user
+            logger.info(f"💾 Cached {len(existing_users)} existing users")
+
+            for folder in folders:
+                try:
+                    folder_users_synced = 0
+                    folder_memberships_created = 0
+                    logger.info(f"=== Processing folder: {folder.name} (ID: {folder.id}) ===")
+
+                    # Get all active permissions for this folder
+                    active_permissions = [fp for fp in folder.permissions if fp.is_active]
+                    logger.info(f"Found {len(active_permissions)} active permissions for folder {folder.name}")
+
+                    if not active_permissions:
+                        logger.warning(f"No active permissions found for folder {folder.name}")
+                        results['folders_processed'] += 1
+                        continue
+
+                    for permission in active_permissions:
+                        ad_group = permission.ad_group
+                        logger.info(f"Processing group {ad_group.name} for folder {folder.name}")
+
+                        try:
+                            # Get group members from AD
+                            group_members = self.ldap_service.get_group_members(ad_group.distinguished_name)
+                            logger.info(f"Found {len(group_members)} members in group {ad_group.name}")
+                        except Exception as group_error:
+                            logger.error(f"❌ Failed to get members for group {ad_group.name}: {str(group_error)}")
+                            results['errors'].append(f"Error obteniendo miembros del grupo {ad_group.name}: {str(group_error)}")
+                            continue
+
+                        if not group_members:
+                            logger.warning(f"No members found for group {ad_group.name}")
+                            continue
+
+                        # Process group members (limit to 100 for automatic sync to prevent timeouts)
+                        processed_count = 0
+                        max_members_auto = 100  # Limit for automatic sync
+
+                        for member_dn in group_members[:max_members_auto]:
+                            try:
+                                # Skip Foreign Security Principals
+                                if 'ForeignSecurityPrincipals' in member_dn or 'S-1-5-' in member_dn:
+                                    continue
+
+                                # Get user details from AD
+                                sam_account = None
+                                full_name = None
+                                email = None
+
+                                # Search user by DN
+                                search_filter = f"(distinguishedName={member_dn})"
+                                attributes = ['sAMAccountName', 'displayName', 'mail', 'cn']
+
+                                ldap_conn.search(
+                                    search_base=self.ldap_service.base_dn,
+                                    search_filter=search_filter,
+                                    attributes=attributes,
+                                    search_scope=ldap3.SUBTREE
+                                )
+
+                                if ldap_conn.entries:
+                                    user_entry = ldap_conn.entries[0]
+                                    sam_account = str(user_entry.sAMAccountName) if user_entry.sAMAccountName else None
+                                    full_name = str(user_entry.displayName) if user_entry.displayName else str(user_entry.cn) if user_entry.cn else None
+                                    email = str(user_entry.mail) if user_entry.mail else None
+
+                                if sam_account:
+                                    # Find or create user in database
+                                    user = existing_users.get(sam_account.lower())
+                                    if not user:
+                                        user = User.query.filter_by(username=sam_account.lower()).first()
+                                        if not user:
+                                            # Create new user
+                                            user = User(
+                                                username=sam_account.lower(),
+                                                email=email or f"{sam_account}@example.org",
+                                                full_name=full_name or sam_account,
+                                                distinguished_name=member_dn,
+                                                is_active=True
+                                            )
+                                            db.session.add(user)
+                                            db.session.flush()
+                                            existing_users[sam_account.lower()] = user
+                                            folder_users_synced += 1
+                                        else:
+                                            existing_users[sam_account.lower()] = user
+
+                                    # Check/create membership
+                                    existing_membership = UserADGroupMembership.query.filter_by(
+                                        user_id=user.id,
+                                        ad_group_id=ad_group.id
+                                    ).first()
+
+                                    if not existing_membership:
+                                        membership = UserADGroupMembership(
+                                            user_id=user.id,
+                                            ad_group_id=ad_group.id
+                                        )
+                                        db.session.add(membership)
+                                        folder_memberships_created += 1
+
+                                    processed_count += 1
+
+                            except Exception as member_error:
+                                logger.error(f"Error processing member {member_dn}: {str(member_error)}")
+                                continue
+
+                        logger.info(f"Processed {processed_count}/{len(group_members)} members for group {ad_group.name}")
+
+                    results['folders_processed'] += 1
+                    results['users_synced'] += folder_users_synced
+                    results['memberships_created'] += folder_memberships_created
+
+                    # Commit changes for this folder
+                    db.session.commit()
+
+                except Exception as folder_error:
+                    logger.error(f"Error processing folder {folder.name}: {str(folder_error)}")
+                    results['errors'].append(f"Error procesando carpeta {folder.name}: {str(folder_error)}")
+                    db.session.rollback()
+                    continue
+
+            # Close LDAP connection
+            ldap_conn.unbind()
+
+            self.last_active_permissions_sync = datetime.utcnow()
+
+            # Log audit event
+            AuditEvent.log_event(
+                user=system_user,
+                event_type='ad_sync',
+                action='automatic_sync_active_permissions',
+                description=f'Sincronización automática de permisos activos: {results["folders_processed"]} carpetas, {results["users_synced"]} usuarios, {results["memberships_created"]} membresías creadas',
+                metadata={
+                    'folders_processed': results['folders_processed'],
+                    'users_synced': results['users_synced'],
+                    'memberships_created': results['memberships_created'],
+                    'errors_count': len(results['errors']),
+                    'sync_type': 'automatic',
+                    'active_permissions_sync_interval': self.get_config()['active_permissions_sync_interval']
+                }
+            )
+
+            logger.info(f"Automatic active permissions sync completed: {results['folders_processed']} folders, {results['users_synced']} users, {results['memberships_created']} memberships")
+
+        except Exception as e:
+            logger.error(f"Error in automatic active permissions sync: {str(e)}")
+
+            # Log error event
+            system_user = self._get_or_create_system_user()
+            AuditEvent.log_event(
+                user=system_user,
+                event_type='ad_sync',
+                action='automatic_sync_active_permissions_error',
+                description=f'Error en sincronización automática de permisos activos: {str(e)}',
+                metadata={
+                    'error': str(e),
+                    'sync_type': 'automatic'
+                }
+            )
+
     def _get_or_create_system_user(self) -> User:
         """Obtiene o crea el usuario del sistema para audit logs"""
         system_user = User.query.filter_by(username='system').first()
@@ -333,6 +542,7 @@ class SchedulerService:
                 self._sync_users()
                 self._sync_ad_groups()
                 self._sync_user_permissions()
+                self._sync_active_permissions()
             
             logger.info("Forced synchronization completed")
             
@@ -349,12 +559,14 @@ class SchedulerService:
             'last_syncs': {
                 'users': self.last_user_sync.isoformat() if self.last_user_sync else None,
                 'groups': self.last_group_sync.isoformat() if self.last_group_sync else None,
-                'user_permissions': self.last_user_permissions_sync.isoformat() if self.last_user_permissions_sync else None
+                'user_permissions': self.last_user_permissions_sync.isoformat() if self.last_user_permissions_sync else None,
+                'active_permissions': self.last_active_permissions_sync.isoformat() if self.last_active_permissions_sync else None
             },
             'next_syncs': {
                 'users': self._get_next_sync_time('user', config['user_sync_interval']),
                 'groups': self._get_next_sync_time('group', config['group_sync_interval']),
-                'user_permissions': self._get_next_sync_time('user_permissions', config['user_permissions_sync_interval'])
+                'user_permissions': self._get_next_sync_time('user_permissions', config['user_permissions_sync_interval']),
+                'active_permissions': self._get_next_sync_time('active_permissions', config['active_permissions_sync_interval'])
             }
         }
     
