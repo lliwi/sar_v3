@@ -331,11 +331,18 @@ def my_permissions():
                     if folder not in accessible_folders:
                         accessible_folders.append(folder)
                 
-                # Add the group to the appropriate permission type
+                # Add the group to the appropriate permission type with deletion status
+                # Check if current user specifically has deletion in progress for this folder
+                user_has_deletion_in_progress = folder.has_user_deletion_in_progress(current_user.id)
+                group_info = {
+                    'group': permission.ad_group,
+                    'deletion_in_progress': user_has_deletion_in_progress
+                }
+
                 if permission.permission_type == 'read':
-                    permissions_by_folder[folder_id]['read_groups'].append(permission.ad_group)
+                    permissions_by_folder[folder_id]['read_groups'].append(group_info)
                 elif permission.permission_type == 'write':
-                    permissions_by_folder[folder_id]['write_groups'].append(permission.ad_group)
+                    permissions_by_folder[folder_id]['write_groups'].append(group_info)
         
     except Exception as e:
         # If LDAP is not available or there's an error, fall back to empty result
@@ -1368,6 +1375,13 @@ def delete_user_permission_from_ad_group():
         flash(f'Error al generar archivo CSV: {str(e)}', 'error')
         return redirect(url_for('main.manage_resource', folder_id=folder_id))
     
+    # Ensure permission_request is saved to DB before creating tasks
+    if not permission_request.id:  # Check if it's not yet persisted to DB
+        # For AD-synced permissions, we created a temporary request object
+        # Save it now so tasks have a proper permission_request_id
+        db.session.add(permission_request)
+        db.session.commit()  # This will assign an ID to permission_request
+
     # Create deletion task
     from app.services.task_service import create_permission_deletion_task
     task = create_permission_deletion_task(
@@ -1375,18 +1389,11 @@ def delete_user_permission_from_ad_group():
         deleted_by=current_user,
         csv_file_path=csv_file_path
     )
-    
+
     if task:
-        # Mark the request as revoked (only if it was persisted)
-        if permission_request.id:  # Check if it's persisted to DB
-            permission_request.status = 'revoked'
-            db.session.commit()
-        else:
-            # For AD-synced permissions, we created a temporary request object
-            # Save it now so we have a record of the deletion request
-            permission_request.status = 'revoked'
-            db.session.add(permission_request)
-            db.session.commit()
+        # Mark the request as revoked
+        permission_request.status = 'revoked'
+        db.session.commit()
         
         # Log audit event
         AuditEvent.log_event(

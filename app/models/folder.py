@@ -148,6 +148,28 @@ class Folder(db.Model):
         
         return result
     
+    def has_user_deletion_in_progress(self, user_id):
+        """Check if a specific user has deletion in progress for this folder"""
+        from app.models.task import Task
+        from sqlalchemy import and_, or_
+
+        # Check for active deletion tasks for this specific user and folder
+        # Look for both airflow_dag and ad_verification tasks with delete action
+        active_deletion_task = Task.query.filter(
+            and_(
+                Task.status.in_(['pending', 'processing']),
+                or_(
+                    Task.task_type == 'airflow_dag',
+                    Task.task_type == 'ad_verification'
+                ),
+                Task.task_data.contains(f'"user_id": {user_id}'),
+                Task.task_data.contains(f'"folder_id": {self.id}'),
+                Task.task_data.contains('"action": "delete"')
+            )
+        ).first()
+
+        return active_deletion_task is not None
+
     def get_permissions_summary(self):
         """Get a comprehensive summary of all permissions including AD groups and users"""
         summary = {
@@ -169,18 +191,19 @@ class Folder(db.Model):
             if permission.is_active:
                 # Check if we already have users for this group
                 group_has_known_users = any(
-                    any(p['source'] == 'ad_group' and p['source_name'] == permission.ad_group.name 
+                    any(p['source'] == 'ad_group' and p['source_name'] == permission.ad_group.name
                         for p in user_data['permissions'])
                     for user_data in users_with_permissions
                 )
-                
+
                 ad_group_info = {
                     'ad_group': permission.ad_group,
                     'permission_type': permission.permission_type,
                     'granted_at': permission.granted_at,
                     'granted_by': permission.granted_by,
                     'permission_id': permission.id,
-                    'has_known_users': group_has_known_users
+                    'has_known_users': group_has_known_users,
+                    'deletion_in_progress': permission.deletion_in_progress
                 }
                 ad_group_permissions.append(ad_group_info)
         

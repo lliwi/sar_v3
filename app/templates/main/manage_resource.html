@@ -103,12 +103,22 @@
                                     <tr>
                                         <td>
                                             <div class="d-flex align-items-center">
-                                                <div class="avatar avatar-sm bg-primary text-white rounded-circle me-2 d-flex align-items-center justify-content-center">
-                                                    <i class="fas fa-user fa-sm"></i>
+                                                {% set user_has_deletion_in_progress = folder.has_user_deletion_in_progress(user_data.user.id) %}
+                                                <div class="avatar avatar-sm bg-primary text-white rounded-circle me-2 d-flex align-items-center justify-content-center {% if user_has_deletion_in_progress %}opacity-50{% endif %}">
+                                                    {% if user_has_deletion_in_progress %}
+                                                        <i class="fas fa-spinner fa-spin fa-sm"></i>
+                                                    {% else %}
+                                                        <i class="fas fa-user fa-sm"></i>
+                                                    {% endif %}
                                                 </div>
                                                 <div>
-                                                    <div class="fw-medium">{{ user_data.user.full_name }}</div>
+                                                    <div class="fw-medium {% if user_has_deletion_in_progress %}opacity-50{% endif %}">{{ user_data.user.full_name }}</div>
                                                     <small class="text-muted">{{ user_data.user.username }}</small>
+                                                    {% if user_has_deletion_in_progress %}
+                                                        <small class="text-warning d-block">
+                                                            <i class="fas fa-clock me-1"></i>Eliminación en proceso...
+                                                        </small>
+                                                    {% endif %}
                                                 </div>
                                             </div>
                                         </td>
@@ -184,14 +194,22 @@
                                                     {% set user_ad_perms = user_data.permissions | selectattr('source', 'equalto', 'ad_group') | list %}
                                                     {% if user_ad_perms %}
                                                         <div class="btn-group" role="group">
-                                                            <button type="button" class="btn btn-sm btn-outline-warning dropdown-toggle" 
-                                                                    data-bs-toggle="dropdown" aria-expanded="false" title="Eliminar permisos de grupos AD">
-                                                                <i class="fas fa-trash"></i>
+                                                            {% set user_has_deletion_in_progress = folder.has_user_deletion_in_progress(user_data.user.id) %}
+                                                            <button type="button" class="btn btn-sm btn-outline-warning dropdown-toggle {{ 'disabled' if user_has_deletion_in_progress else '' }}"
+                                                                    data-bs-toggle="dropdown" aria-expanded="false"
+                                                                    title="{{ 'Eliminación en proceso...' if user_has_deletion_in_progress else 'Eliminar permisos de grupos AD' }}"
+                                                                    {{ 'disabled' if user_has_deletion_in_progress else '' }}>
+                                                                {% if user_has_deletion_in_progress %}
+                                                                    <i class="fas fa-spinner fa-spin"></i>
+                                                                {% else %}
+                                                                    <i class="fas fa-trash"></i>
+                                                                {% endif %}
                                                             </button>
+                                                            {% if not user_has_deletion_in_progress %}
                                                             <ul class="dropdown-menu">
                                                                 {% for perm in user_ad_perms %}
                                                                     <li>
-                                                                        <form action="{{ url_for('main.delete_user_permission_from_ad_group') }}" 
+                                                                        <form action="{{ url_for('main.delete_user_permission_from_ad_group') }}"
                                                                               method="POST" class="dropdown-item-form">
                                                                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                                                             <input type="hidden" name="folder_id" value="{{ folder.id }}"/>
@@ -207,6 +225,7 @@
                                                                     </li>
                                                                 {% endfor %}
                                                             </ul>
+                                                            {% endif %}
                                                         </div>
                                                     {% endif %}
                                                 {% else %}
@@ -214,14 +233,22 @@
                                                     {% set user_ad_perms = user_data.permissions | selectattr('source', 'equalto', 'ad_group') | list %}
                                                     {% if user_ad_perms %}
                                                         <div class="btn-group" role="group">
-                                                            <button type="button" class="btn btn-sm btn-outline-danger dropdown-toggle" 
-                                                                    data-bs-toggle="dropdown" aria-expanded="false" title="Eliminar permisos de grupos AD">
-                                                                <i class="fas fa-trash"></i>
+                                                            {% set user_has_deletion_in_progress = folder.has_user_deletion_in_progress(user_data.user.id) %}
+                                                            <button type="button" class="btn btn-sm btn-outline-danger dropdown-toggle {{ 'disabled' if user_has_deletion_in_progress else '' }}"
+                                                                    data-bs-toggle="dropdown" aria-expanded="false"
+                                                                    title="{{ 'Eliminación en proceso...' if user_has_deletion_in_progress else 'Eliminar permisos de grupos AD' }}"
+                                                                    {{ 'disabled' if user_has_deletion_in_progress else '' }}>
+                                                                {% if user_has_deletion_in_progress %}
+                                                                    <i class="fas fa-spinner fa-spin"></i>
+                                                                {% else %}
+                                                                    <i class="fas fa-trash"></i>
+                                                                {% endif %}
                                                             </button>
+                                                            {% if not user_has_deletion_in_progress %}
                                                             <ul class="dropdown-menu">
                                                                 {% for perm in user_ad_perms %}
                                                                     <li>
-                                                                        <form action="{{ url_for('main.delete_user_permission_from_ad_group') }}" 
+                                                                        <form action="{{ url_for('main.delete_user_permission_from_ad_group') }}"
                                                                               method="POST" class="dropdown-item-form">
                                                                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                                                             <input type="hidden" name="folder_id" value="{{ folder.id }}"/>
@@ -237,6 +264,7 @@
                                                                     </li>
                                                                 {% endfor %}
                                                             </ul>
+                                                            {% endif %}
                                                         </div>
                                                     {% else %}
                                                         <span class="btn btn-sm btn-outline-secondary" title="Sin permisos disponibles" disabled>

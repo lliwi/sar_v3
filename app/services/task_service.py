@@ -1757,8 +1757,8 @@ class TaskService:
             
             # Verify AD changes
             # Get the requester from the permission request
-            from app.models import PermissionRequest
-            permission_request = PermissionRequest.query.get(task.permission_request_id)
+            from app.models import PermissionRequest, User
+            permission_request = PermissionRequest.query.get(task.permission_request_id) if task.permission_request_id else None
 
             # Determine action type: for standard permission requests, it's 'add'
             # For revocations, the action would be stored differently
@@ -1766,12 +1766,23 @@ class TaskService:
                          task_data.get('action',
                          task_data.get('action_type', 'add')))  # Default to 'add' for permission grants
 
+            # Get requester user - try from permission_request first, then from task_data
+            requester_user = None
+            if permission_request and permission_request.requester:
+                requester_user = permission_request.requester
+            elif task_data.get('user_id'):
+                # Fallback to user from task_data for deletion tasks
+                requester_user = User.query.get(task_data.get('user_id'))
+            elif task_data.get('username'):
+                # Final fallback to username lookup
+                requester_user = User.query.filter_by(username=task_data.get('username')).first()
+
             verification_result = self.verify_ad_changes(
                 folder_path=expected_changes.get('folder_path') or task_data.get('folder_path'),
                 ad_group_name=expected_changes.get('group') or task_data.get('ad_group_name'),
                 access_type=expected_changes.get('access_type') or task_data.get('permission_type'),
                 action_type=action_type,
-                requester_user=permission_request.requester if permission_request else None
+                requester_user=requester_user
             )
             
             if verification_result['success']:
@@ -1800,6 +1811,115 @@ class TaskService:
                 
                 logger.info(f"AD verification task {task.id} completed successfully")
 
+                # Handle database updates based on deletion type
+                if action_type in ['delete', 'remove', 'remove_ad_sync']:
+                    try:
+                        from app.models import FolderPermission
+
+                        # Get the permission details from task data
+                        folder_id = task_data.get('folder_id')
+                        ad_group_id = task_data.get('ad_group_id')
+                        permission_type = task_data.get('permission_type')
+
+                        if folder_id and ad_group_id and permission_type:
+                            # Find the permission record
+                            permission_record = FolderPermission.query.filter_by(
+                                folder_id=folder_id,
+                                ad_group_id=ad_group_id,
+                                permission_type=permission_type,
+                                is_active=True
+                            ).first()
+
+                            if permission_record:
+                                # Clear the deletion_in_progress flag for all deletion types
+                                permission_record.deletion_in_progress = False
+
+                                # Only remove permission from database for group permission removals
+                                # For user deletions from group, keep the group permission active
+                                if action_type in ['remove', 'remove_ad_sync']:
+                                    # This is a group permission removal - deactivate the permission
+                                    permission_record.is_active = False
+                                    logger.info(f"Removed group permission from database: folder_id={folder_id}, ad_group_id={ad_group_id}, permission_type={permission_type}")
+
+                                    # Log audit event for database permission removal
+                                    AuditEvent.log_event(
+                                        user=task.created_by,
+                                        event_type='permission_deletion',
+                                        action='database_permission_removal',
+                                        resource_type='folder_permission',
+                                        resource_id=permission_record.id,
+                                        description=f'Permiso de grupo eliminado de la base de datos tras verificación AD exitosa',
+                                        metadata={
+                                            'folder_id': folder_id,
+                                            'ad_group_id': ad_group_id,
+                                            'permission_type': permission_type,
+                                            'task_id': task.id,
+                                            'action_type': action_type
+                                        }
+                                    )
+                                elif action_type == 'delete':
+                                    # This is a user deletion from group - keep group permission active
+                                    # but update the user's membership status in the database
+                                    username = task_data.get('username')
+                                    user_id = task_data.get('user_id')
+
+                                    if username or user_id:
+                                        from app.models import UserADGroupMembership, User
+
+                                        # Find the user
+                                        if user_id:
+                                            user = User.query.get(user_id)
+                                        elif username:
+                                            user = User.query.filter_by(username=username).first()
+                                        else:
+                                            user = None
+
+                                        if user:
+                                            # Find and deactivate the user's membership in this group
+                                            membership = UserADGroupMembership.query.filter_by(
+                                                user_id=user.id,
+                                                ad_group_id=ad_group_id,
+                                                is_active=True
+                                            ).first()
+
+                                            if membership:
+                                                membership.is_active = False
+                                                logger.info(f"Deactivated user membership in database: user={user.username}, group_id={ad_group_id}")
+                                            else:
+                                                logger.warning(f"No active membership found to deactivate: user={user.username}, group_id={ad_group_id}")
+                                        else:
+                                            logger.warning(f"Could not find user to update membership: username={username}, user_id={user_id}")
+
+                                    logger.info(f"User deletion from group completed, keeping group permission active: folder_id={folder_id}, ad_group_id={ad_group_id}, permission_type={permission_type}")
+
+                                    # Log audit event for user removal from group
+                                    AuditEvent.log_event(
+                                        user=task.created_by,
+                                        event_type='user_group_removal',
+                                        action='user_removed_from_group',
+                                        resource_type='folder_permission',
+                                        resource_id=permission_record.id,
+                                        description=f'Usuario eliminado del grupo tras verificación AD exitosa',
+                                        metadata={
+                                            'folder_id': folder_id,
+                                            'ad_group_id': ad_group_id,
+                                            'permission_type': permission_type,
+                                            'task_id': task.id,
+                                            'action_type': action_type,
+                                            'user_removed': username
+                                        }
+                                    )
+
+                                db.session.commit()
+                            else:
+                                logger.warning(f"Permission not found in database: folder_id={folder_id}, ad_group_id={ad_group_id}, permission_type={permission_type}")
+                        else:
+                            logger.warning(f"Missing required data for database permission handling: folder_id={folder_id}, ad_group_id={ad_group_id}, permission_type={permission_type}")
+
+                    except Exception as e:
+                        logger.error(f"Error handling permission database update: {str(e)}")
+                        # Don't fail the task for database cleanup errors, but log them
+
                 # Clean up CSV file after successful AD verification
                 self.cleanup_csv_file(task)
 
@@ -1817,6 +1937,34 @@ class TaskService:
                     })
                     # Send notification after all retries exhausted
                     self._send_queued_ad_verification_failure_notification(task)
+
+                    # If this was a deletion task that failed, restore the permission state
+                    if action_type in ['delete', 'remove', 'remove_ad_sync']:
+                        try:
+                            from app.models import FolderPermission
+
+                            folder_id = task_data.get('folder_id')
+                            ad_group_id = task_data.get('ad_group_id')
+                            permission_type = task_data.get('permission_type')
+
+                            if folder_id and ad_group_id and permission_type:
+                                # Find and restore the permission state - for all deletion types, just clear the flag
+                                permission_to_restore = FolderPermission.query.filter_by(
+                                    folder_id=folder_id,
+                                    ad_group_id=ad_group_id,
+                                    permission_type=permission_type,
+                                    is_active=True
+                                ).first()
+
+                                if permission_to_restore:
+                                    permission_to_restore.deletion_in_progress = False  # Clear the flag
+                                    db.session.commit()
+                                    logger.info(f"Restored permission state after deletion failure: folder_id={folder_id}, ad_group_id={ad_group_id}, permission_type={permission_type}")
+                                else:
+                                    logger.warning(f"Could not find permission to restore after deletion failure: folder_id={folder_id}, ad_group_id={ad_group_id}, permission_type={permission_type}")
+                        except Exception as e:
+                            logger.error(f"Error restoring permission state after deletion failure: {str(e)}")
+
                     # Clean up CSV file after permanent AD verification failure
                     self.cleanup_csv_file(task)
                 
@@ -1831,6 +1979,32 @@ class TaskService:
                 task.mark_as_failed(error_msg)
                 # Send notification after all retries exhausted
                 self._send_queued_ad_verification_failure_notification(task)
+
+                # If this was a deletion task that failed, restore the permission state
+                if action_type in ['delete', 'remove', 'remove_ad_sync']:
+                    try:
+                        from app.models import FolderPermission
+
+                        folder_id = task_data.get('folder_id')
+                        ad_group_id = task_data.get('ad_group_id')
+                        permission_type = task_data.get('permission_type')
+
+                        if folder_id and ad_group_id and permission_type:
+                            # Find and restore the permission state - for all deletion types, just clear the flag
+                            permission_to_restore = FolderPermission.query.filter_by(
+                                folder_id=folder_id,
+                                ad_group_id=ad_group_id,
+                                permission_type=permission_type,
+                                is_active=True
+                            ).first()
+
+                            if permission_to_restore:
+                                permission_to_restore.deletion_in_progress = False  # Clear the flag
+                                db.session.commit()
+                                logger.info(f"Restored permission state after deletion exception: folder_id={folder_id}, ad_group_id={ad_group_id}, permission_type={permission_type}")
+                    except Exception as restore_error:
+                        logger.error(f"Error restoring permission state after deletion exception: {str(restore_error)}")
+
                 # Clean up CSV file after permanent AD verification failure
                 self.cleanup_csv_file(task)
             
@@ -1897,13 +2071,15 @@ class TaskService:
                 verification_details['permissions_verified'] = permissions_verified
                 verification_details['action_type'] = action_type
                 
-                # For removal actions, success means permissions are NOT found
+                # _check_user_group_membership already applies the correct logic for removals and additions
+                # For removal actions, it returns True if user was successfully removed (not in group)
+                # For addition actions, it returns True if user was successfully added (in group)
+                success = permissions_verified
+
                 if is_removal_action:
-                    success = not permissions_verified  # Inverted logic for removals
-                    error_msg = 'Permission still exists on folder' if permissions_verified else None
+                    error_msg = 'User still belongs to group - removal failed' if not success else None
                 else:
-                    success = permissions_verified
-                    error_msg = 'Permissions not found on folder' if not permissions_verified else None
+                    error_msg = 'User does not belong to group - addition failed' if not success else None
                 
                 return {
                     'success': success,
@@ -2575,8 +2751,27 @@ def create_user_permission_deletion_task(user, folder, ad_group, permission_type
         verification_task.set_task_data(verification_data)
         
         db.session.add(verification_task)
+
+        # Mark the permission as "deletion in progress"
+        try:
+            from app.models import FolderPermission
+            permission_to_mark = FolderPermission.query.filter_by(
+                folder_id=folder.id,
+                ad_group_id=ad_group.id,
+                permission_type=permission_type,
+                is_active=True
+            ).first()
+
+            if permission_to_mark:
+                permission_to_mark.deletion_in_progress = True
+                logger.info(f"Marked permission as deletion in progress: folder_id={folder.id}, ad_group_id={ad_group.id}, permission_type={permission_type}")
+            else:
+                logger.warning(f"Could not find permission to mark as deletion in progress: folder_id={folder.id}, ad_group_id={ad_group.id}, permission_type={permission_type}")
+        except Exception as e:
+            logger.error(f"Error marking permission as deletion in progress: {str(e)}")
+
         db.session.commit()
-        
+
         logger.info(f"Created delete user permission tasks for folder {folder.id}, user {user.id}, group {ad_group.id}")
         return airflow_task
         

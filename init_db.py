@@ -9,14 +9,82 @@ def init_database():
     app = create_app()
 
     with app.app_context():
-        # Create all tables
+        # For new installations, create all tables directly from models
         print("Creating database tables...")
         db.create_all()
 
-        # Apply any pending migrations to ensure schema is up to date
-        print("Applying database migrations...")
-        from flask_migrate import upgrade
-        upgrade()
+        # Skip migrations for new installations and mark them as applied
+        print("Initializing migration tracking for new installation...")
+        try:
+            from flask_migrate import stamp
+            from sqlalchemy import text
+
+            # Check if alembic_version table exists (indicates existing installation)
+            result = db.session.execute(text("""
+                SELECT COUNT(*)
+                FROM information_schema.tables
+                WHERE table_name = 'alembic_version'
+            """))
+
+            has_alembic = result.scalar() > 0
+
+            if not has_alembic:
+                # New installation - mark all migrations as applied
+                stamp()
+                print("✓ New installation: All migrations marked as applied")
+            else:
+                # Existing installation - try to apply pending migrations carefully
+                print("Existing installation detected, applying pending migrations...")
+                try:
+                    from flask_migrate import upgrade
+                    upgrade()
+                    print("✓ Migrations applied successfully")
+                except Exception as migration_error:
+                    print(f"⚠ Migration warning: {migration_error}")
+                    print("Database may already be up to date")
+
+        except Exception as e:
+            print(f"⚠ Warning: Could not handle migrations: {e}")
+            print("Continuing with database initialization...")
+
+        # Ensure deletion_in_progress column exists in folder_permissions table
+        print("Verifying folder_permissions table schema...")
+        try:
+            from sqlalchemy import text
+
+            # First check if folder_permissions table exists
+            table_check = db.session.execute(text("""
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_name = 'folder_permissions'
+            """))
+            table_exists = table_check.fetchone()
+
+            if table_exists:
+                # Check if deletion_in_progress column exists
+                result = db.session.execute(text("""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'folder_permissions'
+                    AND column_name = 'deletion_in_progress'
+                """))
+                column_exists = result.fetchone()
+
+                if not column_exists:
+                    print("Adding deletion_in_progress column to folder_permissions table...")
+                    db.session.execute(text("""
+                        ALTER TABLE folder_permissions
+                        ADD COLUMN deletion_in_progress BOOLEAN NOT NULL DEFAULT FALSE
+                    """))
+                    db.session.commit()
+                    print("✓ deletion_in_progress column added successfully")
+                else:
+                    print("✓ deletion_in_progress column already exists")
+            else:
+                print("ℹ folder_permissions table will be created by db.create_all() with all fields")
+
+        except Exception as e:
+            print(f"⚠ Warning: Could not verify/add deletion_in_progress column: {e}")
 
         # Create default roles
         print("Creating default roles...")

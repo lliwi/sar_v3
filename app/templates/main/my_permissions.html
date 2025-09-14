@@ -293,8 +293,8 @@
                             <tr class="permission-row" data-folder-name="{{ folder_data.folder.name|lower }}" 
                                 data-folder-path="{{ folder_data.folder.path|lower }}"
                                 data-description="{{ (folder_data.folder.description or '')|lower }}"
-                                data-read-groups="{{ folder_data.read_groups|map(attribute='name')|join(' ')|lower }}"
-                                data-write-groups="{{ folder_data.write_groups|map(attribute='name')|join(' ')|lower }}"
+                                data-read-groups="{{ folder_data.read_groups|map(attribute='group.name')|join(' ')|lower }}"
+                                data-write-groups="{{ folder_data.write_groups|map(attribute='group.name')|join(' ')|lower }}"
                                 data-role="{% if current_user in folder_data.folder.owners %}owner{% elif current_user in folder_data.folder.validators %}validator{% endif %}"
                                 data-has-read="{{ 'true' if folder_data.read_groups else 'false' }}"
                                 data-has-write="{{ 'true' if folder_data.write_groups else 'false' }}">
@@ -315,9 +315,14 @@
                                 
                                 <td>
                                     {% if folder_data.read_groups %}
-                                        {% for group in folder_data.read_groups %}
+                                        {% for group_info in folder_data.read_groups %}
                                             {% if not loop.first %}, {% endif %}
-                                            <span class="badge bg-success">{{ group.name }}</span>
+                                            <span class="badge bg-success{% if group_info.deletion_in_progress %} opacity-50{% endif %}">
+                                                {{ group_info.group.name }}
+                                                {% if group_info.deletion_in_progress %}
+                                                    <i class="fas fa-spinner fa-spin ms-1" title="Eliminación en proceso"></i>
+                                                {% endif %}
+                                            </span>
                                         {% endfor %}
                                     {% else %}
                                         <span class="text-muted">-</span>
@@ -326,9 +331,14 @@
                                 
                                 <td>
                                     {% if folder_data.write_groups %}
-                                        {% for group in folder_data.write_groups %}
+                                        {% for group_info in folder_data.write_groups %}
                                             {% if not loop.first %}, {% endif %}
-                                            <span class="badge bg-warning">{{ group.name }}</span>
+                                            <span class="badge bg-warning{% if group_info.deletion_in_progress %} opacity-50{% endif %}">
+                                                {{ group_info.group.name }}
+                                                {% if group_info.deletion_in_progress %}
+                                                    <i class="fas fa-spinner fa-spin ms-1" title="Eliminación en proceso"></i>
+                                                {% endif %}
+                                            </span>
                                         {% endfor %}
                                     {% else %}
                                         <span class="text-muted">-</span>
@@ -354,34 +364,44 @@
                                                     <i class="fas fa-trash"></i>
                                                 </button>
                                                 <ul class="dropdown-menu">
-                                                    {% for group in folder_data.read_groups %}
+                                                    {% for group_info in folder_data.read_groups %}
                                                         <li>
-                                                            <form action="{{ url_for('main.delete_user_permission') }}" 
+                                                            <form action="{{ url_for('main.delete_user_permission') }}"
                                                                   method="POST" class="dropdown-item-form">
                                                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                                                 <input type="hidden" name="folder_id" value="{{ folder_data.folder.id }}"/>
-                                                                <input type="hidden" name="ad_group_id" value="{{ group.id }}"/>
+                                                                <input type="hidden" name="ad_group_id" value="{{ group_info.group.id }}"/>
                                                                 <input type="hidden" name="permission_type" value="read"/>
-                                                                <button type="submit" class="dropdown-item text-danger"
-                                                                        onclick="return confirm('¿Estás seguro de que deseas eliminar tu permiso de lectura del grupo {{ group.name }}?')">
-                                                                    <i class="fas fa-trash me-2"></i>
-                                                                    Eliminar Lectura ({{ group.name }})
+                                                                <button type="submit" class="dropdown-item {% if group_info.deletion_in_progress %}text-muted{% else %}text-danger{% endif %}"
+                                                                        {% if group_info.deletion_in_progress %}disabled{% else %}onclick="return confirm('¿Estás seguro de que deseas eliminar tu permiso de lectura del grupo {{ group_info.group.name }}?')"{% endif %}>
+                                                                    {% if group_info.deletion_in_progress %}
+                                                                        <i class="fas fa-spinner fa-spin me-2"></i>
+                                                                        Eliminando... ({{ group_info.group.name }})
+                                                                    {% else %}
+                                                                        <i class="fas fa-trash me-2"></i>
+                                                                        Eliminar Lectura ({{ group_info.group.name }})
+                                                                    {% endif %}
                                                                 </button>
                                                             </form>
                                                         </li>
                                                     {% endfor %}
-                                                    {% for group in folder_data.write_groups %}
+                                                    {% for group_info in folder_data.write_groups %}
                                                         <li>
-                                                            <form action="{{ url_for('main.delete_user_permission') }}" 
+                                                            <form action="{{ url_for('main.delete_user_permission') }}"
                                                                   method="POST" class="dropdown-item-form">
                                                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                                                 <input type="hidden" name="folder_id" value="{{ folder_data.folder.id }}"/>
-                                                                <input type="hidden" name="ad_group_id" value="{{ group.id }}"/>
+                                                                <input type="hidden" name="ad_group_id" value="{{ group_info.group.id }}"/>
                                                                 <input type="hidden" name="permission_type" value="write"/>
-                                                                <button type="submit" class="dropdown-item text-danger"
-                                                                        onclick="return confirm('¿Estás seguro de que deseas eliminar tu permiso de escritura del grupo {{ group.name }}?')">
-                                                                    <i class="fas fa-trash me-2"></i>
-                                                                    Eliminar Escritura ({{ group.name }})
+                                                                <button type="submit" class="dropdown-item {% if group_info.deletion_in_progress %}text-muted{% else %}text-danger{% endif %}"
+                                                                        {% if group_info.deletion_in_progress %}disabled{% else %}onclick="return confirm('¿Estás seguro de que deseas eliminar tu permiso de escritura del grupo {{ group_info.group.name }}?')"{% endif %}>
+                                                                    {% if group_info.deletion_in_progress %}
+                                                                        <i class="fas fa-spinner fa-spin me-2"></i>
+                                                                        Eliminando... ({{ group_info.group.name }})
+                                                                    {% else %}
+                                                                        <i class="fas fa-trash me-2"></i>
+                                                                        Eliminar Escritura ({{ group_info.group.name }})
+                                                                    {% endif %}
                                                                 </button>
                                                             </form>
                                                         </li>

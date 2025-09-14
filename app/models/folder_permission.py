@@ -11,6 +11,7 @@ class FolderPermission(db.Model):
     granted_by_id = db.Column(db.Integer, db.ForeignKey('users.id'))
     granted_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
+    deletion_in_progress = db.Column(db.Boolean, default=False, nullable=False)
     
     # Relationships
     granted_by = db.relationship('User', backref='granted_permissions')
@@ -34,5 +35,6 @@ class FolderPermission(db.Model):
             'permission_type': self.permission_type,
             'granted_by': self.granted_by.username if self.granted_by else None,
             'granted_at': self.granted_at.isoformat(),
-            'is_active': self.is_active
+            'is_active': self.is_active,
+            'deletion_in_progress': self.deletion_in_progress
         }
