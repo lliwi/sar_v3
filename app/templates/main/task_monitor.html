@@ -238,11 +238,10 @@
                                                 {% endif %}
                                             </td>
                                             <td>
-                                                {% if task.permission_request %}
+                                                {% if task.permission_request_id %}
                                                     <a href="{{ url_for('main.my_requests') }}" class="text-decoration-none">
-                                                        <span class="badge bg-white text-dark border">#{{ task.permission_request.id }}</span>
+                                                        <span class="badge bg-white text-dark border">#{{ task.permission_request_id }}</span>
                                                     </a>
-                                                    <br><small class="text-muted">{{ task.permission_request.folder.path }}</small>
                                                 {% else %}
                                                     <span class="text-muted">N/A</span>
                                                 {% endif %}
