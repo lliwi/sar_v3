@@ -3515,7 +3515,47 @@ def restore_backup(filename):
                 # Commit all changes
                 db.session.commit()
                 current_app.logger.info("Database restoration completed successfully")
-                
+
+                # Repair PostgreSQL sequences after restoration
+                current_app.logger.info("Repairing PostgreSQL sequences after backup restoration...")
+                sequences_repaired = 0
+                sequence_errors = 0
+
+                tables_with_sequences = [
+                    'permission_requests',
+                    'tasks',
+                    'audit_events',
+                    'user_ad_group_memberships',
+                    'folder_permissions',
+                    'user_folder_permissions',
+                    'admin_notifications'
+                ]
+
+                for table in tables_with_sequences:
+                    try:
+                        # Get max ID from table
+                        result = db.session.execute(text(f'SELECT MAX(id) FROM {table}'))
+                        max_id = result.scalar()
+
+                        if max_id is not None:
+                            # Reset sequence to max_id + 1
+                            db.session.execute(text(f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), {max_id})"))
+                            sequences_repaired += 1
+                            current_app.logger.info(f"Sequence repaired for {table}: set to {max_id}")
+                        else:
+                            # Table is empty, reset to 1
+                            db.session.execute(text(f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), 1, false)"))
+                            sequences_repaired += 1
+                            current_app.logger.info(f"Sequence reset for {table}: set to 1 (empty table)")
+
+                    except Exception as seq_error:
+                        sequence_errors += 1
+                        current_app.logger.error(f"Error repairing sequence for {table}: {str(seq_error)}")
+
+                # Commit sequence repairs
+                db.session.commit()
+                current_app.logger.info(f"Sequence repair completed: {sequences_repaired} repaired, {sequence_errors} errors")
+
             finally:
                 # Re-enable foreign key checks
                 db.session.execute(text("SET session_replication_role = DEFAULT;"))
@@ -3534,7 +3574,9 @@ def restore_backup(filename):
                     'restored_tables': len([t for t in restored_tables if 'error' not in t]),
                     'total_records': restored_records,
                     'backup_date': backup_metadata.get('backup_date'),
-                    'tables_restored': restored_tables
+                    'tables_restored': restored_tables,
+                    'sequences_repaired': sequences_repaired,
+                    'sequence_errors': sequence_errors
                 },
                 ip_address=request.remote_addr,
                 user_agent=request.headers.get('User-Agent')
