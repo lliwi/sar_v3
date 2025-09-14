@@ -457,21 +457,21 @@ def export_folders():
         owner_username = folder.owners[0].username if folder.owners else ''
         
         # Get validators usernames
-        validator_usernames = ';'.join([v.username for v in folder.validators])
-        
+        validator_usernames = '#'.join([v.username for v in folder.validators])
+
         # Get read and write groups
         read_groups = []
         write_groups = []
-        
+
         for permission in folder.permissions:
             if permission.is_active:
                 if permission.permission_type == 'read':
                     read_groups.append(permission.ad_group.name)
                 elif permission.permission_type == 'write':
                     write_groups.append(permission.ad_group.name)
-        
-        read_group_names = ';'.join(read_groups)
-        write_group_names = ';'.join(write_groups)
+
+        read_group_names = '#'.join(read_groups)
+        write_group_names = '#'.join(write_groups)
         
         writer.writerow([
             folder.name,
@@ -579,7 +579,7 @@ def import_folders():
                 # Handle validators
                 if row.get('validadores_usernames'):
                     folder.validators.clear()
-                    validator_usernames = [u.strip() for u in row['validadores_usernames'].split(';') if u.strip()]
+                    validator_usernames = [u.strip() for u in row['validadores_usernames'].split('#') if u.strip()]
                     for username in validator_usernames:
                         validator = User.query.filter_by(username=username).first()
                         if validator:
@@ -595,7 +595,7 @@ def import_folders():
                         permission_type='read'
                     ).delete()
                     
-                    group_names = [g.strip() for g in row['grupo_lectura'].split(';') if g.strip()]
+                    group_names = [g.strip() for g in row['grupo_lectura'].split('#') if g.strip()]
                     for group_name in group_names:
                         ad_group = ADGroup.query.filter_by(name=group_name).first()
                         if ad_group:
@@ -617,7 +617,7 @@ def import_folders():
                         permission_type='write'
                     ).delete()
                     
-                    group_names = [g.strip() for g in row['grupo_escritura'].split(';') if g.strip()]
+                    group_names = [g.strip() for g in row['grupo_escritura'].split('#') if g.strip()]
                     for group_name in group_names:
                         ad_group = ADGroup.query.filter_by(name=group_name).first()
                         if ad_group:
