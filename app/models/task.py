@@ -88,6 +88,9 @@ class Task(db.Model):
         self.updated_at = datetime.utcnow()
         if result_data:
             self.set_result_data(result_data)
+
+        # Check if associated permission request should be marked as failed
+        self._check_and_update_permission_request_status()
     
     def schedule_retry(self, delay_seconds=30):
         """Schedule task for retry"""
@@ -102,6 +105,58 @@ class Task(db.Model):
         self.next_execution_at = datetime.utcnow() + timedelta(seconds=delay_seconds)
         self.updated_at = datetime.utcnow()
         return True
+
+    def _check_and_update_permission_request_status(self):
+        """
+        Check if permission request should be marked as failed when tasks fail.
+        Only mark as failed if ALL associated tasks have failed.
+        """
+        if not self.permission_request_id:
+            return
+
+        # Get all tasks for this permission request
+        from app.models.permission_request import PermissionRequest
+        permission_request = PermissionRequest.query.get(self.permission_request_id)
+        if not permission_request or permission_request.status != 'approved':
+            return
+
+        all_tasks = Task.query.filter_by(
+            permission_request_id=self.permission_request_id
+        ).all()
+
+        # Check if all tasks have failed or been cancelled
+        if all_tasks:
+            failed_tasks = [task for task in all_tasks if task.status in ['failed', 'cancelled']]
+            pending_or_running_tasks = [task for task in all_tasks if task.status in ['pending', 'running', 'retry']]
+
+            # Only mark permission request as failed if all tasks have failed/cancelled and none are pending/running
+            if len(failed_tasks) == len(all_tasks) and len(pending_or_running_tasks) == 0:
+                # Find a user to attribute the failure to (preferably the creator of this task)
+                failed_by_user = self.created_by
+
+                permission_request.mark_as_failed(
+                    user=failed_by_user,
+                    comment=f"Todas las tareas de automatización han fallado. Último error: {self.error_message}"
+                )
+
+                # Log the automatic failure
+                from app.models.audit_event import AuditEvent
+                AuditEvent.log_event(
+                    user=failed_by_user,
+                    event_type='permission_request',
+                    action='auto_failed',
+                    resource_type='permission_request',
+                    resource_id=permission_request.id,
+                    description=f'Solicitud #{permission_request.id} marcada automáticamente como fallida - todas las tareas fallaron',
+                    metadata={
+                        'failed_task_count': len(failed_tasks),
+                        'total_task_count': len(all_tasks),
+                        'last_error': self.error_message,
+                        'folder_path': permission_request.folder.path,
+                        'permission_type': permission_request.permission_type,
+                        'requester': permission_request.requester.username
+                    }
+                )
 
     def increment_attempt_count(self):
         """Increment attempt count for immediate execution tracking"""

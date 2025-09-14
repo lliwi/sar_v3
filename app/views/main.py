@@ -127,6 +127,11 @@ def request_permission():
             # Permission already exists - warn user and don't proceed
             flash(existing_permission_check['message'], 'warning')
             return redirect(url_for('main.request_permission'))
+
+        elif existing_permission_check['action'] == 'retry':
+            # Allow retry for failed requests - show info message
+            flash(existing_permission_check['message'], 'info')
+            # Continue with normal processing to allow new request
         
         elif existing_permission_check['action'] == 'change':
             # Different permission type exists - create change request
@@ -186,8 +191,10 @@ def request_permission():
             flash(f'Solicitud de cambio enviada: {existing_permission_check["existing_permission_type"]} → {form.permission_type.data}. Se crearán tareas para eliminar el permiso actual y aplicar el nuevo.', 'info')
             return redirect(url_for('main.dashboard'))
         
-        else:  # action == 'new'
-            # Standard new permission request
+        else:  # action == 'new' or 'retry'
+            # Standard new permission request (or retry of failed request)
+            if existing_permission_check['action'] == 'retry':
+                flash(existing_permission_check['message'], 'info')
             permission_request = PermissionRequest(
                 requester=current_user,
                 folder_id=form.folder_id.data,
@@ -814,8 +821,8 @@ def assign_user_permission(folder_id):
         # Permission already exists - warn user and don't proceed
         flash(existing_permission_check['message'], 'warning')
         return redirect(url_for('main.manage_resource', folder_id=folder_id))
-    
-    elif existing_permission_check['action'] == 'change':
+
+    if existing_permission_check['action'] == 'change':
         # Different permission type exists - create change request with automatic approval
         
         # Cancel any pending request first
@@ -877,8 +884,10 @@ def assign_user_permission(folder_id):
         flash(f'Cambio de permiso aprobado automáticamente: {existing_permission_check["existing_permission_type"]} → {permission_type} para usuario {user.username}.', 'success')
         return redirect(url_for('main.manage_resource', folder_id=folder_id))
     
-    else:  # action == 'new'
-        # Create new permission request with automatic approval
+    else:  # action == 'new' or 'retry'
+        # Create new permission request with automatic approval (or retry of failed request)
+        if existing_permission_check['action'] == 'retry':
+            flash(existing_permission_check['message'], 'info')
         permission_request = PermissionRequest(
             requester=user,
             folder_id=folder_id,

@@ -29,7 +29,7 @@ class PermissionRequest(db.Model):
     # Constraints
     __table_args__ = (
         db.CheckConstraint(permission_type.in_(['read', 'write']), name='check_request_permission_type'),
-        db.CheckConstraint(status.in_(['pending', 'approved', 'rejected', 'canceled', 'revoked']), name='check_request_status')
+        db.CheckConstraint(status.in_(['pending', 'approved', 'rejected', 'canceled', 'revoked', 'failed']), name='check_request_status')
     )
     
     def __repr__(self):
@@ -137,7 +137,10 @@ class PermissionRequest(db.Model):
     
     def is_canceled(self):
         return self.status == 'canceled'
-    
+
+    def is_failed(self):
+        return self.status == 'failed'
+
     def cancel(self, user, comment=None):
         """Cancel the permission request"""
         self.status = 'canceled'
@@ -145,7 +148,45 @@ class PermissionRequest(db.Model):
         self.validation_comment = comment or 'Solicitud cancelada por el usuario'
         self.validation_date = datetime.utcnow()
         self.updated_at = datetime.utcnow()
-    
+
+    def mark_as_failed(self, user, comment=None):
+        """Mark request as failed when automation tasks fail"""
+        self.status = 'failed'
+        self.validator = user
+        self.validation_comment = comment or 'Las tareas de automatización fallaron'
+        self.validation_date = datetime.utcnow()
+        self.updated_at = datetime.utcnow()
+
+    def retry_request(self, user, comment=None):
+        """Retry a failed or approved request by resetting status to pending"""
+        if self.status not in ['approved', 'failed']:
+            raise ValueError("Solo se pueden reintentar solicitudes aprobadas o fallidas")
+
+        # Reset status and clear previous validation but keep history
+        old_status = self.status
+        self.status = 'pending'
+        self.validator = None
+        self.validation_comment = None
+        self.validation_date = None
+        self.updated_at = datetime.utcnow()
+
+        # Log the retry action
+        from app.models.audit_event import AuditEvent
+        AuditEvent.log_event(
+            user=user,
+            event_type='permission_request',
+            action='retry_request',
+            resource_type='permission_request',
+            resource_id=self.id,
+            description=f'Solicitud #{self.id} reintentada desde estado {old_status}',
+            metadata={
+                'previous_status': old_status,
+                'retry_comment': comment,
+                'folder_path': self.folder.path,
+                'permission_type': self.permission_type
+            }
+        )
+
     def can_be_validated_by(self, user):
         """Check if user can validate this request"""
         # If there's a specific validator assigned, only that validator (or admins) can validate
@@ -184,8 +225,46 @@ class PermissionRequest(db.Model):
             folder_id=folder_id,
             status='approved'
         ).first()
-        
+
+        # Also check for failed requests that can be retried
+        failed_request = PermissionRequest.query.filter_by(
+            requester_id=user_id,
+            folder_id=folder_id,
+            status='failed'
+        ).first()
+
+        if failed_request:
+            if failed_request.permission_type == requested_permission_type:
+                return {
+                    'action': 'retry',
+                    'existing_permission_type': failed_request.permission_type,
+                    'existing_source': 'failed',
+                    'existing_request': failed_request,
+                    'message': f'Solicitud anterior de {failed_request.permission_type} falló. Se permite nueva solicitud o reintentar la existente'
+                }
+
         if existing_manual:
+            # Check if automation tasks failed for this approved request
+            from app.models.task import Task
+
+            automation_tasks = Task.query.filter_by(
+                permission_request_id=existing_manual.id
+            ).all()
+
+            # If there are failed/cancelled tasks or no tasks at all, allow retry
+            has_failed_tasks = any(task.status in ['failed', 'cancelled'] for task in automation_tasks)
+            has_no_tasks = len(automation_tasks) == 0
+
+            if has_failed_tasks or has_no_tasks:
+                return {
+                    'action': 'retry',
+                    'existing_permission_type': existing_manual.permission_type,
+                    'existing_source': 'manual_failed',
+                    'existing_request': existing_manual,
+                    'message': f'Solicitud anterior de {existing_manual.permission_type} falló o fue cancelada en automatización. Se permite nueva solicitud'
+                }
+
+            # Check if permission type matches
             if existing_manual.permission_type == requested_permission_type:
                 return {
                     'action': 'duplicate',
