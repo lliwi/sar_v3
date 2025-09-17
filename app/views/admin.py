@@ -1204,29 +1204,60 @@ def active_permissions_report():
         
         # Get all folders for filter dropdown
         all_folders = Folder.query.filter_by(is_active=True).order_by(Folder.name).all()
-        
-        # Implement pagination for user records
-        total_records = len(permissions_by_user)
-        user_items = list(permissions_by_user.items())
-        
-        # Sort user records by username for consistent pagination
-        user_items.sort(key=lambda x: x[1]['user'].username.lower())
-        
-        # Calculate pagination
-        start_idx = (page - 1) * per_page
-        end_idx = start_idx + per_page
-        paginated_user_items = user_items[start_idx:end_idx]
-        
-        # Convert back to dict for template
-        paginated_permissions_by_user = dict(paginated_user_items)
-        
-        # Calculate pagination info
+
+        # Create flat list of individual permission records for pagination
+        flat_permissions = []
+        for user_id, user_data in permissions_by_user.items():
+            user = user_data['user']
+            for folder_id, folder_data in user_data['folders'].items():
+                folder = folder_data['folder']
+                for permission in folder_data['permissions']:
+                    flat_permissions.append({
+                        'user': user,
+                        'folder': folder,
+                        'permission': permission
+                    })
+
+        # Sort by username then folder name for consistent pagination
+        flat_permissions.sort(key=lambda x: (x['user'].username.lower(), x['folder'].name.lower()))
+
+        # Calculate pagination for individual records
+        total_records = len(flat_permissions)
         total_pages = (total_records + per_page - 1) // per_page
         has_prev = page > 1
         has_next = page < total_pages
         prev_num = page - 1 if has_prev else None
         next_num = page + 1 if has_next else None
-        
+
+        # Get records for current page
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        paginated_permissions = flat_permissions[start_idx:end_idx]
+
+        # Reconstruct permissions_by_user structure with only paginated records
+        paginated_permissions_by_user = {}
+        for record in paginated_permissions:
+            user = record['user']
+            folder = record['folder']
+            permission = record['permission']
+
+            user_id = user.id
+            folder_id = folder.id
+
+            if user_id not in paginated_permissions_by_user:
+                paginated_permissions_by_user[user_id] = {
+                    'user': user,
+                    'folders': {}
+                }
+
+            if folder_id not in paginated_permissions_by_user[user_id]['folders']:
+                paginated_permissions_by_user[user_id]['folders'][folder_id] = {
+                    'folder': folder,
+                    'permissions': []
+                }
+
+            paginated_permissions_by_user[user_id]['folders'][folder_id]['permissions'].append(permission)
+
         pagination = {
             'page': page,
             'per_page': per_page,
