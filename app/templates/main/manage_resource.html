@@ -104,11 +104,11 @@
                                         <td>
                                             <div class="d-flex align-items-center">
                                                 {% set user_has_deletion_in_progress = folder.has_user_deletion_in_progress(user_data.user.id) %}
-                                                <div class="avatar avatar-sm bg-primary text-white rounded-circle me-2 d-flex align-items-center justify-content-center {% if user_has_deletion_in_progress %}opacity-50{% endif %}">
+                                                <div class="me-2 {% if user_has_deletion_in_progress %}opacity-50{% endif %}">
                                                     {% if user_has_deletion_in_progress %}
-                                                        <i class="fas fa-spinner fa-spin fa-sm"></i>
+                                                        <i class="fas fa-spinner fa-spin text-warning"></i>
                                                     {% else %}
-                                                        <i class="fas fa-user fa-sm"></i>
+                                                        <i class="fas fa-user text-secondary"></i>
                                                     {% endif %}
                                                 </div>
                                                 <div>
@@ -330,8 +330,8 @@
                                 <tr>
                                     <td>
                                         <div class="d-flex align-items-center">
-                                            <div class="avatar avatar-sm bg-warning text-white rounded-circle me-2 d-flex align-items-center justify-content-center">
-                                                <i class="fas fa-users fa-sm"></i>
+                                            <div class="me-2">
+                                                <i class="fas fa-users text-warning"></i>
                                             </div>
                                             <div>
                                                 <div class="fw-medium">{{ group_data.ad_group.name }}</div>
@@ -441,8 +441,8 @@
                                            data-user-username="{{ user.username }}"
                                            data-user-email="{{ user.email }}">
                                             <div class="d-flex align-items-center">
-                                                <div class="avatar avatar-sm bg-primary text-white rounded-circle me-2 d-flex align-items-center justify-content-center">
-                                                    <i class="fas fa-user fa-sm"></i>
+                                                <div class="me-2">
+                                                    <i class="fas fa-user text-secondary"></i>
                                                 </div>
                                                 <div>
                                                     <div class="fw-medium">{{ user.full_name }}</div>
