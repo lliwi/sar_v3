@@ -42,7 +42,7 @@
                                                 <span class="folder-icon">📁</span>
                                                 <div class="folder-info">
                                                     <div class="folder-path">{{ folder.name }}</div>
-                                                    <div class="folder-description">{{ folder.path }}</div>
+                                                    <div class="folder-description">{{ folder.sanitized_path }}</div>
                                                 </div>
                                             </div>
                                         {% endfor %}
@@ -230,7 +230,7 @@
                                         <strong>{{ permission.folder.name }}</strong>
                                     </td>
                                     <td>
-                                        <code>{{ permission.folder.path }}</code>
+                                        <code>{{ permission.folder.sanitized_path }}</code>
                                     </td>
                                     <td>
                                         <span class="badge bg-info">{{ permission.ad_group.name }}</span>

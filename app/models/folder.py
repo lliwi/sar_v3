@@ -35,8 +35,22 @@ class Folder(db.Model):
     def sanitized_path(self):
         """Get path with sanitized backslashes"""
         import re
-        # Replace multiple consecutive backslashes with single backslash
-        sanitized = re.sub(r'\\+', '\\', self.path)
+
+        # Simple approach: normalize all multiple backslashes first
+        # Then ensure UNC paths have exactly 2 backslashes at start
+
+        # Step 1: Replace any sequence of 2+ backslashes with single backslash
+        sanitized = re.sub(r'\\{2,}', r'\\', self.path)
+
+        # Step 2: If this looks like it should be a UNC path (starts with \server)
+        # then add the missing backslash at the beginning
+        if sanitized.startswith('\\') and not sanitized.startswith('\\\\'):
+            # Check if the part after the first \ looks like a server name
+            parts = sanitized[1:].split('\\', 1)
+            if len(parts) > 0 and parts[0] and not parts[0].startswith('/'):
+                # This looks like a UNC path, add the missing backslash
+                sanitized = '\\' + sanitized
+
         # Also handle forward slashes that might be duplicated
         sanitized = re.sub(r'/+', '/', sanitized)
         return sanitized

@@ -40,7 +40,7 @@
                                             <span class="badge bg-secondary">#{{ req.id }}</span>
                                         </td>
                                         <td>
-                                            <small class="text-muted">{{ req.folder.path }}</small>
+                                            <small class="text-muted">{{ req.folder.sanitized_path }}</small>
                                         </td>
                                         <td>
                                             <span class="badge bg-info">{{ req.ad_group.name }}</span>
@@ -185,7 +185,7 @@
                 <div class="row">
                     <div class="col-md-6">
                         <strong class="text-dark">Carpeta:</strong>
-                        <p class="text-secondary">{{ req.folder.path }}</p>
+                        <p class="text-secondary">{{ req.folder.sanitized_path }}</p>
                     </div>
                     <div class="col-md-6">
                         <strong class="text-dark">Grupo AD:</strong>

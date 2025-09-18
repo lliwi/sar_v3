@@ -84,7 +84,7 @@
                     <div class="border-bottom pb-2 mb-2">
                         <div class="d-flex justify-content-between">
                             <div>
-                                <strong>{{ request.folder.path }}</strong>
+                                <strong>{{ request.folder.sanitized_path }}</strong>
                                 {% if request.folder.description %}
                                     <br><small class="text-info">{{ request.folder.description }}</small>
                                 {% endif %}
@@ -125,7 +125,7 @@
                     <div class="border-bottom pb-2 mb-2">
                         <div class="d-flex justify-content-between">
                             <div>
-                                <strong>{{ request.folder.path }}</strong>
+                                <strong>{{ request.folder.sanitized_path }}</strong>
                                 <br>
                                 <small class="text-muted">
                                     Por: {{ request.requester.full_name }} - {{ request.permission_type.title() }}

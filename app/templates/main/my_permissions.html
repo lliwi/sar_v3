@@ -291,7 +291,7 @@
                         <tbody id="permissionsTableBody">
                             {% for folder_id, folder_data in permissions_by_folder.items() %}
                             <tr class="permission-row" data-folder-name="{{ folder_data.folder.name|lower }}" 
-                                data-folder-path="{{ folder_data.folder.path|lower }}"
+                                data-folder-path="{{ folder_data.folder.sanitized_path|lower }}"
                                 data-description="{{ (folder_data.folder.description or '')|lower }}"
                                 data-read-groups="{{ folder_data.read_groups|map(attribute='group.name')|join(' ')|lower }}"
                                 data-write-groups="{{ folder_data.write_groups|map(attribute='group.name')|join(' ')|lower }}"
@@ -310,7 +310,7 @@
                                 </td>
                                 
                                 <td>
-                                    <small class="text-muted">{{ folder_data.folder.path }}</small>
+                                    <small class="text-muted">{{ folder_data.folder.sanitized_path }}</small>
                                 </td>
                                 
                                 <td>
@@ -466,7 +466,7 @@
                                     <div>
                                         <strong>{{ request.folder.name }}</strong>
                                         <br>
-                                        <small class="text-muted">{{ request.folder.path }}</small>
+                                        <small class="text-muted">{{ request.folder.sanitized_path }}</small>
                                     </div>
                                 </td>
                                 <td>

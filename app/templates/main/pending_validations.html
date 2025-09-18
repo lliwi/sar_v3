@@ -54,7 +54,7 @@
                                         <td>
                                             <div>
                                                 <strong>{{ req.folder.name }}</strong><br>
-                                                <small class="text-muted">{{ req.folder.path }}</small>
+                                                <small class="text-muted">{{ req.folder.sanitized_path }}</small>
                                             </div>
                                         </td>
                                         <td>
@@ -195,7 +195,7 @@
                 <div class="row mb-3">
                     <div class="col-md-6">
                         <strong>Carpeta:</strong>
-                        <p class="text-muted">{{ req.folder.path }}</p>
+                        <p class="text-muted">{{ req.folder.sanitized_path }}</p>
                     </div>
                     <div class="col-md-6">
                         <strong>Grupo AD:</strong>

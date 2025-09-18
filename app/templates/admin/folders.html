@@ -87,7 +87,7 @@
                                     {% endif %}
                                 </td>
                                 <td>
-                                    <code>{{ folder.path }}</code>
+                                    <code>{{ folder.sanitized_path }}</code>
                                 </td>
                                 <td>
                                     {% if folder.owners %}
@@ -256,7 +256,7 @@
                 <div class="row mb-3">
                     <div class="col-12">
                         <strong>Ruta:</strong>
-                        <p class="text-muted"><code>{{ folder.path }}</code></p>
+                        <p class="text-muted"><code>{{ folder.sanitized_path }}</code></p>
                     </div>
                 </div>
                 
@@ -429,7 +429,7 @@ function showADPermissionsModal(data) {
                     <div class="modal-body">
                         <div class="row mb-3">
                             <div class="col-md-12">
-                                <h6><strong>Carpeta:</strong> <code>${folder.path}</code></h6>
+                                <h6><strong>Carpeta:</strong> <code>${folder.sanitized_path}</code></h6>
                             </div>
                         </div>
                         
