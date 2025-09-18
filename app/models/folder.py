@@ -19,6 +19,27 @@ class Folder(db.Model):
     
     def __repr__(self):
         return f'<Folder {self.path}>'
+
+    @property
+    def folder_name(self):
+        """Extract folder name from path"""
+        import os
+        # Remove trailing slashes/backslashes and get basename
+        basename = os.path.basename(self.path.rstrip('/\\'))
+        # If basename is empty (root path), use the name field or last meaningful part
+        if not basename:
+            return self.name if self.name else self.path
+        return basename
+
+    @property
+    def sanitized_path(self):
+        """Get path with sanitized backslashes"""
+        import re
+        # Replace multiple consecutive backslashes with single backslash
+        sanitized = re.sub(r'\\+', '\\', self.path)
+        # Also handle forward slashes that might be duplicated
+        sanitized = re.sub(r'/+', '/', sanitized)
+        return sanitized
     
     def get_permissions_by_type(self, permission_type):
         """Get all groups with specific permission type for this folder"""

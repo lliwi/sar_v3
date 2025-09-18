@@ -19,17 +19,18 @@
                             {{ form.folder_id.label(class="form-label") }}
                             
                             <!-- Combobox con Filtrado -->
-                            <div class="combobox-container">
+                            <div class="combobox-container" id="folderComboboxContainer">
                                 <input type="text" class="combobox-input" id="comboboxInput" placeholder="🗂️ Buscar carpeta...">
                                 <div class="combobox-dropdown" id="comboboxDropdown">
                                     {% for folder in form.folders %}
-                                        <div class="combobox-option" data-value="{{ folder.id }}">
+                                        {% set path_parts = folder.path.replace('\\', '/').split('/') %}
+                                        {% set folder_name = path_parts[-1] if path_parts[-1] else folder.name %}
+                                        {% set sanitized_path = folder.path.replace('\\\\', '\\') %}
+                                        <div class="combobox-option" data-value="{{ folder.id }}" data-folder-name="{{ folder_name }}">
                                             <span class="folder-icon">📁</span>
                                             <div class="folder-info">
-                                                <div class="folder-path">{{ folder.path }}</div>
-                                                {% if folder.description %}
-                                                    <div class="folder-description">{{ folder.description }}</div>
-                                                {% endif %}
+                                                <div class="folder-path">{{ folder_name }}</div>
+                                                <div class="folder-description">{{ sanitized_path }}</div>
                                             </div>
                                         </div>
                                     {% endfor %}
@@ -67,10 +68,10 @@
                             
                             <div class="col-md-8">
                                 <div class="mb-3">
-                                    {{ form.validator_id.label(class="form-label") }}
+                                    <label for="validatorComboboxInput" class="form-label">Validador</label>
                                     
                                     <!-- Validator Combobox -->
-                                    <div class="combobox-container">
+                                    <div class="combobox-container" id="validatorComboboxContainer">
                                         <input type="text" class="combobox-input" id="validatorComboboxInput" placeholder="🗂️ Seleccione primero una carpeta..." disabled>
                                         <div class="combobox-dropdown" id="validatorComboboxDropdown">
                                             <!-- Options will be populated dynamically -->
@@ -150,8 +151,9 @@ document.addEventListener('DOMContentLoaded', function() {
         allFolders = Array.from(options).map(option => ({
             element: option,
             value: option.dataset.value,
+            folderName: option.dataset.folderName || option.querySelector('.folder-path').textContent,
             path: option.querySelector('.folder-path').textContent,
-            description: option.querySelector('.folder-description') ? 
+            description: option.querySelector('.folder-description') ?
                         option.querySelector('.folder-description').textContent : '',
             text: option.textContent.toLowerCase()
         }));
@@ -160,7 +162,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function filterFolders(searchTerm) {
         const term = searchTerm.toLowerCase().trim();
-        filteredFolders = allFolders.filter(folder => 
+        filteredFolders = allFolders.filter(folder =>
+            folder.folderName.toLowerCase().includes(term) ||
             folder.path.toLowerCase().includes(term) ||
             folder.description.toLowerCase().includes(term) ||
             folder.text.includes(term)
@@ -207,11 +210,11 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function selectFolder(folder) {
-        comboboxInput.value = folder.path;
+        comboboxInput.value = folder.folderName;
         hiddenInput.value = folder.value;
         comboboxDropdown.classList.remove('show');
         comboboxInput.blur();
-        
+
         // Mark as selected
         allFolders.forEach(f => f.element.classList.remove('selected'));
         folder.element.classList.add('selected');
@@ -267,7 +270,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Cerrar dropdown al hacer click fuera
     document.addEventListener('click', (e) => {
-        if (!e.target.closest('.combobox-container')) {
+        if (!e.target.closest('#folderComboboxContainer')) {
             comboboxDropdown.classList.remove('show');
         }
     });
@@ -330,7 +333,13 @@ document.addEventListener('DOMContentLoaded', function() {
             clearValidators();
             return;
         }
-        
+
+        // Reset validator selection when folder changes
+        clearValidators();
+
+        // Also force clear the display text to ensure visual reset
+        validatorComboboxInput.value = '';
+
         // Show loading state
         validatorComboboxInput.placeholder = '🔄 Cargando validadores...';
         validatorComboboxInput.disabled = true;
@@ -349,6 +358,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     }));
                     
                     populateValidatorDropdown();
+                    // Ensure the field is completely reset visually
+                    validatorComboboxInput.value = '';
+                    validatorHiddenInput.value = '';
                     validatorComboboxInput.placeholder = '👤 Seleccionar validador...';
                     validatorComboboxInput.disabled = false;
                 } else {
@@ -520,7 +532,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Close validator dropdown when clicking outside
     document.addEventListener('click', (e) => {
-        if (!e.target.closest('.combobox-container') || !e.target.closest('#validatorComboboxInput')) {
+        if (!e.target.closest('#validatorComboboxContainer')) {
             validatorComboboxDropdown.classList.remove('show');
         }
     });
