@@ -309,3 +309,6 @@ csrf_token.txt
 settings.local.json
 .playwright-mcp/
 CLAUDE.md
+
+# Code analysis reports
+cleanup.md
