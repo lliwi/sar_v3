@@ -1195,8 +1195,8 @@ def active_permissions_report():
                         self.folder = folder_permission.folder
                         self.permission_type = folder_permission.permission_type
                         self.ad_group = ad_group
-                        self.validator = None
-                        self.validated_at = None
+                        self.validator = folder_permission.granted_by
+                        self.validated_at = folder_permission.granted_at
                         self.requester_id = user.id
                         self.requester = user
                         self.source = 'ad_sync'
@@ -1437,8 +1437,8 @@ def active_permissions_export():
                         self.folder = folder_permission.folder
                         self.permission_type = folder_permission.permission_type
                         self.ad_group = ad_group
-                        self.validator = None
-                        self.validated_at = None
+                        self.validator = folder_permission.granted_by
+                        self.validated_at = folder_permission.granted_at
                         self.requester_id = user.id
                         self.requester = user
                         self.source = 'ad_sync'
@@ -1490,8 +1490,10 @@ def active_permissions_export():
                         validator_name = 'Sistema'
 
                     # Format validation date
-                    if permission.validated_at:
+                    if hasattr(permission, 'validated_at') and permission.validated_at:
                         validation_date = permission.validated_at.strftime('%d/%m/%Y %H:%M')
+                    elif hasattr(permission, 'validation_date') and permission.validation_date:
+                        validation_date = permission.validation_date.strftime('%d/%m/%Y %H:%M')
                     elif hasattr(permission, 'source') and permission.source == 'ad_sync':
                         validation_date = 'Sincronizado'
                     else:
