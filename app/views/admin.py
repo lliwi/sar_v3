@@ -1293,6 +1293,252 @@ def active_permissions_report():
         return redirect(url_for('admin.admin_dashboard'))
 
 
+@admin_bp.route('/reports/active-permissions/export')
+@login_required
+@admin_required
+def active_permissions_export():
+    """Export active permissions report to CSV"""
+    import csv
+    import io
+    from datetime import datetime
+    from flask import make_response
+    from app.models import PermissionRequest, UserADGroupMembership, FolderPermission, Folder, ADGroup, User
+
+    try:
+        # Get filter parameters (same as the main report)
+        folder_id = request.args.get('folder_id', '').strip()
+        user_search = request.args.get('user_search', '').strip()
+        permission_type = request.args.get('permission_type', 'all')
+
+        permissions_by_user = {}
+        all_permissions = []
+
+        # STEP 1: Get approved permission requests
+        query = PermissionRequest.query.filter_by(status='approved')
+
+        # Apply filters
+        if folder_id and folder_id.isdigit():
+            query = query.filter(PermissionRequest.folder_id == int(folder_id))
+
+        if permission_type and permission_type != 'all':
+            query = query.filter(PermissionRequest.permission_type == permission_type)
+
+        approved_requests = query.options(
+            db.joinedload(PermissionRequest.requester),
+            db.joinedload(PermissionRequest.folder),
+            db.joinedload(PermissionRequest.ad_group)
+        ).all()
+
+        for permission in approved_requests:
+            if not permission.folder or not permission.folder.is_active:
+                continue
+
+            # Apply user search filter
+            if user_search:
+                if not (user_search.lower() in permission.requester.username.lower() or
+                       user_search.lower() in (permission.requester.full_name or '').lower()):
+                    continue
+
+            user_id = permission.requester.id
+            folder_id_key = permission.folder_id
+
+            if user_id not in permissions_by_user:
+                permissions_by_user[user_id] = {
+                    'user': permission.requester,
+                    'folders': {}
+                }
+
+            if folder_id_key not in permissions_by_user[user_id]['folders']:
+                permissions_by_user[user_id]['folders'][folder_id_key] = {
+                    'folder': permission.folder,
+                    'permissions': []
+                }
+
+            permissions_by_user[user_id]['folders'][folder_id_key]['permissions'].append(permission)
+            all_permissions.append(permission)
+
+        # STEP 2: Get AD memberships with optimized JOIN query
+        membership_permissions_query = db.session.query(
+            UserADGroupMembership,
+            FolderPermission,
+            User,
+            ADGroup,
+            Folder
+        ).join(
+            ADGroup, UserADGroupMembership.ad_group_id == ADGroup.id
+        ).join(
+            FolderPermission, ADGroup.id == FolderPermission.ad_group_id
+        ).join(
+            User, UserADGroupMembership.user_id == User.id
+        ).join(
+            Folder, FolderPermission.folder_id == Folder.id
+        ).filter(
+            UserADGroupMembership.is_active == True,
+            FolderPermission.is_active == True,
+            Folder.is_active == True
+        )
+
+        # Apply filters at database level
+        if folder_id and folder_id.isdigit():
+            membership_permissions_query = membership_permissions_query.filter(
+                Folder.id == int(folder_id)
+            )
+
+        if permission_type and permission_type != 'all':
+            membership_permissions_query = membership_permissions_query.filter(
+                FolderPermission.permission_type == permission_type
+            )
+
+        if user_search:
+            search_term = f"%{user_search.lower()}%"
+            membership_permissions_query = membership_permissions_query.filter(
+                db.or_(
+                    User.username.ilike(search_term),
+                    User.full_name.ilike(search_term)
+                )
+            )
+
+        # Execute single optimized query
+        membership_permissions = membership_permissions_query.all()
+
+        # Process results from optimized query
+        for membership, fp, user, ad_group, folder in membership_permissions:
+            user_id = user.id
+            folder_id_key = folder.id
+
+            # Initialize user entry if not exists
+            if user_id not in permissions_by_user:
+                permissions_by_user[user_id] = {
+                    'user': user,
+                    'folders': {}
+                }
+
+            # Initialize folder entry if not exists
+            if folder_id_key not in permissions_by_user[user_id]['folders']:
+                permissions_by_user[user_id]['folders'][folder_id_key] = {
+                    'folder': folder,
+                    'permissions': []
+                }
+
+            # Check if this permission already exists (avoid duplicates)
+            exists = False
+            for existing in permissions_by_user[user_id]['folders'][folder_id_key]['permissions']:
+                if (hasattr(existing, 'permission_type') and
+                    existing.permission_type == fp.permission_type):
+                    exists = True
+                    break
+
+            if not exists:
+                # Create virtual permission
+                class VirtualPermission:
+                    def __init__(self, membership, folder_permission, user, ad_group):
+                        self.id = f"sync_{membership.id}_{folder_permission.id}"
+                        self.folder_id = folder_permission.folder_id
+                        self.folder = folder_permission.folder
+                        self.permission_type = folder_permission.permission_type
+                        self.ad_group = ad_group
+                        self.validator = None
+                        self.validated_at = None
+                        self.requester_id = user.id
+                        self.requester = user
+                        self.source = 'ad_sync'
+
+                virtual_perm = VirtualPermission(membership, fp, user, ad_group)
+                permissions_by_user[user_id]['folders'][folder_id_key]['permissions'].append(virtual_perm)
+                all_permissions.append(virtual_perm)
+
+        # Create CSV output
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        # CSV Headers
+        writer.writerow([
+            'Carpeta',
+            'Propietario',
+            'Usuario AD Propietario',
+            'Usuario',
+            'Nombre Completo',
+            'Ruta',
+            'Tipo de Permiso',
+            'Grupo AD',
+            'Validado Por',
+            'Fecha de Validación'
+        ])
+
+        # Create flat list of permissions for export
+        for user_id, user_data in permissions_by_user.items():
+            user = user_data['user']
+            for folder_id, folder_data in user_data['folders'].items():
+                folder = folder_data['folder']
+
+                # Get folder owners (first owner if multiple, or 'Sin propietario' if none)
+                if folder.owners:
+                    first_owner = folder.owners[0]
+                    folder_owner = first_owner.full_name or first_owner.username
+                    folder_owner_username = first_owner.username
+                else:
+                    folder_owner = 'Sin propietario'
+                    folder_owner_username = 'N/A'
+
+                for permission in folder_data['permissions']:
+                    # Determine validator
+                    if permission.validator:
+                        validator_name = permission.validator.full_name or permission.validator.username
+                    elif hasattr(permission, 'source') and permission.source == 'ad_sync':
+                        validator_name = 'Sincronización AD'
+                    else:
+                        validator_name = 'Sistema'
+
+                    # Format validation date
+                    if permission.validated_at:
+                        validation_date = permission.validated_at.strftime('%d/%m/%Y %H:%M')
+                    elif hasattr(permission, 'source') and permission.source == 'ad_sync':
+                        validation_date = 'Sincronizado'
+                    else:
+                        validation_date = 'N/A'
+
+                    # Permission type translation
+                    permission_type_display = 'Lectura' if permission.permission_type == 'read' else 'Escritura'
+
+                    # AD Group name
+                    ad_group_name = permission.ad_group.name if permission.ad_group else 'Sin grupo asignado'
+
+                    # User display names
+                    user_display = user.username
+                    user_full_name = user.full_name or 'N/A'
+
+                    writer.writerow([
+                        folder.name,
+                        folder_owner,
+                        folder_owner_username,
+                        user_display,
+                        user_full_name,
+                        folder.sanitized_path,
+                        permission_type_display,
+                        ad_group_name,
+                        validator_name,
+                        validation_date
+                    ])
+
+        # Create response
+        csv_data = output.getvalue()
+        output.close()
+
+        response = make_response(csv_data)
+        response.headers['Content-Disposition'] = f'attachment; filename=permisos_activos_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+        response.headers['Content-Type'] = 'text/csv; charset=utf-8'
+
+        return response
+
+    except Exception as e:
+        current_app.logger.error(f"Error in active_permissions_export: {str(e)}")
+        import traceback
+        current_app.logger.error(f"Traceback: {traceback.format_exc()}")
+
+        flash(f'Error al exportar los permisos: {str(e)}', 'error')
+        return redirect(url_for('admin.active_permissions_report'))
+
+
 # Task Management
 @admin_bp.route('/tasks')
 @login_required

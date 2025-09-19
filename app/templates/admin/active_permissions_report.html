@@ -22,6 +22,9 @@
                     <button onclick="window.print()" class="btn btn-outline-primary me-2">
                         <i class="fas fa-print me-2"></i>Imprimir
                     </button>
+                    <button onclick="exportActivePermissions()" class="btn btn-success me-2">
+                        <i class="fas fa-download me-2"></i>Exportar CSV
+                    </button>
                     <a href="{{ url_for('admin.admin_dashboard') }}" class="btn btn-secondary">
                         <i class="fas fa-arrow-left me-2"></i>Volver al Panel
                     </a>
@@ -1099,6 +1102,24 @@ function showSyncResultsModal(data) {
     modal.addEventListener('hidden.bs.modal', function() {
         this.remove();
     });
+}
+
+// Export active permissions to CSV
+function exportActivePermissions() {
+    // Get current filter parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const folder_id = urlParams.get('folder_id') || '';
+    const user_search = urlParams.get('user_search') || '';
+    const permission_type = urlParams.get('permission_type') || 'all';
+
+    // Build export URL with current filters
+    const exportUrl = new URL('{{ url_for("admin.active_permissions_export") }}', window.location.origin);
+    if (folder_id) exportUrl.searchParams.set('folder_id', folder_id);
+    if (user_search) exportUrl.searchParams.set('user_search', user_search);
+    if (permission_type) exportUrl.searchParams.set('permission_type', permission_type);
+
+    // Open download link
+    window.location.href = exportUrl.toString();
 }
 </script>
 {% endblock %}
