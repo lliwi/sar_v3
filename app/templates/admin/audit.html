@@ -105,7 +105,7 @@
                                         {% endif %}
                                     </td>
                                     <td>
-                                        <small>{{ event.description }}</small>
+                                        <small>{{ event.description | sanitize_paths }}</small>
                                     </td>
                                     <td>
                                         <small>{{ event.ip_address or '-' }}</small>

@@ -172,7 +172,7 @@ def request_permission():
                 action='create',
                 resource_type='permission_request',
                 resource_id=permission_request.id,
-                description=f'Solicitud de cambio de permiso: {existing_permission_check["existing_permission_type"]} → {form.permission_type.data} para carpeta {permission_request.folder.path}',
+                description=f'Solicitud de cambio de permiso: {existing_permission_check["existing_permission_type"]} → {form.permission_type.data} para carpeta {permission_request.folder.sanitized_path}',
                 metadata={
                     'folder_path': permission_request.folder.path,
                     'old_permission_type': existing_permission_check['existing_permission_type'],
@@ -224,7 +224,7 @@ def request_permission():
                 action='create',
                 resource_type='permission_request',
                 resource_id=permission_request.id,
-                description=f'Solicitud de permiso {form.permission_type.data} para carpeta {permission_request.folder.path}',
+                description=f'Solicitud de permiso {form.permission_type.data} para carpeta {permission_request.folder.sanitized_path}',
                 metadata={
                     'folder_path': permission_request.folder.path,
                     'folder_description': permission_request.folder.description,
@@ -597,7 +597,7 @@ def grant_permission(folder_id):
         action='grant',
         resource_type='folder_permission',
         resource_id=new_permission.id,
-        description=f'Otorgado permiso {permission_type} al grupo {ad_group.name} para carpeta {folder.path}',
+        description=f'Otorgado permiso {permission_type} al grupo {ad_group.name} para carpeta {folder.sanitized_path}',
         metadata={
             'folder_path': folder.path,
             'ad_group_name': ad_group.name,
@@ -645,7 +645,7 @@ def revoke_permission(permission_id):
         action='revoke',
         resource_type='folder_permission',
         resource_id=permission.id,
-        description=f'Revocado permiso {permission.permission_type} del grupo {permission.ad_group.name} para carpeta {folder.path}',
+        description=f'Revocado permiso {permission.permission_type} del grupo {permission.ad_group.name} para carpeta {folder.sanitized_path}',
         metadata={
             'folder_path': folder.path,
             'ad_group_name': permission.ad_group.name,
@@ -766,7 +766,7 @@ def update_folder_validators(folder_id):
             action='update',
             resource_type='folder',
             resource_id=folder.id,
-            description=f'Validadores actualizados para carpeta {folder.path}',
+            description=f'Validadores actualizados para carpeta {folder.sanitized_path}',
             metadata={
                 'folder_path': folder.path,
                 'validators': [v.username for v in selected_validators]
@@ -872,7 +872,7 @@ def assign_user_permission(folder_id):
             action='auto_approve',
             resource_type='permission_request',
             resource_id=permission_request.id,
-            description=f'Aprobación automática de cambio de permiso: {existing_permission_check["existing_permission_type"]} → {permission_type} para usuario {user.username} en carpeta {folder.path}',
+            description=f'Aprobación automática de cambio de permiso: {existing_permission_check["existing_permission_type"]} → {permission_type} para usuario {user.username} en carpeta {folder.sanitized_path}',
             metadata={
                 'folder_path': folder.path,
                 'target_username': user.username,
@@ -928,7 +928,7 @@ def assign_user_permission(folder_id):
             action='auto_approve',
             resource_type='permission_request',
             resource_id=permission_request.id,
-            description=f'Aprobación automática de permiso {permission_type} para usuario {user.username} en carpeta {folder.path}',
+            description=f'Aprobación automática de permiso {permission_type} para usuario {user.username} en carpeta {folder.sanitized_path}',
             metadata={
                 'folder_path': folder.path,
                 'folder_description': folder.description,
@@ -980,7 +980,7 @@ def revoke_user_permission(permission_id):
         action='revoke',
         resource_type='user_folder_permission',
         resource_id=permission.id,
-        description=f'Revocado permiso {permission.permission_type} del usuario {user.username} para carpeta {folder.path}',
+        description=f'Revocado permiso {permission.permission_type} del usuario {user.username} para carpeta {folder.sanitized_path}',
         metadata={
             'folder_path': folder.path,
             'target_username': user.username,
@@ -1132,7 +1132,7 @@ def delete_user_permission():
             action='delete_own_permission',
             resource_type='permission_request',
             resource_id=user_permission_request.id,
-            description=f'Usuario eliminó su propio permiso {permission_type} del grupo {ad_group.name} para carpeta {folder.path}',
+            description=f'Usuario eliminó su propio permiso {permission_type} del grupo {ad_group.name} para carpeta {folder.sanitized_path}',
             metadata={
                 'folder_path': folder.path,
                 'ad_group_name': ad_group.name,
@@ -1198,7 +1198,7 @@ def delete_user_permission_by_request():
             action='delete_own_permission_by_request',
             resource_type='permission_request',
             resource_id=permission_request.id,
-            description=f'Usuario eliminó su permiso aprobado {permission_request.permission_type} para carpeta {permission_request.folder.path}',
+            description=f'Usuario eliminó su permiso aprobado {permission_request.permission_type} para carpeta {permission_request.folder.sanitized_path}',
             metadata={
                 'folder_path': permission_request.folder.path,
                 'ad_group_name': permission_request.ad_group.name if permission_request.ad_group else None,
@@ -1402,7 +1402,7 @@ def delete_user_permission_from_ad_group():
             action='delete_user_permission_from_ad_group',
             resource_type='permission_request',
             resource_id=permission_request.id,
-            description=f'Administrador eliminó permiso {permission_type} del usuario {target_user.username} para carpeta {folder.path}',
+            description=f'Administrador eliminó permiso {permission_type} del usuario {target_user.username} para carpeta {folder.sanitized_path}',
             metadata={
                 'folder_path': folder.path,
                 'target_user_id': target_user.id,

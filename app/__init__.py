@@ -147,6 +147,22 @@ def create_app(config_name=None):
         """Template global to get timezone name"""
         return get_timezone_name()
 
+    @app.template_filter('sanitize_paths')
+    def sanitize_paths_filter(text):
+        """Filter to sanitize folder paths in audit descriptions"""
+        import re
+        if not text:
+            return text
+
+        # Replace sequences of 3+ backslashes with 2 backslashes (UNC path normalization)
+        # This handles cases like \\\\server\\path -> \\server\\path
+        sanitized = re.sub(r'\\{3,}', r'\\\\', text)
+
+        # Replace sequences of 2+ regular slashes with single slash
+        sanitized = re.sub(r'/{2,}', '/', sanitized)
+
+        return sanitized
+
     # Create tables and default data only if needed
     with app.app_context():
         # Only create tables if they don't exist (safer for production)
