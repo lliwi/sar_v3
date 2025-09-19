@@ -334,6 +334,9 @@ def new_folder():
 def edit_folder(folder_id):
     folder = Folder.query.get_or_404(folder_id)
     form = FolderForm(obj=folder)
+
+    # Use sanitized path for display
+    form.path.data = folder.sanitized_path
     
     if form.validate_on_submit():
         folder.name = form.name.data
