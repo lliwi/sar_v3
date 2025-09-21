@@ -70,6 +70,10 @@ def main():
 
                 print(f'[{current_time}] ✅ Procesadas {processed_count} tareas', flush=True)
 
+                # Nota: Sincronización de Airflow no necesaria
+                # Las tareas se marcan como completadas inmediatamente al enviarlas exitosamente a Airflow
+                print(f'[{current_time}] ✅ Sincronización simplificada - las tareas se completan al enviarse a Airflow', flush=True)
+
         except Exception as e:
             current_time = get_local_time().strftime("%Y-%m-%d %H:%M:%S %Z")
             print(f'[{current_time}] ❌ Error procesando tareas: {str(e)}', flush=True)

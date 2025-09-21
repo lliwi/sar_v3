@@ -122,6 +122,7 @@ class TaskService:
             airflow_success = self._try_quick_airflow_execution(airflow_task, permission_request, validator, csv_file_path)
 
             if airflow_success:
+                logger.info(f"✅ Airflow execution succeeded for task {airflow_task.id}, current status: {airflow_task.status}")
                 # Step 3: Try quick AD verification (single attempt, no blocking)
                 verification_success = self._try_quick_ad_verification(verification_task, permission_request)
 
@@ -130,12 +131,17 @@ class TaskService:
                     db.session.commit()
                     return {'success': True, 'tasks': [airflow_task, verification_task]}
                 else:
-                    logger.info(f"Quick AD verification failed for request {permission_request.id}, will retry later")
+                    logger.info(f"Quick AD verification failed for request {permission_request.id}, but Airflow succeeded - keeping Airflow as completed")
+                    # Don't change Airflow task status - it succeeded
+                    verification_task.status = 'pending'
+                    verification_task.next_execution_at = None
+                    db.session.commit()
+                    return {'success': True, 'tasks': [airflow_task, verification_task]}
             else:
-                logger.info(f"Quick Airflow execution failed for request {permission_request.id}, will retry later")
+                logger.info(f"❌ Quick Airflow execution failed for request {permission_request.id}, will retry later")
 
             # If quick execution failed, schedule tasks for background processing
-            logger.info(f"Scheduling tasks for background execution for request {permission_request.id}")
+            logger.info(f"⚠️ WARNING: About to reset Airflow task {airflow_task.id} to pending - current status: {airflow_task.status}")
             airflow_task.status = 'pending'
             airflow_task.next_execution_at = datetime.utcnow()  # Execute ASAP
 
@@ -227,8 +233,15 @@ class TaskService:
                     'quick_success': True
                 })
 
+                # Commit the completion to database
+                db.session.commit()
+
                 # Execute dependent tasks immediately when Airflow completes successfully
-                self._execute_dependent_tasks_immediately(task)
+                try:
+                    self._schedule_dependent_ad_verification_tasks(task)
+                except Exception as dependent_error:
+                    logger.warning(f"Could not schedule dependent AD verification tasks for task {task.id}: {str(dependent_error)}")
+                    # Don't fail the main task - dependent tasks can be processed later
 
                 return True
             else:
@@ -330,7 +343,13 @@ class TaskService:
                 if success:
                     logger.info(f"Airflow DAG triggered successfully on attempt {attempt}/{max_attempts} for task {task.id}")
 
-                    # Mark task as completed and wait for DAG completion
+                    # Update task status to running
+                    task.status = 'running'
+                    task.metadata = f"DAG run_id: {run_id}, attempt: {attempt}/{max_attempts}"
+                    db.session.commit()
+                    logger.info(f"Task {task.id} status updated to 'running'")
+
+                    # Prepare result data and wait for DAG completion
                     result_data = {
                         'execution_type': 'immediate',
                         'attempt': attempt,
@@ -1684,7 +1703,10 @@ class TaskService:
                     'execution_time': datetime.utcnow().isoformat()
                 }
                 task.mark_as_completed(result_data)
-                
+
+                # Commit the completion to database
+                db.session.commit()
+
                 # Log audit event
                 AuditEvent.log_event(
                     user=task.created_by,
@@ -1703,7 +1725,11 @@ class TaskService:
                 logger.info(f"Airflow task {task.id} completed successfully")
 
                 # Execute dependent tasks immediately
-                self._execute_dependent_tasks_immediately(task)
+                try:
+                    self._schedule_dependent_ad_verification_tasks(task)
+                except Exception as dependent_error:
+                    logger.warning(f"Could not schedule dependent AD verification tasks for task {task.id}: {str(dependent_error)}")
+                    # Don't fail the main task - dependent tasks can be processed later
 
                 return True
             else:
@@ -2524,6 +2550,41 @@ class TaskService:
             logger.error(f"Error cleaning up old tasks: {str(e)}")
             return 0
 
+    def _schedule_dependent_ad_verification_tasks(self, completed_airflow_task):
+        """Schedule AD verification tasks that depend on the completed Airflow task"""
+        try:
+            from datetime import timedelta
+
+            # Find AD verification tasks for the same permission request
+            dependent_tasks = Task.query.filter_by(
+                task_type='ad_verification',
+                permission_request_id=completed_airflow_task.permission_request_id,
+                status='pending'
+            ).filter(
+                Task.next_execution_at.is_(None)  # Not yet scheduled
+            ).all()
+
+            if not dependent_tasks:
+                logger.debug(f"No AD verification tasks to schedule for Airflow task {completed_airflow_task.id}")
+                return
+
+            logger.info(f"Scheduling {len(dependent_tasks)} AD verification tasks for Airflow task {completed_airflow_task.id}")
+
+            for task in dependent_tasks:
+                # Schedule for immediate execution with a small delay
+                task.next_execution_at = datetime.utcnow() + timedelta(seconds=30)
+                task.updated_at = datetime.utcnow()
+                logger.info(f"Scheduled AD verification task {task.id} for execution in 30 seconds")
+
+            db.session.commit()
+            logger.info(f"Successfully scheduled {len(dependent_tasks)} AD verification tasks")
+
+        except Exception as e:
+            logger.error(f"Error scheduling dependent AD verification tasks: {str(e)}")
+            # Don't raise exception to avoid affecting the parent task
+
+        return
+
 def create_permission_task(action, folder, ad_group, permission_type, created_by):
     """Create a task for direct permission grant/revoke actions"""
     try:
@@ -2933,3 +2994,111 @@ def create_permission_deletion_task(permission_request, deleted_by, csv_file_pat
         except Exception as e:
             logger.error(f"Error finding/executing dependent tasks for task {completed_task.id}: {str(e)}")
             # Don't raise exception to avoid affecting the parent task completion
+
+    def sync_airflow_task_statuses(self):
+        """Synchronize task statuses with Airflow DAG runs"""
+        try:
+            # Get all running airflow tasks
+            running_tasks = Task.query.filter_by(
+                task_type='airflow_dag',
+                status='running'
+            ).all()
+
+            if not running_tasks:
+                logger.debug("No running Airflow tasks to sync")
+                return
+
+            logger.info(f"Syncing status for {len(running_tasks)} running Airflow tasks")
+
+            # Get all DAG runs from Airflow to match with our tasks
+            token = self.airflow_service.get_jwt_token()
+            if not token:
+                logger.error("Could not get JWT token for Airflow sync")
+                return
+
+            import requests
+            url = f"{self.airflow_service.api_url}/dags/{self.airflow_service.dag_id}/dagRuns"
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json'
+            }
+
+            response = requests.get(url, headers=headers, verify=self.airflow_service.verify_ssl, timeout=30)
+            if response.status_code != 200:
+                logger.error(f"Failed to get DAG runs from Airflow: {response.status_code}")
+                return
+
+            airflow_runs = response.json().get('dag_runs', [])
+            logger.info(f"Found {len(airflow_runs)} DAG runs in Airflow")
+
+            for task in running_tasks:
+                try:
+                    # Extract DAG run ID from result_data
+                    result_data = task.get_result_data()
+                    dag_run_id = result_data.get('current_run_id')
+
+                    if not dag_run_id:
+                        # Try to extract from execution_time if available
+                        execution_time = result_data.get('execution_time')
+                        if execution_time:
+                            # Generate probable run_id based on execution time
+                            from datetime import datetime
+                            try:
+                                dt = datetime.fromisoformat(execution_time.replace('Z', '+00:00'))
+                                dag_run_id = f"manual__{dt.strftime('%Y%m%dT%H%M%S')}"
+                            except:
+                                pass
+
+                    if not dag_run_id:
+                        logger.warning(f"Task {task.id} has no identifiable DAG run_id, skipping sync")
+                        continue
+
+                    # Find matching DAG run in Airflow
+                    matching_run = None
+                    for run in airflow_runs:
+                        if run.get('dag_run_id') == dag_run_id:
+                            matching_run = run
+                            break
+
+                    if matching_run:
+                        airflow_state = matching_run.get('state', '').lower()
+                        logger.debug(f"Task {task.id} DAG {dag_run_id} status: {airflow_state}")
+
+                        # Update task status based on Airflow state
+                        if airflow_state == 'success':
+                            logger.info(f"Marking task {task.id} as completed (Airflow: success)")
+                            task.mark_as_completed({
+                                'airflow_sync': True,
+                                'dag_run_id': dag_run_id,
+                                'final_state': 'success',
+                                'synced_at': datetime.utcnow().isoformat()
+                            })
+                            db.session.commit()
+
+                        elif airflow_state in ['failed', 'upstream_failed']:
+                            logger.info(f"Marking task {task.id} as failed (Airflow: {airflow_state})")
+                            task.mark_as_failed(f"Airflow DAG execution {airflow_state} - {dag_run_id}")
+                            db.session.commit()
+
+                        # If still running or queued, keep as running
+                        elif airflow_state in ['running', 'queued']:
+                            logger.debug(f"Task {task.id} still running in Airflow")
+                            # Update result data with sync info
+                            result_data['airflow_status'] = airflow_state
+                            result_data['last_sync'] = datetime.utcnow().isoformat()
+                            task.set_result_data(result_data)
+                            db.session.commit()
+
+                        else:
+                            logger.warning(f"Task {task.id} has unknown Airflow state: {airflow_state}")
+
+                    else:
+                        logger.warning(f"Could not find DAG run {dag_run_id} in Airflow (task {task.id})")
+
+                except Exception as e:
+                    logger.error(f"Error syncing status for task {task.id}: {str(e)}")
+                    continue
+
+        except Exception as e:
+            logger.error(f"Error in sync_airflow_task_statuses: {str(e)}")
+            return False
