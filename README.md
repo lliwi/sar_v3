@@ -132,10 +132,19 @@ Abrir navegador en `http://localhost:8080` y usar credenciales de Active Directo
 
 El `docker-compose.yml` incluye los siguientes servicios:
 
+### Servicios Principales
 - **web** - Aplicación Flask principal (puerto 8080)
 - **db** - Base de datos PostgreSQL (puerto 5432)
 - **redis** - Cache y broker para Celery (puerto 6379)
-- **celery** - Worker para tareas asíncronas
+
+### Workers Celery Especializados
+- **celery-sync** - Worker para sincronizaciones pesadas de AD (concurrency: 2)
+- **celery-notifications** - Worker para emails y notificaciones (concurrency: 4)
+- **celery-reports** - Worker para reportes y tareas generales (concurrency: 3)
+
+### Servicios de Automatización
+- **ad-scheduler** - Sincronización automática de metadatos de AD (cada 30 min)
+- **task-scheduler** - Procesamiento automático de tareas pendientes (cada 5 min)
 
 ## 📊 Modelo de Datos
 
