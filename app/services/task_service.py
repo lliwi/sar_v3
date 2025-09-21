@@ -2758,7 +2758,7 @@ def create_user_permission_deletion_task(user, folder, ad_group, permission_type
             'ad_group_id': ad_group.id,
             'ad_group_name': ad_group.name,
             'permission_type': permission_type,
-            'csv_file_path': csv_file_path,
+            'csv_file_path': os.path.basename(csv_file_path) if csv_file_path else None,
             'original_request_id': original_request.id if original_request else None,
             'deleted_by_id': user.id,
             'deleted_by_username': user.username,
@@ -2870,7 +2870,7 @@ def create_permission_deletion_task(permission_request, deleted_by, csv_file_pat
             'ad_group_id': permission_request.ad_group_id,
             'ad_group_name': ad_group.name if ad_group else None,
             'permission_type': permission_request.permission_type,
-            'csv_file_path': csv_file_path,
+            'csv_file_path': os.path.basename(csv_file_path) if csv_file_path else None,
             'deleted_by_id': deleted_by.id,
             'deleted_by_username': deleted_by.username,
             'execution_timestamp': datetime.utcnow().isoformat()
