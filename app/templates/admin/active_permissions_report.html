@@ -662,7 +662,13 @@ function syncUsersFromAD() {
     })
     .catch(error => {
         console.error('Error:', error);
-        alert('Error de conexión durante la sincronización: ' + error.message);
+
+        // Show more helpful error message
+        if (error.name === 'TypeError' && error.message.includes('fetch')) {
+            alert('Error de conexión. La tarea puede haberse iniciado correctamente. Consulte el Monitor de Tareas para verificar el estado.');
+        } else {
+            alert('Error de conexión durante la sincronización. La tarea puede ejecutarse en segundo plano. Consulte el Monitor de Tareas para verificar el estado.');
+        }
     })
     .finally(() => {
         // Restore button state
@@ -760,6 +766,23 @@ function showBackgroundTaskModal(taskId, message) {
     
     // Start polling task status
     pollTaskStatus(taskId, modalId);
+
+    // Add beforeunload event to inform user about background task
+    const beforeUnloadHandler = (e) => {
+        const modal = document.getElementById(modalId);
+        if (modal && !modal.classList.contains('d-none')) {
+            e.preventDefault();
+            e.returnValue = 'Hay una tarea de sincronización ejecutándose. Continuará en segundo plano si sale de la página. ¿Desea continuar?';
+            return e.returnValue;
+        }
+    };
+
+    window.addEventListener('beforeunload', beforeUnloadHandler);
+
+    // Clean up event listener when modal is closed
+    modal.addEventListener('hidden.bs.modal', () => {
+        window.removeEventListener('beforeunload', beforeUnloadHandler);
+    });
     
     // Clean up modal after it's hidden
     modal.addEventListener('hidden.bs.modal', function() {
@@ -788,7 +811,35 @@ function pollTaskStatus(taskId, modalId) {
             }
         })
         .catch(error => {
-            console.error('Error polling task status:', error);
+            console.log('Task monitoring stopped - user navigated away or connection lost');
+
+            // Check if modal still exists (user hasn't navigated away)
+            const currentModal = document.getElementById(modalId);
+            if (currentModal && currentModal.style.display !== 'none') {
+                // Only show error if modal is still visible
+                console.error('Error polling task status:', error);
+
+                // Update modal to show task continues in background
+                const messageElement = currentModal.querySelector('#taskMessage');
+                const statusElement = currentModal.querySelector('#taskStatus');
+
+                if (messageElement) {
+                    messageElement.innerHTML = `
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i>
+                            <strong>Información:</strong> La tarea continúa ejecutándose en segundo plano.
+                            <br>Puede cerrar esta ventana y consultar el progreso en el
+                            <a href="/admin/task-monitor" class="alert-link">Monitor de Tareas</a>.
+                        </div>
+                    `;
+                }
+
+                if (statusElement) {
+                    statusElement.className = 'badge bg-info';
+                    statusElement.textContent = 'EN BACKGROUND';
+                }
+            }
+
             clearInterval(pollInterval);
         });
     }, 2000); // Poll every 2 seconds

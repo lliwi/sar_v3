@@ -168,12 +168,13 @@ services:
       retries: 3
       start_period: 30s
 
-  celery:
+  # Celery Worker for Heavy Sync Operations
+  celery-sync:
     env_file:
       - .env
     #build: .
     image: lliwi/sar_v3:latest
-    command: celery -A celery_worker.celery worker --loglevel=info --concurrency=4 --prefetch-multiplier=1
+    command: celery -A celery_worker.celery worker --loglevel=info --concurrency=${CELERY_WORKER_SYNC_CONCURRENCY:-2} --prefetch-multiplier=${CELERY_SYNC_QUEUE_PREFETCH:-1} --queues=sync_heavy --hostname=sync-worker@%h --max-tasks-per-child=${CELERY_WORKER_MAX_TASKS_PER_CHILD:-1000} --time-limit=${CELERY_WORKER_TASK_TIME_LIMIT:-7200} --soft-time-limit=${CELERY_WORKER_TASK_SOFT_TIME_LIMIT:-6600}
     environment:
       # Time zone configuration
       - TZ=Europe/Madrid
@@ -189,7 +190,14 @@ services:
       - CELERY_ACCEPT_CONTENT=${CELERY_ACCEPT_CONTENT:-json}
       - CELERY_TIMEZONE=${CELERY_TIMEZONE:-UTC}
       - CELERY_ENABLE_UTC=${CELERY_ENABLE_UTC:-true}
-      - CELERY_WORKER_PREFETCH_MULTIPLIER=${CELERY_WORKER_PREFETCH_MULTIPLIER:-1}
+      - CELERY_WORKER_PREFETCH_MULTIPLIER=${CELERY_SYNC_QUEUE_PREFETCH:-1}
+      # Celery Performance Configuration
+      - CELERY_WORKER_SYNC_CONCURRENCY=${CELERY_WORKER_SYNC_CONCURRENCY:-2}
+      - CELERY_WORKER_MAX_TASKS_PER_CHILD=${CELERY_WORKER_MAX_TASKS_PER_CHILD:-1000}
+      - CELERY_WORKER_TASK_TIME_LIMIT=${CELERY_WORKER_TASK_TIME_LIMIT:-7200}
+      - CELERY_WORKER_TASK_SOFT_TIME_LIMIT=${CELERY_WORKER_TASK_SOFT_TIME_LIMIT:-6600}
+      - CELERY_SEND_EVENTS=${CELERY_SEND_EVENTS:-true}
+      - CELERY_TASK_SEND_SENT_EVENT=${CELERY_TASK_SEND_SENT_EVENT:-true}
       # SMTP Configuration
       - SMTP_SERVER=${SMTP_SERVER}
       - SMTP_PORT=${SMTP_PORT}
@@ -229,9 +237,125 @@ services:
         condition: service_healthy
     volumes:
       - ./app:/app/app:ro
+      - ./celery_worker.py:/app/celery_worker.py:ro
       - ./logs:/app/logs
       - ./exports:/app/exports
       - ./data:/app/data
+      - ./csv_files:/app/sar_csv_files
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "celery", "-A", "celery_worker.celery", "inspect", "ping"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 120s
+
+  # Celery Worker for Fast Notifications
+  celery-notifications:
+    env_file:
+      - .env
+    #build: .
+    image: lliwi/sar_v3:latest
+    command: celery -A celery_worker.celery worker --loglevel=info --concurrency=${CELERY_WORKER_NOTIFICATIONS_CONCURRENCY:-4} --prefetch-multiplier=${CELERY_NOTIFICATIONS_QUEUE_PREFETCH:-2} --queues=notifications --hostname=notifications-worker@%h --max-tasks-per-child=${CELERY_WORKER_MAX_TASKS_PER_CHILD:-1000}
+    environment:
+      # Time zone configuration
+      - TZ=Europe/Madrid
+      # Flask Configuration
+      - FLASK_ENV=${FLASK_ENV:-development}
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=${DATABASE_URL}
+      # Celery Configuration
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+      - CELERY_TASK_SERIALIZER=${CELERY_TASK_SERIALIZER:-json}
+      - CELERY_RESULT_SERIALIZER=${CELERY_RESULT_SERIALIZER:-json}
+      - CELERY_ACCEPT_CONTENT=${CELERY_ACCEPT_CONTENT:-json}
+      - CELERY_TIMEZONE=${CELERY_TIMEZONE:-UTC}
+      - CELERY_ENABLE_UTC=${CELERY_ENABLE_UTC:-true}
+      - CELERY_WORKER_PREFETCH_MULTIPLIER=${CELERY_NOTIFICATIONS_QUEUE_PREFETCH:-2}
+      # Celery Performance Configuration
+      - CELERY_WORKER_NOTIFICATIONS_CONCURRENCY=${CELERY_WORKER_NOTIFICATIONS_CONCURRENCY:-4}
+      - CELERY_WORKER_MAX_TASKS_PER_CHILD=${CELERY_WORKER_MAX_TASKS_PER_CHILD:-1000}
+      - CELERY_SEND_EVENTS=${CELERY_SEND_EVENTS:-true}
+      - CELERY_TASK_SEND_SENT_EVENT=${CELERY_TASK_SEND_SENT_EVENT:-true}
+      # SMTP Configuration
+      - SMTP_SERVER=${SMTP_SERVER}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-false}
+      - SMTP_TIMEOUT=${SMTP_TIMEOUT:-30}
+      - SMTP_FROM=${SMTP_FROM}
+      # Application URLs
+      - SERVER_URL=${SERVER_URL}
+      - BASE_URL=${BASE_URL}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app:ro
+      - ./celery_worker.py:/app/celery_worker.py:ro
+      - ./logs:/app/logs
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "celery", "-A", "celery_worker.celery", "inspect", "ping"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 120s
+
+  # Celery Worker for Reports and Medium Priority Tasks
+  celery-reports:
+    env_file:
+      - .env
+    #build: .
+    image: lliwi/sar_v3:latest
+    command: celery -A celery_worker.celery worker --loglevel=info --concurrency=${CELERY_WORKER_REPORTS_CONCURRENCY:-3} --prefetch-multiplier=${CELERY_REPORTS_QUEUE_PREFETCH:-1} --queues=reports,default --hostname=reports-worker@%h --max-tasks-per-child=${CELERY_WORKER_MAX_TASKS_PER_CHILD:-1000}
+    environment:
+      # Time zone configuration
+      - TZ=Europe/Madrid
+      # Flask Configuration
+      - FLASK_ENV=${FLASK_ENV:-development}
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=${DATABASE_URL}
+      # Celery Configuration
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+      - CELERY_TASK_SERIALIZER=${CELERY_TASK_SERIALIZER:-json}
+      - CELERY_RESULT_SERIALIZER=${CELERY_RESULT_SERIALIZER:-json}
+      - CELERY_ACCEPT_CONTENT=${CELERY_ACCEPT_CONTENT:-json}
+      - CELERY_TIMEZONE=${CELERY_TIMEZONE:-UTC}
+      - CELERY_ENABLE_UTC=${CELERY_ENABLE_UTC:-true}
+      - CELERY_WORKER_PREFETCH_MULTIPLIER=${CELERY_REPORTS_QUEUE_PREFETCH:-1}
+      # Celery Performance Configuration
+      - CELERY_WORKER_REPORTS_CONCURRENCY=${CELERY_WORKER_REPORTS_CONCURRENCY:-3}
+      - CELERY_WORKER_MAX_TASKS_PER_CHILD=${CELERY_WORKER_MAX_TASKS_PER_CHILD:-1000}
+      - CELERY_SEND_EVENTS=${CELERY_SEND_EVENTS:-true}
+      - CELERY_TASK_SEND_SENT_EVENT=${CELERY_TASK_SEND_SENT_EVENT:-true}
+      # Application Configuration
+      - SERVER_URL=${SERVER_URL}
+      - BASE_URL=${BASE_URL}
+      # LDAP Configuration for reports
+      - LDAP_HOST=${LDAP_HOST}
+      - LDAP_BASE_DN=${LDAP_BASE_DN}
+      - LDAP_USER_DN=${LDAP_USER_DN}
+      - LDAP_GROUP_DN=${LDAP_GROUP_DN}
+      - LDAP_BIND_USER_DN=${LDAP_BIND_USER_DN}
+      - LDAP_BIND_USER_PASSWORD=${LDAP_BIND_USER_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app:ro
+      - ./celery_worker.py:/app/celery_worker.py:ro
+      - ./logs:/app/logs
+      - ./exports:/app/exports
       - ./csv_files:/app/sar_csv_files
       - /etc/localtime:/etc/localtime:ro
     restart: unless-stopped

@@ -313,9 +313,9 @@ class SchedulerService:
             )
 
     def _sync_active_permissions(self):
-        """Ejecuta la sincronización completa de usuarios con permisos activos desde AD"""
+        """Ejecuta la sincronización completa de usuarios con permisos activos desde AD usando Celery"""
         try:
-            logger.info("Starting automatic active permissions synchronization (sync_users_from_ad_old)")
+            logger.info("Starting automatic active permissions synchronization via Celery task")
 
             # Crear usuario del sistema para el audit log
             system_user = self._get_or_create_system_user()
@@ -326,7 +326,41 @@ class SchedulerService:
                 raise Exception("No se pudo conectar a LDAP")
             conn.unbind()
 
-            # Import and execute the sync_users_from_ad_old function logic
+            # Use optimized Celery task with parallel workers instead of sequential processing
+            try:
+                from celery_worker import sync_users_from_ad_task
+
+                # Launch background task with parallel processing
+                task_result = sync_users_from_ad_task.delay(system_user.id)
+
+                logger.info(f"✅ Automatic sync launched as Celery task: {task_result.id}")
+
+                # Log audit event for task launch
+                AuditEvent.log_event(
+                    user=system_user,
+                    event_type='ad_sync',
+                    action='automatic_sync_active_permissions_celery_started',
+                    description=f'Sincronización automática de permisos activos iniciada via Celery - Task ID: {task_result.id}',
+                    metadata={
+                        'task_id': task_result.id,
+                        'sync_type': 'automatic_celery_parallel',
+                        'celery_queue': 'sync_heavy',
+                        'parallel_workers': True
+                    }
+                )
+
+                return {
+                    'success': True,
+                    'task_id': task_result.id,
+                    'message': 'Sincronización iniciada en background con workers paralelos',
+                    'parallel_processing': True
+                }
+
+            except (ImportError, Exception) as e:
+                logger.warning(f"Celery task failed ({str(e)}), falling back to sequential sync")
+                # Fallback to sequential processing if Celery not available or fails
+
+            # FALLBACK: Sequential processing (original implementation)
             from app.models import Folder, User, FolderPermission, UserADGroupMembership, ADGroup
             import ldap3
 

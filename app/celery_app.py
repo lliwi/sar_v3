@@ -14,6 +14,47 @@ def make_celery(app=None):
     
     celery.conf.update(app.config)
     celery.conf.broker_connection_retry_on_startup = True
+
+    # Configure specialized queues
+    celery.conf.task_routes = {
+        # Sync tasks - Heavy operations
+        'sync_users_from_ad_task': {'queue': 'sync_heavy'},
+        'celery_worker.sync_users_from_ad_task': {'queue': 'sync_heavy'},
+
+        # Email notifications - Fast processing
+        'send_permission_request_notification': {'queue': 'notifications'},
+        'send_permission_status_notification': {'queue': 'notifications'},
+        'celery_worker.send_permission_request_notification': {'queue': 'notifications'},
+        'celery_worker.send_permission_status_notification': {'queue': 'notifications'},
+
+        # Reports and exports - Medium priority
+        'generate_report_task': {'queue': 'reports'},
+        'export_permissions_task': {'queue': 'reports'},
+
+        # Default queue for other tasks
+        '*': {'queue': 'default'},
+    }
+
+    # Queue configuration
+    celery.conf.task_default_queue = 'default'
+    celery.conf.task_queues = {
+        'sync_heavy': {
+            'exchange': 'sync_heavy',
+            'routing_key': 'sync_heavy',
+        },
+        'notifications': {
+            'exchange': 'notifications',
+            'routing_key': 'notifications',
+        },
+        'reports': {
+            'exchange': 'reports',
+            'routing_key': 'reports',
+        },
+        'default': {
+            'exchange': 'default',
+            'routing_key': 'default',
+        }
+    }
     
     class ContextTask(celery.Task):
         """Make celery tasks work with Flask app context."""

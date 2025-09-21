@@ -10,17 +10,17 @@ app = create_app()
 celery = make_celery(app)
 
 # Register email tasks
-@celery.task
+@celery.task(queue='notifications')
 def send_permission_request_notification(request_id):
     """Celery task wrapper for sending permission request notification email"""
     return _send_permission_request_notification(request_id)
 
-@celery.task
+@celery.task(queue='notifications')
 def send_permission_status_notification(request_id, status):
     """Celery task wrapper for sending permission status change notification"""
     return _send_permission_status_notification(request_id, status)
 
-@celery.task(bind=True)
+@celery.task(bind=True, queue='sync_heavy')
 def sync_users_from_ad_task(self, user_id):
     """
     Background task to sync ALL users with permissions from AD for all active folders
@@ -174,17 +174,37 @@ def sync_users_from_ad_task(self, user_id):
                                 try:
                                     logger.debug(f"Processing member DN: {member_dn}")
                                     
-                                    # Extract username from DN (optimization to avoid individual LDAP queries)
+                                    # Extract username from DN with robust parsing
                                     sam_account = None
                                     member_dn_lower = member_dn.lower()
-                                    
-                                    if 'cn=' in member_dn_lower:
-                                        sam_account = member_dn.split('cn=')[1].split(',')[0].strip()
-                                    elif 'uid=' in member_dn_lower:
-                                        sam_account = member_dn.split('uid=')[1].split(',')[0].strip()
-                                    
-                                    if not sam_account:
-                                        logger.warning(f"Could not extract username from DN: {member_dn}")
+
+                                    # Skip known non-user objects
+                                    if any(skip_pattern in member_dn_lower for skip_pattern in [
+                                        'ou=devices', 'ou=computers', 'cn=protected users',
+                                        'foreignsecurityprincipals', 's-1-5-'
+                                    ]):
+                                        logger.debug(f"Skipping non-user object: {member_dn}")
+                                        continue
+
+                                    try:
+                                        # Robust CN extraction - handle various DN formats
+                                        if 'cn=' in member_dn_lower:
+                                            cn_parts = member_dn_lower.split('cn=')
+                                            if len(cn_parts) > 1:
+                                                # Get the first CN= part (typically the user)
+                                                cn_value = cn_parts[1].split(',')[0].strip()
+                                                if cn_value and not any(x in cn_value for x in ['users', 'builtin', 'system']):
+                                                    sam_account = cn_value
+                                        elif 'uid=' in member_dn_lower:
+                                            uid_parts = member_dn_lower.split('uid=')
+                                            if len(uid_parts) > 1:
+                                                sam_account = uid_parts[1].split(',')[0].strip()
+                                    except (IndexError, AttributeError) as parse_error:
+                                        logger.warning(f"Error parsing DN {member_dn}: {str(parse_error)}")
+                                        continue
+
+                                    if not sam_account or len(sam_account) < 2:
+                                        logger.debug(f"Could not extract valid username from DN: {member_dn}")
                                         continue
                                         
                                     username = sam_account.lower()

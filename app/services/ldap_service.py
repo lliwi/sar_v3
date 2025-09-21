@@ -210,6 +210,66 @@ class LDAPService:
             logger.error(f"Error authenticating user {username}: {str(e)}")
             return None
     
+    def get_user_details(self, username):
+        """Get user details from LDAP without authentication"""
+        try:
+            # Search for the user in the entire domain to find their details
+            conn = self.get_connection()
+            if not conn:
+                return None
+
+            # Search for user by sAMAccountName or cn across all OUs
+            search_filter = f"(&(objectClass=user)(|(sAMAccountName={username})({self.attr_user}={username})(userPrincipalName={username}@*)))"
+            attributes = [
+                'cn', 'distinguishedName', 'sAMAccountName', 'displayName', 'memberOf', 'userPrincipalName',
+                self.attr_email, self.attr_department, self.attr_firstname, self.attr_lastname, self.attr_user
+            ]
+
+            # Use multi-OU search if configured, otherwise search base DN
+            entries = self._search_in_multiple_ous(conn, search_filter, attributes, ldap3.SUBTREE)
+
+            if entries:
+                user_entry = entries[0]
+
+                # Extract individual attributes using configurable mappings
+                email_attr = getattr(user_entry, self.attr_email, None)
+                department_attr = getattr(user_entry, self.attr_department, None)
+                firstname_attr = getattr(user_entry, self.attr_firstname, None)
+                lastname_attr = getattr(user_entry, self.attr_lastname, None)
+
+                # Build full name from first and last name if available
+                full_name = ""
+                if firstname_attr and lastname_attr:
+                    full_name = f"{str(firstname_attr)} {str(lastname_attr)}"
+                elif user_entry.displayName:
+                    full_name = str(user_entry.displayName)
+                else:
+                    full_name = str(user_entry.cn)
+
+                # Extract email and other details
+                email = str(email_attr) if email_attr else f"{username}@example.org"
+                department = str(department_attr) if department_attr else None
+                distinguished_name = str(user_entry.distinguishedName)
+                sam_account = str(user_entry.sAMAccountName) if user_entry.sAMAccountName else username
+
+                conn.unbind()
+
+                return {
+                    'username': sam_account.lower(),
+                    'full_name': full_name,
+                    'email': email,
+                    'department': department,
+                    'distinguished_name': distinguished_name
+                }
+            else:
+                logger.warning(f"User {username} not found in LDAP")
+                conn.unbind()
+                return None
+
+        except Exception as e:
+            logger.error(f"Error getting user details for {username}: {str(e)}")
+            return None
+
     def get_user_groups(self, username):
         """Get groups for a specific user"""
         try:

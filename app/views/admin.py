@@ -2092,14 +2092,34 @@ def sync_users_from_ad_old():
                                     user_found = True
                                 
                                 if not user_found or not sam_account:
-                                    # If DN search failed, try extracting username from DN and search by sAMAccountName
+                                    # If DN search failed, try extracting username from DN with robust parsing
                                     extracted_username = None
                                     member_dn_lower = member_dn.lower()
-                                    
-                                    if 'cn=' in member_dn_lower:
-                                        extracted_username = member_dn.split('cn=')[1].split(',')[0].strip()
-                                    elif 'uid=' in member_dn_lower:
-                                        extracted_username = member_dn.split('uid=')[1].split(',')[0].strip()
+
+                                    # Skip known non-user objects
+                                    if any(skip_pattern in member_dn_lower for skip_pattern in [
+                                        'ou=devices', 'ou=computers', 'cn=protected users',
+                                        'foreignsecurityprincipals', 's-1-5-'
+                                    ]):
+                                        logger.debug(f"Skipping non-user object: {member_dn}")
+                                        continue
+
+                                    try:
+                                        # Robust CN extraction - handle various DN formats
+                                        if 'cn=' in member_dn_lower:
+                                            cn_parts = member_dn_lower.split('cn=')
+                                            if len(cn_parts) > 1:
+                                                # Get the first CN= part (typically the user)
+                                                cn_value = cn_parts[1].split(',')[0].strip()
+                                                if cn_value and not any(x in cn_value for x in ['users', 'builtin', 'system']):
+                                                    extracted_username = cn_value
+                                        elif 'uid=' in member_dn_lower:
+                                            uid_parts = member_dn_lower.split('uid=')
+                                            if len(uid_parts) > 1:
+                                                extracted_username = uid_parts[1].split(',')[0].strip()
+                                    except (IndexError, AttributeError) as parse_error:
+                                        logger.warning(f"Error parsing DN {member_dn}: {str(parse_error)}")
+                                        continue
                                     
                                     if extracted_username:
                                         logger.debug(f"Trying search by extracted username: {extracted_username}")
@@ -2362,11 +2382,32 @@ def debug_sync_analysis(folder_name):
                             'user_details': None
                         }
                         
-                        # Extract username from DN
-                        if 'cn=' in member_dn.lower():
-                            member_info['username'] = member_dn.split('cn=')[1].split(',')[0].strip()
-                        elif 'uid=' in member_dn.lower():
-                            member_info['username'] = member_dn.split('uid=')[1].split(',')[0].strip()
+                        # Extract username from DN with robust parsing
+                        member_dn_lower = member_dn.lower()
+
+                        # Skip known non-user objects
+                        if any(skip_pattern in member_dn_lower for skip_pattern in [
+                            'ou=devices', 'ou=computers', 'cn=protected users',
+                            'foreignsecurityprincipals', 's-1-5-'
+                        ]):
+                            continue
+
+                        try:
+                            # Robust CN extraction - handle various DN formats
+                            if 'cn=' in member_dn_lower:
+                                cn_parts = member_dn_lower.split('cn=')
+                                if len(cn_parts) > 1:
+                                    # Get the first CN= part (typically the user)
+                                    cn_value = cn_parts[1].split(',')[0].strip()
+                                    if cn_value and not any(x in cn_value for x in ['users', 'builtin', 'system']):
+                                        member_info['username'] = cn_value
+                            elif 'uid=' in member_dn_lower:
+                                uid_parts = member_dn_lower.split('uid=')
+                                if len(uid_parts) > 1:
+                                    member_info['username'] = uid_parts[1].split(',')[0].strip()
+                        except (IndexError, AttributeError):
+                            # Skip problematic DNs
+                            continue
                         
                         if member_info['username']:
                             # Search user in AD
