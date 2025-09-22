@@ -9,6 +9,9 @@ from app.services.email_service import send_permission_status_notification as _s
 app = create_app()
 celery = make_celery(app)
 
+# Ensure Celery autodiscovery works properly
+celery.autodiscover_tasks(['celery_worker'])
+
 # Register email tasks
 @celery.task(queue='notifications')
 def send_permission_request_notification(request_id):
