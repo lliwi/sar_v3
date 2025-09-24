@@ -9,8 +9,15 @@ from app.services.email_service import send_permission_status_notification as _s
 app = create_app()
 celery = make_celery(app)
 
-# Ensure Celery autodiscovery works properly
-celery.autodiscover_tasks(['celery_worker'])
+# Import all tasks to ensure they're registered
+# This is needed because the worker needs explicit imports
+import sys
+import os
+
+# Add the project root to Python path if not already there
+project_root = os.path.dirname(os.path.abspath(__file__))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 # Register email tasks
 @celery.task(queue='notifications')
@@ -104,6 +111,10 @@ def sync_users_from_ad_task(self, user_id):
                 if user.username:
                     existing_users[user.username.lower()] = user
             logger.info(f"💾 Cached {len(existing_users)} existing users")
+
+            # Cache for failed user lookups to avoid repeated LDAP queries
+            failed_user_lookups = set()
+            logger.info("🚫 Initialized cache for failed user lookups")
             
             # Process folders in batches
             offset = 0
@@ -214,6 +225,11 @@ def sync_users_from_ad_task(self, user_id):
                                     
                                     # If FULL sync is enabled, create users that don't exist
                                     if enable_full_sync and username not in existing_users:
+                                        # Skip if we already know this user doesn't exist in AD
+                                        if username in failed_user_lookups:
+                                            logger.debug(f"👻 Skipping known failed user: {username} (cached)")
+                                            continue
+
                                         logger.info(f"🔍 Full sync: Looking up new user {username} in AD...")
                                         try:
                                             # Do individual LDAP lookup for new user
@@ -234,9 +250,11 @@ def sync_users_from_ad_task(self, user_id):
                                                 logger.info(f"✅ Created new user: {username}")
                                             else:
                                                 logger.warning(f"Could not find user details in AD: {username}")
+                                                failed_user_lookups.add(username)  # Cache the failed lookup
                                                 continue
                                         except Exception as user_lookup_error:
                                             logger.error(f"❌ Error looking up user {username}: {str(user_lookup_error)}")
+                                            failed_user_lookups.add(username)  # Cache the failed lookup
                                             continue
                                     elif username not in existing_users:
                                         # Skip non-existent users if full sync is disabled
@@ -331,6 +349,7 @@ def sync_users_from_ad_task(self, user_id):
                 'memberships_updated': results['memberships_updated'],
                 'errors_count': len(results['errors']),
                 'large_groups_processed': results['large_groups_processed'],
+                'failed_user_lookups_cached': len(failed_user_lookups),
                 'batches_processed': total_batches_processed,
                 'configuration': {
                     'batch_size_folders': max_folders,
@@ -343,13 +362,15 @@ def sync_users_from_ad_task(self, user_id):
                     'folder_batch_processing': True,
                     'member_batch_processing': True,
                     'user_caching': True,
+                    'failed_lookup_caching': True,
                     'full_sync_mode': enable_full_sync,
                     'timeout_prevention': True,
-                    'memory_optimization': True
+                    'memory_optimization': True,
+                    'cpu_optimization': True
                 }
             }
             
-            logger.info(f"🎉 FULL background sync completed in {total_batches_processed} batches: {results['folders_processed']}/{total_folders_count} folders, {results['users_synced']} users, {results['memberships_created']} new memberships, {results['memberships_updated']} updated, {results['large_groups_processed']} large groups skipped")
+            logger.info(f"🎉 FULL background sync completed in {total_batches_processed} batches: {results['folders_processed']}/{total_folders_count} folders, {results['users_synced']} users, {results['memberships_created']} new memberships, {results['memberships_updated']} updated, {len(failed_user_lookups)} failed user lookups cached (CPU optimized)")
             
             # Log comprehensive audit event
             AuditEvent.log_event(
