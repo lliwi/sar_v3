@@ -2238,6 +2238,26 @@ class TaskService:
                 Task.status.in_(['pending', 'retry']),
                 Task.next_execution_at <= datetime.utcnow()
             ).order_by(Task.created_at).limit(config['batch_size']).all()
+
+            # Also get AD verification tasks that are waiting for dependency completion
+            dependent_verification_tasks = Task.query.filter(
+                Task.status == 'pending',
+                Task.task_type == 'ad_verification',
+                Task.next_execution_at.is_(None)
+            ).limit(config['batch_size']).all()
+
+            # Check if their dependencies are completed and schedule them
+            for task in dependent_verification_tasks:
+                task_data = task.get_task_data()
+                depends_on_task_id = task_data.get('depends_on_task_id')
+                if depends_on_task_id:
+                    airflow_task = Task.query.get(depends_on_task_id)
+                    if airflow_task and airflow_task.is_completed():
+                        # Schedule this verification task with delay to allow AD replication
+                        task.next_execution_at = datetime.utcnow() + timedelta(seconds=60)  # 1 minute delay
+                        logger.info(f"Scheduled AD verification task {task.id} - Airflow task {depends_on_task_id} completed")
+                        db.session.commit()
+                        ready_tasks.append(task)
             
             processed_count = 0
             
@@ -2624,7 +2644,7 @@ def create_permission_task(action, folder, ad_group, permission_type, created_by
         db.session.add(airflow_task)
         db.session.flush()  # Get the ID
         
-        # Create verification task (delayed by retry_delay)
+        # Create verification task (delayed until Airflow completes)
         verification_task = Task(
             name=f"AD verification {action}: {ad_group.name} -> {folder.name}",
             task_type='ad_verification',
@@ -2632,7 +2652,7 @@ def create_permission_task(action, folder, ad_group, permission_type, created_by
             max_attempts=config['max_retries'],
             attempt_count=0,
             created_by_id=created_by.id,
-            next_execution_at=datetime.utcnow() + timedelta(seconds=config['retry_delay'])
+            next_execution_at=None  # Will be set when Airflow task completes
         )
         
         # Set verification task data
