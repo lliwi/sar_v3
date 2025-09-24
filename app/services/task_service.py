@@ -37,10 +37,11 @@ class TaskService:
             task_data = task.get_task_data()
             csv_filename = task_data.get('csv_file_path')
             
-            # Construct full path from filename
+            # Construct full path from filename using configured CSV output directory
             if csv_filename:
-                exports_dir = '/app/exports'
-                csv_file_path = os.path.join(exports_dir, csv_filename)
+                from flask import current_app
+                csv_output_dir = current_app.config.get('CSV_OUTPUT_DIR', '/app/sar_csv_files')
+                csv_file_path = os.path.join(csv_output_dir, csv_filename)
                 
                 if os.path.exists(csv_file_path):
                     os.remove(csv_file_path)
