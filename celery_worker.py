@@ -20,17 +20,17 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # Register email tasks
-@celery.task(queue='notifications')
+@celery.task(queue='notifications', name='celery_worker.send_permission_request_notification')
 def send_permission_request_notification(request_id):
     """Celery task wrapper for sending permission request notification email"""
     return _send_permission_request_notification(request_id)
 
-@celery.task(queue='notifications')
+@celery.task(queue='notifications', name='celery_worker.send_permission_status_notification')
 def send_permission_status_notification(request_id, status):
     """Celery task wrapper for sending permission status change notification"""
     return _send_permission_status_notification(request_id, status)
 
-@celery.task(bind=True, queue='sync_heavy')
+@celery.task(bind=True, queue='sync_heavy', name='celery_worker.sync_users_from_ad_task')
 def sync_users_from_ad_task(self, user_id):
     """
     Background task to sync ALL users with permissions from AD for all active folders

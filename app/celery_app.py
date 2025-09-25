@@ -18,16 +18,13 @@ def make_celery(app=None):
     # Configure specialized queues
     celery.conf.task_routes = {
         # Sync tasks - Heavy operations
-        'sync_users_from_ad_task': {'queue': 'sync_heavy'},
         'celery_worker.sync_users_from_ad_task': {'queue': 'sync_heavy'},
 
         # Email notifications - Fast processing
-        'send_permission_request_notification': {'queue': 'notifications'},
-        'send_permission_status_notification': {'queue': 'notifications'},
         'celery_worker.send_permission_request_notification': {'queue': 'notifications'},
         'celery_worker.send_permission_status_notification': {'queue': 'notifications'},
 
-        # Reports and exports - Medium priority
+        # Reports and exports - Medium priority (reserved for future use)
         'generate_report_task': {'queue': 'reports'},
         'export_permissions_task': {'queue': 'reports'},
 
