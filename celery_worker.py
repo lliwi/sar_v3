@@ -33,6 +33,415 @@ def send_permission_status_notification(request_id, status):
     """Celery task wrapper for sending permission status change notification"""
     return _send_permission_status_notification(request_id, status)
 
+@celery.task(bind=True, queue='sync_heavy', name='celery_worker.sync_memberships_optimized_task')
+def sync_memberships_optimized_task(self, user_id):
+    """
+    Optimized task to sync ONLY memberships, assumes users are already synchronized
+    Searches for missing users on demand with intelligent fallback
+    """
+    try:
+        with app.app_context():
+            from app.services.ldap_service import LDAPService
+            from app.models import Folder, User, UserADGroupMembership, ADGroup, AuditEvent
+            from app import db
+            from datetime import datetime
+            import os
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.info(f"🚀 Starting OPTIMIZED membership sync task - Task ID: {self.request.id}")
+
+            # Get configuration from environment
+            max_fallback_lookups = float('inf')  # No limit - process all users
+            batch_size_groups = int(os.getenv('MEMBERSHIP_SYNC_BATCH_SIZE_GROUPS', 10))
+            enable_fallback = os.getenv('MEMBERSHIP_SYNC_ENABLE_FALLBACK', 'true').lower() == 'true'
+            batch_size_commits = int(os.getenv('BACKGROUND_SYNC_BATCH_SIZE', 25))
+
+            logger.info(f"📋 Configuration: max_fallback=unlimited, batch_groups={batch_size_groups}, fallback={enable_fallback}")
+
+            # Get requesting user
+            requesting_user = User.query.get(user_id)
+            if not requesting_user:
+                raise Exception(f"User with ID {user_id} not found")
+
+            # 1. STEP 1: Cache all existing users (1 DB query)
+            logger.info("📋 Pre-caching existing users...")
+            existing_users = {}
+            for user in User.query.all():
+                if user.username:
+                    existing_users[user.username.lower()] = user
+            logger.info(f"💾 Cached {len(existing_users)} existing users")
+
+            # 2. STEP 2: Get unique groups from active permissions
+            logger.info("📋 Getting unique groups from active permissions...")
+            unique_groups = set()
+            active_folders = Folder.query.filter_by(is_active=True).all()
+
+            for folder in active_folders:
+                for permission in folder.permissions:
+                    if permission.is_active:
+                        unique_groups.add(permission.ad_group.distinguished_name)
+
+            unique_groups_list = list(unique_groups)
+            logger.info(f"📦 Found {len(unique_groups_list)} unique groups to process")
+
+            # Update task state
+            self.update_state(
+                state='PROGRESS',
+                meta={
+                    'current': 0,
+                    'total': len(unique_groups_list),
+                    'message': 'Obteniendo miembros de grupos...'
+                }
+            )
+
+            # 3. STEP 3: Get all group memberships in batches (Optimized LDAP queries)
+            ldap_service = LDAPService()
+            conn = ldap_service.get_connection()
+            if not conn:
+                raise Exception('No se pudo conectar a LDAP')
+
+            all_group_memberships = {}
+            processed_groups = 0
+
+            # Process groups in batches to avoid memory issues
+            for i in range(0, len(unique_groups_list), batch_size_groups):
+                batch = unique_groups_list[i:i + batch_size_groups]
+                logger.info(f"📦 Processing group batch {i//batch_size_groups + 1}: {len(batch)} groups")
+
+                for group_dn in batch:
+                    try:
+                        members = ldap_service.get_group_members(group_dn)
+                        # Extract usernames from DNs
+                        usernames = []
+                        for member_dn in members:
+                            username = _extract_username_from_dn(member_dn)
+                            if username:
+                                usernames.append(username.lower())
+
+                        all_group_memberships[group_dn] = usernames
+                        logger.debug(f"Group {group_dn}: {len(usernames)} members")
+
+                    except Exception as group_error:
+                        logger.error(f"❌ Error getting members for group {group_dn}: {str(group_error)}")
+                        all_group_memberships[group_dn] = []
+
+                processed_groups += len(batch)
+                self.update_state(
+                    state='PROGRESS',
+                    meta={
+                        'current': processed_groups,
+                        'total': len(unique_groups_list),
+                        'message': f'Procesando grupos {processed_groups}/{len(unique_groups_list)}...'
+                    }
+                )
+
+            conn.unbind()
+
+            # 4. STEP 4: Process memberships with intelligent fallback
+            logger.info("🔍 Processing memberships with fallback...")
+
+            stats = {
+                'success': True,
+                'groups_processed': len(unique_groups_list),
+                'memberships_processed': 0,
+                'users_found_in_cache': 0,
+                'users_looked_up_in_ad': 0,
+                'users_created_on_demand': 0,
+                'users_not_found_in_ad': 0,
+                'errors': [],
+                'task_id': self.request.id
+            }
+
+            failed_user_lookups = set()  # Cache for failed lookups
+            fallback_lookups_count = 0
+
+            # Update task state
+            self.update_state(
+                state='PROGRESS',
+                meta={
+                    'current': 0,
+                    'total': len(all_group_memberships),
+                    'message': 'Sincronizando membresías...'
+                }
+            )
+
+            processed_groups_count = 0
+            batch_operations = 0
+
+            for group_dn, usernames in all_group_memberships.items():
+                try:
+                    # Get AD group object
+                    ad_group = ADGroup.query.filter_by(distinguished_name=group_dn).first()
+                    if not ad_group:
+                        logger.warning(f"AD Group not found in database: {group_dn}")
+                        continue
+
+                    logger.debug(f"Processing {len(usernames)} members for group {ad_group.name}")
+
+                    for username in usernames:
+                        try:
+                            # STEP 4A: Check cache first (99% of cases)
+                            if username in existing_users:
+                                user = existing_users[username]
+                                # Mark user as active in AD since they're in group membership
+                                user.mark_ad_active()
+                                stats['users_found_in_cache'] += 1
+                            else:
+                                # STEP 4B: User not in cache - fallback lookup
+                                if not enable_fallback:
+                                    logger.debug(f"👻 Skipping non-existent user: {username} (fallback disabled)")
+                                    continue
+
+                                # Process all users - no limits
+
+                                if username in failed_user_lookups:
+                                    logger.debug(f"👻 Skipping known failed user: {username}")
+                                    continue
+
+                                logger.info(f"🔍 User not found in cache: {username}, looking up in AD...")
+                                stats['users_looked_up_in_ad'] += 1
+                                fallback_lookups_count += 1
+
+                                try:
+                                    user_details = ldap_service.get_user_details(username)
+                                    if user_details:
+                                        # Create user on demand
+                                        new_user = User(
+                                            username=username,
+                                            full_name=user_details.get('full_name', username),
+                                            email=user_details.get('email'),
+                                            department=user_details.get('department'),
+                                            is_active=True,
+                                            created_by_id=requesting_user.id
+                                        )
+                                        db.session.add(new_user)
+                                        db.session.flush()  # Get ID
+
+                                        # Mark as active in AD since we just found them
+                                        new_user.mark_ad_active()
+
+                                        # Update cache
+                                        existing_users[username] = new_user
+                                        user = new_user
+
+                                        stats['users_created_on_demand'] += 1
+                                        logger.info(f"✅ User created on demand: {username}")
+                                    else:
+                                        # User not found in AD - mark if exists in DB
+                                        existing_user = User.query.filter_by(username=username).first()
+                                        if existing_user:
+                                            existing_user.mark_ad_not_found()
+                                            logger.warning(f"❌ User {username} not found in AD - marked as not_found and inactive")
+
+                                        failed_user_lookups.add(username)
+                                        stats['users_not_found_in_ad'] += 1
+                                        logger.warning(f"❌ User {username} not found in AD")
+                                        continue
+
+                                except Exception as user_lookup_error:
+                                    # Mark user as having AD error if exists in DB
+                                    existing_user = User.query.filter_by(username=username).first()
+                                    if existing_user:
+                                        existing_user.mark_ad_error()
+                                        logger.warning(f"❌ User {username} AD lookup error - marked with error status")
+
+                                    failed_user_lookups.add(username)
+                                    logger.error(f"❌ Error looking up user {username}: {str(user_lookup_error)}")
+                                    stats['errors'].append(f"Error buscando usuario {username}: {str(user_lookup_error)}")
+                                    continue
+
+                            # STEP 4C: Create or update membership
+                            existing_membership = UserADGroupMembership.query.filter_by(
+                                user_id=user.id,
+                                ad_group_id=ad_group.id
+                            ).first()
+
+                            if not existing_membership:
+                                membership = UserADGroupMembership(
+                                    user_id=user.id,
+                                    ad_group_id=ad_group.id,
+                                    granted_at=datetime.utcnow(),
+                                    granted_by_id=requesting_user.id,
+                                    is_active=True
+                                )
+                                db.session.add(membership)
+                                logger.debug(f"✅ Created membership: {username} -> {ad_group.name}")
+                            else:
+                                # Ensure existing membership is active
+                                if not existing_membership.is_active:
+                                    existing_membership.is_active = True
+                                    existing_membership.granted_at = datetime.utcnow()
+                                    logger.debug(f"🔄 Reactivated membership: {username} -> {ad_group.name}")
+
+                            stats['memberships_processed'] += 1
+                            batch_operations += 1
+
+                            # Commit in batches
+                            if batch_operations % batch_size_commits == 0:
+                                try:
+                                    db.session.commit()
+                                    logger.debug(f"✅ Batch committed: {batch_operations} operations")
+                                except Exception as commit_error:
+                                    logger.error(f"❌ Batch commit failed: {str(commit_error)}")
+                                    db.session.rollback()
+                                    stats['errors'].append(f"Error en commit: {str(commit_error)}")
+
+                        except Exception as member_error:
+                            logger.error(f"❌ Error processing member {username}: {str(member_error)}")
+                            stats['errors'].append(f"Error procesando miembro {username}: {str(member_error)}")
+                            continue
+
+                except Exception as group_error:
+                    logger.error(f"❌ Error processing group {group_dn}: {str(group_error)}")
+                    stats['errors'].append(f"Error procesando grupo {group_dn}: {str(group_error)}")
+                    continue
+
+                processed_groups_count += 1
+                self.update_state(
+                    state='PROGRESS',
+                    meta={
+                        'current': processed_groups_count,
+                        'total': len(all_group_memberships),
+                        'message': f'Procesando membresías {processed_groups_count}/{len(all_group_memberships)}...'
+                    }
+                )
+
+            # Final commit
+            try:
+                db.session.commit()
+                logger.info("✅ Final commit completed")
+            except Exception as final_commit_error:
+                logger.error(f"❌ Final commit failed: {str(final_commit_error)}")
+                db.session.rollback()
+                stats['errors'].append(f"Error en commit final: {str(final_commit_error)}")
+
+            # Generate comprehensive summary
+            stats['summary'] = {
+                'total_groups': len(unique_groups_list),
+                'groups_processed': stats['groups_processed'],
+                'memberships_processed': stats['memberships_processed'],
+                'users_found_in_cache': stats['users_found_in_cache'],
+                'cache_hit_rate': f"{(stats['users_found_in_cache'] / max(1, stats['memberships_processed'])) * 100:.1f}%",
+                'users_looked_up_in_ad': stats['users_looked_up_in_ad'],
+                'users_created_on_demand': stats['users_created_on_demand'],
+                'users_not_found_in_ad': stats['users_not_found_in_ad'],
+                'failed_user_lookups_cached': len(failed_user_lookups),
+                'errors_count': len(stats['errors']),
+                'configuration': {
+                    'max_fallback_lookups': max_fallback_lookups,
+                    'batch_size_groups': batch_size_groups,
+                    'batch_size_commits': batch_size_commits,
+                    'fallback_enabled': enable_fallback
+                },
+                'optimizations_applied': {
+                    'user_caching': True,
+                    'group_batch_processing': True,
+                    'intelligent_fallback': True,
+                    'failed_lookup_caching': True,
+                    'memory_optimization': True,
+                    'ldap_query_optimization': True
+                }
+            }
+
+            logger.info(f"""
+🎉 OPTIMIZED membership sync completed:
+   • Groups processed: {stats['groups_processed']}
+   • Memberships processed: {stats['memberships_processed']}
+   • Cache hits: {stats['users_found_in_cache']} ({stats['summary']['cache_hit_rate']})
+   • AD lookups: {stats['users_looked_up_in_ad']}
+   • Users created on demand: {stats['users_created_on_demand']}
+   • Users not found: {stats['users_not_found_in_ad']}
+   • Errors: {len(stats['errors'])}
+""")
+
+            # Log audit event
+            AuditEvent.log_event(
+                user=requesting_user,
+                event_type='ad_sync',
+                action='sync_memberships_optimized_completed',
+                resource_type='system',
+                description=f'Sincronización optimizada de membresías completada - Task ID: {self.request.id}',
+                metadata={
+                    'task_id': self.request.id,
+                    'groups_processed': stats['groups_processed'],
+                    'memberships_processed': stats['memberships_processed'],
+                    'cache_hit_rate': stats['summary']['cache_hit_rate'],
+                    'users_created_on_demand': stats['users_created_on_demand'],
+                    'optimization_enabled': True
+                }
+            )
+
+            return stats
+
+    except Exception as e:
+        logger.error(f"❌ Optimized membership sync task failed: {str(e)}")
+
+        # Log failure audit event
+        try:
+            with app.app_context():
+                requesting_user = User.query.get(user_id)
+                if requesting_user:
+                    AuditEvent.log_event(
+                        user=requesting_user,
+                        event_type='ad_sync',
+                        action='sync_memberships_optimized_failed',
+                        resource_type='system',
+                        description=f'Sincronización optimizada de membresías falló - Task ID: {self.request.id}',
+                        metadata={
+                            'task_id': self.request.id,
+                            'error': str(e),
+                            'optimization_enabled': True
+                        }
+                    )
+        except:
+            pass
+
+        # Update task state with failure
+        self.update_state(
+            state='FAILURE',
+            meta={
+                'error': str(e),
+                'message': f'Error en sincronización optimizada: {str(e)}'
+            }
+        )
+        raise e
+
+def _extract_username_from_dn(member_dn):
+    """
+    Extract username from Distinguished Name with robust parsing
+    """
+    try:
+        if not member_dn:
+            return None
+
+        member_dn_lower = member_dn.lower()
+
+        # Skip known non-user objects
+        if any(skip_pattern in member_dn_lower for skip_pattern in [
+            'ou=devices', 'ou=computers', 'cn=protected users',
+            'foreignsecurityprincipals', 's-1-5-'
+        ]):
+            return None
+
+        # Robust CN extraction - handle various DN formats
+        if 'cn=' in member_dn_lower:
+            cn_parts = member_dn_lower.split('cn=')
+            if len(cn_parts) > 1:
+                # Get the first CN= part (typically the user)
+                cn_value = cn_parts[1].split(',')[0].strip()
+                if cn_value and not any(x in cn_value for x in ['users', 'builtin', 'system']):
+                    return cn_value
+        elif 'uid=' in member_dn_lower:
+            uid_parts = member_dn_lower.split('uid=')
+            if len(uid_parts) > 1:
+                return uid_parts[1].split(',')[0].strip()
+
+        return None
+
+    except (IndexError, AttributeError):
+        return None
+
 @celery.task(bind=True, queue='sync_heavy', name='celery_worker.sync_users_from_ad_task')
 def sync_users_from_ad_task(self, user_id):
     """

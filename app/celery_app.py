@@ -19,6 +19,7 @@ def make_celery(app=None):
     celery.conf.task_routes = {
         # Sync tasks - Heavy operations
         'celery_worker.sync_users_from_ad_task': {'queue': 'sync_heavy'},
+        'celery_worker.sync_memberships_optimized_task': {'queue': 'sync_heavy'},
 
         # Email notifications - Fast processing
         'celery_worker.send_permission_request_notification': {'queue': 'notifications'},

@@ -29,6 +29,13 @@ class User(UserMixin, db.Model):
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     last_login = db.Column(db.DateTime)
     last_sync = db.Column(db.DateTime)  # Last LDAP synchronization
+
+    # AD Status tracking
+    ad_status = db.Column(db.String(20), default='active', nullable=False, index=True, server_default='active')
+    # Possible values: 'active', 'not_found', 'error', 'disabled'
+    ad_last_check = db.Column(db.DateTime)  # Last time AD status was checked
+    ad_error_count = db.Column(db.Integer, default=0, nullable=False, server_default='0')  # Consecutive errors
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -48,6 +55,47 @@ class User(UserMixin, db.Model):
     
     def is_admin(self):
         return self.has_role('Administrador')
+
+    def mark_ad_not_found(self):
+        """Mark user as not found in AD and set as inactive"""
+        self.ad_status = 'not_found'
+        self.ad_last_check = datetime.utcnow()
+        self.ad_error_count = (self.ad_error_count or 0) + 1
+        self.is_active = False  # Deactivate user when not found in AD
+
+    def mark_ad_active(self):
+        """Mark user as active in AD and reactivate if needed"""
+        self.ad_status = 'active'
+        self.ad_last_check = datetime.utcnow()
+        self.ad_error_count = 0
+        self.last_sync = datetime.utcnow()
+        self.is_active = True  # Reactivate user when found in AD
+
+    def mark_ad_error(self):
+        """Mark user as having AD lookup error"""
+        self.ad_status = 'error'
+        self.ad_last_check = datetime.utcnow()
+        self.ad_error_count = (self.ad_error_count or 0) + 1
+
+    def mark_ad_disabled(self):
+        """Mark user as disabled in AD"""
+        self.ad_status = 'disabled'
+        self.ad_last_check = datetime.utcnow()
+        self.is_active = False
+
+    def is_ad_problematic(self):
+        """Check if user has AD issues"""
+        return self.ad_status in ['not_found', 'error', 'disabled']
+
+    def get_ad_status_display(self):
+        """Get human-readable AD status"""
+        status_map = {
+            'active': 'Activo en AD',
+            'not_found': 'No encontrado en AD',
+            'error': 'Error de consulta AD',
+            'disabled': 'Deshabilitado en AD'
+        }
+        return status_map.get(self.ad_status, 'Estado desconocido')
     
     def can_validate_folder(self, folder):
         return self.is_admin() or self in folder.owners or self in folder.validators

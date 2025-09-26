@@ -1,0 +1,455 @@
+{% extends "base.html" %}
+
+{% block page_title %}Usuarios con Problemas en AD{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h2 class="mb-0">Usuarios con Problemas en AD</h2>
+                    <p class="text-muted">Usuarios no encontrados, con errores o deshabilitados en Active Directory</p>
+                </div>
+                <div>
+                    <a href="{{ url_for('admin.users') }}" class="btn btn-outline-secondary me-2">
+                        <i class="fas fa-arrow-left"></i> Volver a Usuarios
+                    </a>
+                    <a href="{{ url_for('admin.sync_users') }}" class="btn btn-primary">
+                        <i class="fas fa-sync-alt"></i> Sincronizar AD
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Filters -->
+    <div class="row mb-3">
+        <div class="col-md-8">
+            <div class="btn-group" role="group" aria-label="Filtros de estado AD">
+                <a href="{{ url_for('admin.users_ad_status') }}"
+                   class="btn {% if not status_filter %}btn-primary{% else %}btn-outline-primary{% endif %}">
+                    Todos ({{ total_count }})
+                </a>
+                <a href="{{ url_for('admin.users_ad_status', status='not_found') }}"
+                   class="btn {% if status_filter == 'not_found' %}btn-danger{% else %}btn-outline-danger{% endif %}">
+                    No Encontrados ({{ status_counts.get('not_found', 0) }})
+                </a>
+                <a href="{{ url_for('admin.users_ad_status', status='error') }}"
+                   class="btn {% if status_filter == 'error' %}btn-warning{% else %}btn-outline-warning{% endif %}">
+                    Con Errores ({{ status_counts.get('error', 0) }})
+                </a>
+                <a href="{{ url_for('admin.users_ad_status', status='disabled') }}"
+                   class="btn {% if status_filter == 'disabled' %}btn-secondary{% else %}btn-outline-secondary{% endif %}">
+                    Deshabilitados ({{ status_counts.get('disabled', 0) }})
+                </a>
+            </div>
+        </div>
+        <div class="col-md-4 text-end">
+            <span class="text-muted">
+                {{ users.total }} usuario(s) con problemas
+            </span>
+        </div>
+    </div>
+
+    <!-- Users Table -->
+    <div class="card">
+        <div class="card-body">
+            {% if users.items %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Usuario</th>
+                                <th>Información</th>
+                                <th>Estado AD</th>
+                                <th>Última Verificación</th>
+                                <th>Errores Consecutivos</th>
+                                <th>Estado Sistema</th>
+                                <th>Carpetas Afectadas</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for user in users.items %}
+                            <tr class="{% if not user.is_active %}table-warning{% endif %}">
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <div class="avatar avatar-sm me-2">
+                                            <span class="avatar-initial rounded-circle
+                                                {% if user.ad_status == 'not_found' %}bg-danger
+                                                {% elif user.ad_status == 'error' %}bg-warning
+                                                {% elif user.ad_status == 'disabled' %}bg-secondary
+                                                {% else %}bg-primary{% endif %}">
+                                                {{ user.username[0].upper() }}
+                                            </span>
+                                        </div>
+                                        <div>
+                                            <strong>{{ user.username }}</strong>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div>
+                                        <strong>{{ user.full_name }}</strong><br>
+                                        <small class="text-muted">{{ user.email }}</small>
+                                        {% if user.department %}
+                                            <br><span class="badge bg-info">{{ user.department }}</span>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="badge
+                                        {% if user.ad_status == 'not_found' %}bg-danger
+                                        {% elif user.ad_status == 'error' %}bg-warning
+                                        {% elif user.ad_status == 'disabled' %}bg-secondary
+                                        {% else %}bg-success{% endif %}">
+                                        {{ user.get_ad_status_display() }}
+                                    </span>
+                                </td>
+                                <td>
+                                    {% if user.ad_last_check %}
+                                        <small>{{ user.ad_last_check.strftime('%d/%m/%Y %H:%M') }}</small>
+                                    {% else %}
+                                        <small class="text-muted">Nunca</small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if user.ad_error_count and user.ad_error_count > 0 %}
+                                        <span class="badge bg-danger">{{ user.ad_error_count }}</span>
+                                    {% else %}
+                                        <span class="text-muted">0</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if user.is_active %}
+                                        <span class="badge bg-success">Activo</span>
+                                    {% else %}
+                                        <span class="badge bg-danger">Inactivo</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div class="d-flex flex-column">
+                                        {% if user.owned_folders %}
+                                            <small><i class="fas fa-crown text-warning"></i> <strong>{{ user.owned_folders|length }}</strong> propietario</small>
+                                        {% endif %}
+                                        {% if user.validated_folders %}
+                                            <small><i class="fas fa-check-circle text-success"></i> <strong>{{ user.validated_folders|length }}</strong> validador</small>
+                                        {% endif %}
+                                        {% if not user.owned_folders and not user.validated_folders %}
+                                            <small class="text-muted">Sin carpetas</small>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button type="button" class="btn btn-outline-info"
+                                                data-bs-toggle="modal"
+                                                data-bs-target="#detailModal{{ user.id }}"
+                                                title="Ver detalles">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                        <button type="button" class="btn btn-outline-primary"
+                                                onclick="recheckUserAD({{ user.id }})"
+                                                title="Reverificar en AD">
+                                            <i class="fas fa-sync-alt"></i>
+                                        </button>
+                                        {% if user.id != current_user.id %}
+                                        <button type="button" class="btn btn-outline-{% if user.is_active %}warning{% else %}success{% endif %}"
+                                                onclick="toggleUserStatus({{ user.id }}, {{ user.is_active|lower }})"
+                                                title="{% if user.is_active %}Desactivar{% else %}Activar{% endif %} usuario">
+                                            {% if user.is_active %}
+                                                <i class="fas fa-ban"></i>
+                                            {% else %}
+                                                <i class="fas fa-check"></i>
+                                            {% endif %}
+                                        </button>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                {% if users.pages > 1 %}
+                <nav aria-label="Navegación de usuarios con problemas AD" class="mt-3">
+                    <ul class="pagination justify-content-center">
+                        {% if users.has_prev %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('admin.users_ad_status', page=users.prev_num, status=status_filter) }}">
+                                    <i class="fas fa-chevron-left"></i>
+                                </a>
+                            </li>
+                        {% endif %}
+
+                        {% for page_num in users.iter_pages() %}
+                            {% if page_num %}
+                                {% if page_num != users.page %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('admin.users_ad_status', page=page_num, status=status_filter) }}">{{ page_num }}</a>
+                                    </li>
+                                {% else %}
+                                    <li class="page-item active">
+                                        <span class="page-link">{{ page_num }}</span>
+                                    </li>
+                                {% endif %}
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">...</span>
+                                </li>
+                            {% endif %}
+                        {% endfor %}
+
+                        {% if users.has_next %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('admin.users_ad_status', page=users.next_num, status=status_filter) }}">
+                                    <i class="fas fa-chevron-right"></i>
+                                </a>
+                            </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+                {% endif %}
+
+            {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
+                    <h5 class="text-success">¡Excelente!</h5>
+                    <p class="text-muted">No se encontraron usuarios con problemas en Active Directory</p>
+                    <a href="{{ url_for('admin.users') }}" class="btn btn-outline-primary">
+                        Ver todos los usuarios
+                    </a>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Detail Modals -->
+{% for user in users.items %}
+<div class="modal fade" id="detailModal{{ user.id }}" tabindex="-1" aria-labelledby="detailModalLabel{{ user.id }}" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="detailModalLabel{{ user.id }}">
+                    {{ user.full_name }} - Estado AD
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <!-- AD Status Information -->
+                <div class="alert alert-{% if user.ad_status == 'not_found' %}danger{% elif user.ad_status == 'error' %}warning{% elif user.ad_status == 'disabled' %}secondary{% else %}success{% endif %}" role="alert">
+                    <h6 class="alert-heading">Estado en Active Directory</h6>
+                    <p class="mb-0">{{ user.get_ad_status_display() }}</p>
+                    {% if user.ad_last_check %}
+                        <hr>
+                        <p class="mb-0"><small>Última verificación: {{ user.ad_last_check.strftime('%d/%m/%Y %H:%M:%S') }}</small></p>
+                    {% endif %}
+                    {% if user.ad_error_count and user.ad_error_count > 0 %}
+                        <p class="mb-0"><small>Errores consecutivos: {{ user.ad_error_count }}</small></p>
+                    {% endif %}
+                </div>
+
+                <!-- User Basic Information -->
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Usuario:</strong>
+                        <p class="text-muted">{{ user.username }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Estado del Sistema:</strong>
+                        <p class="text-muted">
+                            {% if user.is_active %}
+                                <span class="badge bg-success">Activo</span>
+                            {% else %}
+                                <span class="badge bg-danger">Inactivo</span>
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Nombre Completo:</strong>
+                        <p class="text-muted">{{ user.full_name }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Email:</strong>
+                        <p class="text-muted">{{ user.email }}</p>
+                    </div>
+                </div>
+
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Departamento:</strong>
+                        <p class="text-muted">{{ user.department or 'Sin asignar' }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Último Acceso:</strong>
+                        <p class="text-muted">
+                            {% if user.last_login %}
+                                {{ user.last_login.strftime('%d/%m/%Y %H:%M:%S') }}
+                            {% else %}
+                                Nunca ha ingresado
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Affected Resources -->
+                {% if user.owned_folders or user.validated_folders %}
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <h6 class="text-danger">⚠️ Recursos Afectados</h6>
+                        <div class="alert alert-warning">
+                            <p class="mb-2"><strong>Este usuario tiene asignadas carpetas que podrían verse afectadas:</strong></p>
+
+                            {% if user.owned_folders %}
+                            <div class="mb-2">
+                                <strong>Como Propietario ({{ user.owned_folders|length }}):</strong>
+                                <ul class="list-unstyled mt-1">
+                                    {% for folder in user.owned_folders[:5] %}
+                                    <li><small><code>{{ folder.path }}</code></small></li>
+                                    {% endfor %}
+                                    {% if user.owned_folders|length > 5 %}
+                                    <li><small class="text-muted">... y {{ user.owned_folders|length - 5 }} más</small></li>
+                                    {% endif %}
+                                </ul>
+                            </div>
+                            {% endif %}
+
+                            {% if user.validated_folders %}
+                            <div class="mb-2">
+                                <strong>Como Validador ({{ user.validated_folders|length }}):</strong>
+                                <ul class="list-unstyled mt-1">
+                                    {% for folder in user.validated_folders[:5] %}
+                                    <li><small><code>{{ folder.path }}</code></small></li>
+                                    {% endfor %}
+                                    {% if user.validated_folders|length > 5 %}
+                                    <li><small class="text-muted">... y {{ user.validated_folders|length - 5 }} más</small></li>
+                                    {% endif %}
+                                </ul>
+                            </div>
+                            {% endif %}
+
+                            <p class="mb-0"><small>⚠️ Considera asignar estos recursos a otros usuarios activos.</small></p>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Synchronization Information -->
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Fecha de Creación:</strong>
+                        <p class="text-muted">{{ user.created_at.strftime('%d/%m/%Y %H:%M') }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Última Sincronización:</strong>
+                        <p class="text-muted">
+                            {% if user.last_sync %}
+                                {{ user.last_sync.strftime('%d/%m/%Y %H:%M') }}
+                            {% else %}
+                                Nunca sincronizado
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                <button type="button" class="btn btn-primary" onclick="recheckUserAD({{ user.id }})">
+                    <i class="fas fa-sync-alt"></i> Reverificar AD
+                </button>
+                {% if user.id != current_user.id %}
+                <button type="button" class="btn btn-{% if user.is_active %}warning{% else %}success{% endif %}"
+                        onclick="toggleUserStatus({{ user.id }}, {{ user.is_active|lower }})">
+                    {% if user.is_active %}
+                        <i class="fas fa-ban"></i> Desactivar
+                    {% else %}
+                        <i class="fas fa-check"></i> Activar
+                    {% endif %}
+                </button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+<style>
+.avatar {
+    width: 32px;
+    height: 32px;
+}
+
+.avatar-initial {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+}
+
+.table-warning {
+    background-color: rgba(255, 193, 7, 0.1);
+}
+</style>
+
+<script>
+function recheckUserAD(userId) {
+    if (confirm('¿Reverificar el estado de este usuario en Active Directory?')) {
+        fetch(`/admin/users/${userId}/recheck-ad`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert(`Estado actualizado: ${data.ad_status}`);
+                location.reload();
+            } else {
+                alert('Error al reverificar: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error al reverificar el estado del usuario');
+        });
+    }
+}
+
+function toggleUserStatus(userId, isActive) {
+    const action = isActive ? 'desactivar' : 'activar';
+    if (confirm(`¿Estás seguro de que deseas ${action} este usuario?`)) {
+        fetch(`/admin/users/${userId}/toggle`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Error al cambiar el estado: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error al cambiar el estado del usuario');
+        });
+    }
+}
+</script>
+{% endblock %}

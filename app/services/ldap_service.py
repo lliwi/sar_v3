@@ -270,6 +270,177 @@ class LDAPService:
             logger.error(f"Error getting user details for {username}: {str(e)}")
             return None
 
+    def get_multiple_groups_members_batch(self, group_dns, batch_size=10):
+        """
+        Get members of multiple groups in optimized batches
+
+        Args:
+            group_dns: List of group distinguished names
+            batch_size: Number of groups to process in each batch
+
+        Returns:
+            dict: {group_dn: [member_dns]}
+        """
+        all_memberships = {}
+
+        try:
+            # Process in batches to avoid timeouts and memory issues
+            for i in range(0, len(group_dns), batch_size):
+                batch = group_dns[i:i + batch_size]
+                logger.debug(f"Processing group batch {i//batch_size + 1}: {len(batch)} groups")
+
+                for group_dn in batch:
+                    try:
+                        members = self.get_group_members(group_dn)
+                        all_memberships[group_dn] = members
+                        logger.debug(f"Group {group_dn}: {len(members)} members")
+                    except Exception as e:
+                        logger.error(f"Error getting members for {group_dn}: {e}")
+                        all_memberships[group_dn] = []
+
+            logger.info(f"Batch processing completed: {len(group_dns)} groups processed")
+            return all_memberships
+
+        except Exception as e:
+            logger.error(f"Error in batch group processing: {str(e)}")
+            return all_memberships
+
+    def get_user_details_with_cache(self, username, failed_cache=None):
+        """
+        Optimized version of get_user_details with failed user caching
+
+        Args:
+            username: Username to lookup
+            failed_cache: Set of usernames known to have failed lookups
+
+        Returns:
+            dict or None: User details or None if not found
+        """
+        try:
+            # Check failed cache first
+            if failed_cache and username in failed_cache:
+                logger.debug(f"👻 Skipping known failed user: {username} (cached)")
+                return None
+
+            user_details = self.get_user_details(username)
+
+            if not user_details and failed_cache is not None:
+                # Add to failed cache
+                failed_cache.add(username)
+                logger.debug(f"Added {username} to failed cache")
+
+            return user_details
+
+        except Exception as e:
+            # Add to failed cache on error
+            if failed_cache is not None:
+                failed_cache.add(username)
+            logger.error(f"Error in cached user lookup for {username}: {str(e)}")
+            raise e
+
+    def get_multiple_users_details_batch(self, usernames, batch_size=20):
+        """
+        Get details for multiple users in optimized batches
+
+        Args:
+            usernames: List of usernames to lookup
+            batch_size: Number of users to process in each batch
+
+        Returns:
+            dict: {username: user_details}
+        """
+        all_user_details = {}
+        failed_cache = set()
+
+        try:
+            # Process in batches to avoid LDAP timeouts
+            for i in range(0, len(usernames), batch_size):
+                batch = usernames[i:i + batch_size]
+                logger.debug(f"Processing user batch {i//batch_size + 1}: {len(batch)} users")
+
+                for username in batch:
+                    try:
+                        user_details = self.get_user_details_with_cache(username, failed_cache)
+                        if user_details:
+                            all_user_details[username] = user_details
+                        else:
+                            logger.debug(f"User not found: {username}")
+                    except Exception as e:
+                        logger.error(f"Error getting details for user {username}: {e}")
+                        continue
+
+            logger.info(f"Batch user processing completed: {len(all_user_details)} users found, {len(failed_cache)} failed")
+            return all_user_details
+
+        except Exception as e:
+            logger.error(f"Error in batch user processing: {str(e)}")
+            return all_user_details
+
+    def extract_username_from_dn(self, member_dn):
+        """
+        Extract username from Distinguished Name with robust parsing
+
+        Args:
+            member_dn: Distinguished Name string
+
+        Returns:
+            str or None: Extracted username or None if invalid
+        """
+        try:
+            if not member_dn:
+                return None
+
+            member_dn_lower = member_dn.lower()
+
+            # Skip known non-user objects
+            if any(skip_pattern in member_dn_lower for skip_pattern in [
+                'ou=devices', 'ou=computers', 'cn=protected users',
+                'foreignsecurityprincipals', 's-1-5-'
+            ]):
+                return None
+
+            # Robust CN extraction - handle various DN formats
+            if 'cn=' in member_dn_lower:
+                cn_parts = member_dn_lower.split('cn=')
+                if len(cn_parts) > 1:
+                    # Get the first CN= part (typically the user)
+                    cn_value = cn_parts[1].split(',')[0].strip()
+                    if cn_value and not any(x in cn_value for x in ['users', 'builtin', 'system']):
+                        return cn_value
+            elif 'uid=' in member_dn_lower:
+                uid_parts = member_dn_lower.split('uid=')
+                if len(uid_parts) > 1:
+                    return uid_parts[1].split(',')[0].strip()
+
+            return None
+
+        except (IndexError, AttributeError):
+            return None
+
+    def get_unique_groups_from_active_permissions(self):
+        """
+        Get unique AD groups from all active folder permissions
+
+        Returns:
+            list: List of unique group distinguished names
+        """
+        try:
+            from app.models import Folder
+
+            unique_groups = set()
+            active_folders = Folder.query.filter_by(is_active=True).all()
+
+            for folder in active_folders:
+                for permission in folder.permissions:
+                    if permission.is_active:
+                        unique_groups.add(permission.ad_group.distinguished_name)
+
+            return list(unique_groups)
+
+        except Exception as e:
+            logger.error(f"Error getting unique groups from permissions: {str(e)}")
+            return []
+
     def get_user_groups(self, username):
         """Get groups for a specific user"""
         try:

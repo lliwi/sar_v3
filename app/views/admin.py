@@ -40,6 +40,7 @@ def admin_dashboard():
         'pending_requests': PermissionRequest.query.filter_by(status='pending').count(),
         'total_permissions': FolderPermission.query.filter_by(is_active=True).count(),
         'active_permissions': FolderPermission.query.filter_by(is_active=True).count(),
+        'problematic_users': User.query.filter(User.ad_status.in_(['not_found', 'error', 'disabled'])).count(),
         'total_tasks': Task.query.count(),
         'pending_tasks': Task.query.filter_by(status='pending').count(),
         'running_tasks': Task.query.filter_by(status='running').count(),
@@ -1824,62 +1825,276 @@ def get_folder_ad_permissions(folder_id):
 @login_required
 @admin_required
 def sync_users_from_ad():
-    """Start background sync task for complete user synchronization"""
+    """Start background sync task for complete user synchronization (legacy endpoint)"""
     import logging
     import os
-    
+
     logger = logging.getLogger(__name__)
-    
+
     try:
+        # Use legacy task for compatibility
         from celery_worker import sync_users_from_ad_task
-        logger.info("🚀 Starting complete background sync task via Celery")
-        
+        logger.info("🚀 Starting complete background sync task via Celery (legacy)")
+
         # Start background task (no parameters - uses env config)
         task = sync_users_from_ad_task.delay(user_id=current_user.id)
-        
-        logger.info(f"✅ Background sync task started with ID: {task.id}")
-        
-        # Get configuration for display
-        max_folders = int(os.getenv('BACKGROUND_SYNC_MAX_FOLDERS', 50))
-        max_members_per_group = int(os.getenv('BACKGROUND_SYNC_MAX_MEMBERS_PER_GROUP', 200))
-        enable_full_sync = os.getenv('BACKGROUND_SYNC_ENABLE_FULL_SYNC', 'true').lower() == 'true'
-        
+
+        logger.info(f"✅ Legacy sync task started with ID: {task.id}")
+
         # Log this action
         AuditEvent.log_event(
             user=current_user,
             event_type='ad_sync',
-            action='sync_users_from_ad_background_started',
+            action='sync_users_from_ad_legacy_started',
             resource_type='system',
-            description=f'Sincronización completa en background iniciada - Task ID: {task.id}',
+            description=f'Sincronización legacy iniciada - Task ID: {task.id}',
             metadata={
                 'task_id': task.id,
-                'max_folders': max_folders,
-                'max_members_per_group': max_members_per_group,
-                'full_sync_enabled': enable_full_sync,
-                'background_task': True
+                'legacy_mode': True
             },
             ip_address=request.remote_addr,
             user_agent=request.headers.get('User-Agent')
         )
-        
+
         return jsonify({
             'success': True,
-            'message': 'Sincronización completa iniciada en background',
+            'message': 'Sincronización legacy iniciada en background',
             'task_id': task.id,
             'status': 'STARTED',
-            'background_task': True,
-            'configuration': {
-                'max_folders': max_folders,
-                'max_members_per_group': max_members_per_group,
-                'full_sync_enabled': enable_full_sync
-            }
+            'legacy_mode': True
         })
-        
+
     except Exception as e:
-        logger.error(f"❌ Error starting background sync task: {str(e)}")
+        logger.error(f"❌ Error starting legacy sync task: {str(e)}")
         return jsonify({
             'success': False,
-            'error': f'Error iniciando tarea en background: {str(e)}'
+            'error': f'Error iniciando tarea legacy: {str(e)}'
+        }), 500
+
+@admin_bp.route('/folders/sync-memberships-optimized', methods=['POST'])
+@login_required
+@admin_required
+def sync_memberships_optimized():
+    """Start optimized membership synchronization task"""
+    import logging
+    import os
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        from celery_worker import sync_memberships_optimized_task
+        logger.info("🚀 Starting OPTIMIZED membership sync task via Celery")
+
+        # Start optimized background task
+        task = sync_memberships_optimized_task.delay(user_id=current_user.id)
+
+        logger.info(f"✅ Optimized membership sync task started with ID: {task.id}")
+
+        # Get optimized configuration for display
+        max_fallback_lookups = int(os.getenv('MEMBERSHIP_SYNC_MAX_FALLBACK_LOOKUPS', 100))
+        batch_size_groups = int(os.getenv('MEMBERSHIP_SYNC_BATCH_SIZE_GROUPS', 10))
+        enable_fallback = os.getenv('MEMBERSHIP_SYNC_ENABLE_FALLBACK', 'true').lower() == 'true'
+
+        # Log this action
+        AuditEvent.log_event(
+            user=current_user,
+            event_type='ad_sync',
+            action='sync_memberships_optimized_started',
+            resource_type='system',
+            description=f'Sincronización optimizada de membresías iniciada - Task ID: {task.id}',
+            metadata={
+                'task_id': task.id,
+                'max_fallback_lookups': max_fallback_lookups,
+                'batch_size_groups': batch_size_groups,
+                'fallback_enabled': enable_fallback,
+                'optimized_processing': True,
+                'intelligent_fallback': True
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent')
+        )
+
+        return jsonify({
+            'success': True,
+            'message': 'Sincronización optimizada de membresías iniciada en background',
+            'task_id': task.id,
+            'status': 'STARTED',
+            'optimized_processing': True,
+            'configuration': {
+                'max_fallback_lookups': max_fallback_lookups,
+                'batch_size_groups': batch_size_groups,
+                'fallback_enabled': enable_fallback,
+                'optimization_features': [
+                    'User caching',
+                    'Group batch processing',
+                    'Intelligent fallback',
+                    'Failed lookup caching',
+                    'Memory optimization',
+                    'LDAP query optimization'
+                ]
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error starting optimized membership sync task: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Error iniciando tarea optimizada: {str(e)}'
+        }), 500
+
+@admin_bp.route('/users/ad-status', methods=['GET'])
+@login_required
+@admin_required
+def users_ad_status():
+    """View users with AD status issues"""
+    import logging
+    from sqlalchemy import or_
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Get query parameters
+        status_filter = request.args.get('status', 'all')
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 50))
+
+        # Base query
+        query = User.query
+
+        # Apply status filter
+        if status_filter == 'problematic':
+            query = query.filter(User.ad_status.in_(['not_found', 'error', 'disabled']))
+        elif status_filter == 'not_found':
+            query = query.filter(User.ad_status == 'not_found')
+        elif status_filter == 'error':
+            query = query.filter(User.ad_status == 'error')
+        elif status_filter == 'disabled':
+            query = query.filter(User.ad_status == 'disabled')
+        elif status_filter == 'active':
+            query = query.filter(User.ad_status == 'active')
+
+        # Order by last check date (most recent first), then by error count
+        query = query.order_by(User.ad_last_check.desc().nullslast(), User.ad_error_count.desc())
+
+        # Paginate
+        users = query.paginate(
+            page=page, per_page=per_page, error_out=False
+        )
+
+        # Get status counts for summary
+        status_counts = {
+            'total': User.query.count(),
+            'active': User.query.filter(User.ad_status == 'active').count(),
+            'not_found': User.query.filter(User.ad_status == 'not_found').count(),
+            'error': User.query.filter(User.ad_status == 'error').count(),
+            'disabled': User.query.filter(User.ad_status == 'disabled').count(),
+            'problematic': User.query.filter(User.ad_status.in_(['not_found', 'error', 'disabled'])).count()
+        }
+
+        # Format users data
+        users_data = []
+        for user in users.items:
+            users_data.append({
+                'id': user.id,
+                'username': user.username,
+                'full_name': user.full_name,
+                'email': user.email,
+                'department': user.department,
+                'is_active': user.is_active,
+                'ad_status': user.ad_status,
+                'ad_status_display': user.get_ad_status_display(),
+                'ad_last_check': user.ad_last_check.isoformat() if user.ad_last_check else None,
+                'ad_error_count': user.ad_error_count or 0,
+                'last_sync': user.last_sync.isoformat() if user.last_sync else None,
+                'created_at': user.created_at.isoformat() if user.created_at else None
+            })
+
+        return jsonify({
+            'success': True,
+            'users': users_data,
+            'pagination': {
+                'page': users.page,
+                'pages': users.pages,
+                'per_page': users.per_page,
+                'total': users.total,
+                'has_next': users.has_next,
+                'has_prev': users.has_prev
+            },
+            'status_counts': status_counts,
+            'current_filter': status_filter
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Error getting users AD status: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Error obteniendo estado AD de usuarios: {str(e)}'
+        }), 500
+
+@admin_bp.route('/users/<int:user_id>/recheck-ad', methods=['POST'])
+@login_required
+@admin_required
+def recheck_user_ad_status(user_id):
+    """Manually recheck a user's AD status"""
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        user = User.query.get_or_404(user_id)
+
+        # Get LDAP service
+        from app.services.ldap_service import LDAPService
+        ldap_service = LDAPService()
+
+        # Check user in AD
+        try:
+            user_details = ldap_service.get_user_details(user.username)
+            if user_details:
+                user.mark_ad_active()
+                db.session.commit()
+
+                logger.info(f"✅ User {user.username} found in AD and marked as active")
+
+                return jsonify({
+                    'success': True,
+                    'message': f'Usuario {user.username} encontrado en AD y marcado como activo',
+                    'ad_status': user.ad_status,
+                    'ad_status_display': user.get_ad_status_display(),
+                    'is_active': user.is_active
+                })
+            else:
+                user.mark_ad_not_found()
+                db.session.commit()
+
+                logger.warning(f"❌ User {user.username} not found in AD")
+
+                return jsonify({
+                    'success': True,
+                    'message': f'Usuario {user.username} no encontrado en AD y marcado como inactivo',
+                    'ad_status': user.ad_status,
+                    'ad_status_display': user.get_ad_status_display(),
+                    'is_active': user.is_active
+                })
+
+        except Exception as ad_error:
+            user.mark_ad_error()
+            db.session.commit()
+
+            logger.error(f"❌ Error checking user {user.username} in AD: {str(ad_error)}")
+
+            return jsonify({
+                'success': False,
+                'message': f'Error verificando usuario {user.username} en AD: {str(ad_error)}',
+                'ad_status': user.ad_status,
+                'ad_status_display': user.get_ad_status_display()
+            }), 500
+
+    except Exception as e:
+        logger.error(f"❌ Error rechecking user AD status: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Error verificando estado AD: {str(e)}'
         }), 500
 
 @admin_bp.route('/folders/sync-task-status/<task_id>', methods=['GET'])
