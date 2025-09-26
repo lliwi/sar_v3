@@ -9,6 +9,9 @@ from app.services.email_service import send_permission_status_notification as _s
 app = create_app()
 celery = make_celery(app)
 
+# Ensure celery instance is available as module attribute
+app.celery = celery
+
 # Import all tasks to ensure they're registered
 # This is needed because the worker needs explicit imports
 import sys
