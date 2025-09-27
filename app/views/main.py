@@ -75,14 +75,49 @@ def dashboard():
         AuditEvent.created_at.desc()
     ).limit(5).all()
     
+    # Calculate user permissions count based on real AD group membership
+    user_permissions_count = 0
+    try:
+        # Get current user's AD groups
+        from app.services.ldap_service import LDAPService
+        ldap_service = LDAPService()
+        user_groups = ldap_service.get_user_groups(current_user.username)
+
+        if user_groups:
+            # Get AD group names (extract CN from full DN)
+            user_group_names = []
+            for group in user_groups:
+                # Extract CN from LDAP DN format: CN=groupname,OU=...
+                if group.startswith('CN='):
+                    group_name = group.split(',')[0].replace('CN=', '')
+                    user_group_names.append(group_name)
+                else:
+                    user_group_names.append(group)
+
+            # Find folders where user has access through their AD groups
+            user_ad_groups = ADGroup.query.filter(ADGroup.name.in_(user_group_names)).all()
+
+            if user_ad_groups:
+                # Get distinct folders where user has permissions
+                accessible_folders = Folder.query.join(FolderPermission).filter(
+                    FolderPermission.ad_group_id.in_([g.id for g in user_ad_groups]),
+                    FolderPermission.is_active == True,
+                    Folder.is_active == True
+                ).distinct().count()
+
+                user_permissions_count = accessible_folders
+
+    except Exception as e:
+        # If LDAP is not available or there's an error, fall back to 0
+        import logging
+        logging.error(f"Error getting user groups for dashboard stats for {current_user.username}: {e}")
+        user_permissions_count = 0
+
     stats = {
         'pending_requests': len(pending_requests),
         'validation_requests': len(validation_requests),
         'total_folders': Folder.query.filter_by(is_active=True).count(),
-        'user_permissions': FolderPermission.query.join(Folder).filter(
-            FolderPermission.is_active == True,
-            Folder.owners.contains(current_user)
-        ).count()
+        'user_permissions': user_permissions_count
     }
     
     # Add task statistics for administrators
