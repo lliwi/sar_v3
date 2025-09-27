@@ -100,8 +100,6 @@ AIRFLOW_API_URL=http://airflow:8080/api/v1
 AIRFLOW_USERNAME=admin
 AIRFLOW_PASSWORD=password-airflow
 
-# AI Configuration (Opcional)
-OLLAMA_BASE_URL=http://ollama:11434
 ```
 
 ### 3. Ejecutar con Docker Compose
@@ -462,14 +460,6 @@ Este proyecto está licenciado bajo la Licencia MIT - ver el archivo [LICENSE](L
 3. Commit cambios (`git commit -am 'Agregar nueva funcionalidad'`)
 4. Push al branch (`git push origin feature/nueva-funcionalidad`)
 5. Crear Pull Request
-
-## 📞 Soporte
-
-Para soporte técnico o preguntas:
-
-- 📧 Email: soporte@empresa.com
-- 🐛 Issues: [GitHub Issues](link-to-issues)
-- 📖 Wiki: [Documentación](link-to-wiki)
 
 ---
 

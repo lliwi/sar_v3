@@ -826,7 +826,7 @@ class LDAPService:
                         user.department = department
                         user.distinguished_name = distinguished_name
                         user.last_sync = current_time
-                        user.is_active = True
+                        user.mark_ad_active()  # This sets is_active=True AND ad_status='active'
                     else:
                         # Create new user
                         user = User(
@@ -871,7 +871,7 @@ class LDAPService:
                 
                 inactive_count = 0
                 for user in old_users:
-                    user.is_active = False
+                    user.mark_ad_not_found()  # This marks as not_found AND inactive
                     inactive_count += 1
                     
                     if inactive_count % batch_size == 0:
