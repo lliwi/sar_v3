@@ -24,34 +24,139 @@
         </div>
     </div>
 
-    <!-- Status Filters -->
+    <!-- Summary Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card text-white bg-primary">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ status_counts.get('total', 0) }}</h4>
+                            <p class="mb-0">Total Usuarios</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-users fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-white bg-success">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ status_counts.get('active', 0) }}</h4>
+                            <p class="mb-0">Activos en AD</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-check-circle fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-white bg-danger">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ status_counts.get('problematic', 0) }}</h4>
+                            <p class="mb-0">Con Problemas</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-exclamation-triangle fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-white bg-info">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ ((status_counts.get('active', 0) / status_counts.get('total', 1)) * 100)|round(1) }}%</h4>
+                            <p class="mb-0">Salud del AD</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-heartbeat fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search and Filters -->
     <div class="row mb-3">
-        <div class="col-md-8">
-            <div class="btn-group" role="group" aria-label="Filtros de estado AD">
-                <a href="{{ url_for('admin.users_ad_status') }}"
-                   class="btn {% if not status_filter %}btn-primary{% else %}btn-outline-primary{% endif %}">
-                    Todos ({{ total_count }})
+        <div class="col-md-6">
+            <form method="GET" action="{{ url_for('admin.users_ad_status') }}" class="d-flex">
+                <input type="hidden" name="status" value="{{ status_filter }}">
+                <div class="input-group">
+                    <input type="text" class="form-control" name="search"
+                           placeholder="Buscar por usuario, nombre, email o departamento..."
+                           value="{{ search }}" id="searchInput">
+                    <button class="btn btn-outline-secondary" type="submit" title="Buscar">
+                        <i class="fas fa-search"></i>
+                    </button>
+                    {% if search %}
+                    <a href="{{ url_for('admin.users_ad_status', status=status_filter) }}"
+                       class="btn btn-outline-danger" title="Limpiar búsqueda">
+                        <i class="fas fa-times"></i>
+                    </a>
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+        <div class="col-md-6">
+            <div class="btn-group w-100" role="group" aria-label="Filtros de estado AD">
+                <a href="{{ url_for('admin.users_ad_status', search=search) }}"
+                   class="btn {% if status_filter == 'all' %}btn-primary{% else %}btn-outline-primary{% endif %}">
+                    Todos
                 </a>
-                <a href="{{ url_for('admin.users_ad_status', status='not_found') }}"
-                   class="btn {% if status_filter == 'not_found' %}btn-danger{% else %}btn-outline-danger{% endif %}">
-                    No Encontrados ({{ status_counts.get('not_found', 0) }})
+                <a href="{{ url_for('admin.users_ad_status', status='problematic', search=search) }}"
+                   class="btn {% if status_filter == 'problematic' %}btn-danger{% else %}btn-outline-danger{% endif %}">
+                    Problemas
                 </a>
-                <a href="{{ url_for('admin.users_ad_status', status='error') }}"
-                   class="btn {% if status_filter == 'error' %}btn-warning{% else %}btn-outline-warning{% endif %}">
-                    Con Errores ({{ status_counts.get('error', 0) }})
+                <a href="{{ url_for('admin.users_ad_status', status='not_found', search=search) }}"
+                   class="btn {% if status_filter == 'not_found' %}btn-warning{% else %}btn-outline-warning{% endif %}">
+                    No Encontrados
                 </a>
-                <a href="{{ url_for('admin.users_ad_status', status='disabled') }}"
-                   class="btn {% if status_filter == 'disabled' %}btn-secondary{% else %}btn-outline-secondary{% endif %}">
-                    Deshabilitados ({{ status_counts.get('disabled', 0) }})
+                <a href="{{ url_for('admin.users_ad_status', status='error', search=search) }}"
+                   class="btn {% if status_filter == 'error' %}btn-secondary{% else %}btn-outline-secondary{% endif %}">
+                    Con Errores
+                </a>
+                <a href="{{ url_for('admin.users_ad_status', status='active', search=search) }}"
+                   class="btn {% if status_filter == 'active' %}btn-success{% else %}btn-outline-success{% endif %}">
+                    Activos
                 </a>
             </div>
         </div>
-        <div class="col-md-4 text-end">
-            <span class="text-muted">
-                {{ users.total }} usuario(s) con problemas
-            </span>
+    </div>
+
+    <!-- Results Info -->
+    {% if search or status_filter != 'all' %}
+    <div class="row mb-3">
+        <div class="col-12">
+            <div class="alert alert-info d-flex justify-content-between align-items-center">
+                <div>
+                    <i class="fas fa-filter me-2"></i>
+                    {% if search and status_filter != 'all' %}
+                        Mostrando {{ users.total if users else 0 }} resultados para <strong>"{{ search }}"</strong> con estado <strong>{{ status_filter }}</strong>
+                    {% elif search %}
+                        Mostrando {{ users.total if users else 0 }} resultados para <strong>"{{ search }}"</strong>
+                    {% else %}
+                        Mostrando {{ users.total if users else 0 }} usuarios con estado <strong>{{ status_filter }}</strong>
+                    {% endif %}
+                </div>
+                <a href="{{ url_for('admin.users_ad_status') }}" class="btn btn-sm btn-outline-secondary">
+                    <i class="fas fa-times"></i> Limpiar filtros
+                </a>
+            </div>
         </div>
     </div>
+    {% endif %}
 
     <!-- Users Table -->
     <div class="card">
@@ -180,7 +285,7 @@
                     <ul class="pagination justify-content-center">
                         {% if users.has_prev %}
                             <li class="page-item">
-                                <a class="page-link" href="{{ url_for('admin.users_ad_status', page=users.prev_num, status=status_filter) }}">
+                                <a class="page-link" href="{{ url_for('admin.users_ad_status', page=users.prev_num, status=status_filter, search=search) }}">
                                     <i class="fas fa-chevron-left"></i>
                                 </a>
                             </li>
@@ -190,7 +295,7 @@
                             {% if page_num %}
                                 {% if page_num != users.page %}
                                     <li class="page-item">
-                                        <a class="page-link" href="{{ url_for('admin.users_ad_status', page=page_num, status=status_filter) }}">{{ page_num }}</a>
+                                        <a class="page-link" href="{{ url_for('admin.users_ad_status', page=page_num, status=status_filter, search=search) }}">{{ page_num }}</a>
                                     </li>
                                 {% else %}
                                     <li class="page-item active">
@@ -206,7 +311,7 @@
 
                         {% if users.has_next %}
                             <li class="page-item">
-                                <a class="page-link" href="{{ url_for('admin.users_ad_status', page=users.next_num, status=status_filter) }}">
+                                <a class="page-link" href="{{ url_for('admin.users_ad_status', page=users.next_num, status=status_filter, search=search) }}">
                                     <i class="fas fa-chevron-right"></i>
                                 </a>
                             </li>
@@ -402,8 +507,68 @@
 </style>
 
 <script>
+// Enhanced search functionality
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('searchInput');
+    let searchTimeout;
+
+    // Auto-submit search form after 1 second of inactivity
+    if (searchInput) {
+        searchInput.addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                this.form.submit();
+            }, 1000);
+        });
+
+        // Submit immediately on Enter key
+        searchInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                clearTimeout(searchTimeout);
+                this.form.submit();
+            }
+        });
+    }
+
+    // Add loading states to action buttons
+    const actionButtons = document.querySelectorAll('.btn[onclick*="recheck"], .btn[onclick*="toggle"]');
+    actionButtons.forEach(button => {
+        const originalOnClick = button.getAttribute('onclick');
+        button.addEventListener('click', function() {
+            this.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            this.disabled = true;
+        });
+    });
+
+    // Refresh page every 30 seconds if viewing problematic users
+    const currentFilter = '{{ status_filter }}';
+    if (currentFilter === 'problematic' || currentFilter === 'error') {
+        setInterval(() => {
+            // Only refresh if user hasn't interacted recently
+            if (document.hasFocus() && !document.querySelector('.modal.show')) {
+                const now = new Date().getTime();
+                const lastActivity = localStorage.getItem('lastActivity') || now;
+                if (now - lastActivity > 30000) { // 30 seconds
+                    location.reload();
+                }
+            }
+        }, 30000);
+    }
+});
+
+// Track user activity
+document.addEventListener('click', () => {
+    localStorage.setItem('lastActivity', new Date().getTime());
+});
+
 function recheckUserAD(userId) {
     if (confirm('¿Reverificar el estado de este usuario en Active Directory?')) {
+        const button = event.target.closest('button');
+        const originalContent = button.innerHTML;
+
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        button.disabled = true;
+
         fetch(`/admin/users/${userId}/recheck-ad`, {
             method: 'POST',
             headers: {
@@ -414,15 +579,19 @@ function recheckUserAD(userId) {
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                alert(`Estado actualizado: ${data.ad_status}`);
-                location.reload();
+                showToast(`Estado actualizado: ${data.ad_status_display}`, 'success');
+                setTimeout(() => location.reload(), 1500);
             } else {
-                alert('Error al reverificar: ' + data.message);
+                showToast('Error al reverificar: ' + data.message, 'error');
+                button.innerHTML = originalContent;
+                button.disabled = false;
             }
         })
         .catch(error => {
             console.error('Error:', error);
-            alert('Error al reverificar el estado del usuario');
+            showToast('Error al reverificar el estado del usuario', 'error');
+            button.innerHTML = originalContent;
+            button.disabled = false;
         });
     }
 }
@@ -430,6 +599,12 @@ function recheckUserAD(userId) {
 function toggleUserStatus(userId, isActive) {
     const action = isActive ? 'desactivar' : 'activar';
     if (confirm(`¿Estás seguro de que deseas ${action} este usuario?`)) {
+        const button = event.target.closest('button');
+        const originalContent = button.innerHTML;
+
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        button.disabled = true;
+
         fetch(`/admin/users/${userId}/toggle`, {
             method: 'POST',
             headers: {
@@ -440,16 +615,67 @@ function toggleUserStatus(userId, isActive) {
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                location.reload();
+                showToast(`Usuario ${isActive ? 'desactivado' : 'activado'} exitosamente`, 'success');
+                setTimeout(() => location.reload(), 1500);
             } else {
-                alert('Error al cambiar el estado: ' + data.message);
+                showToast('Error al cambiar el estado: ' + data.message, 'error');
+                button.innerHTML = originalContent;
+                button.disabled = false;
             }
         })
         .catch(error => {
             console.error('Error:', error);
-            alert('Error al cambiar el estado del usuario');
+            showToast('Error al cambiar el estado del usuario', 'error');
+            button.innerHTML = originalContent;
+            button.disabled = false;
         });
     }
+}
+
+// Simple toast notification function
+function showToast(message, type = 'info') {
+    // Create toast container if it doesn't exist
+    let toastContainer = document.getElementById('toast-container');
+    if (!toastContainer) {
+        toastContainer = document.createElement('div');
+        toastContainer.id = 'toast-container';
+        toastContainer.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+        `;
+        document.body.appendChild(toastContainer);
+    }
+
+    // Create toast element
+    const toast = document.createElement('div');
+    toast.className = `alert alert-${type === 'success' ? 'success' : type === 'error' ? 'danger' : 'info'} alert-dismissible fade show`;
+    toast.style.cssText = `
+        margin-bottom: 10px;
+        min-width: 300px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    `;
+    toast.innerHTML = `
+        <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-triangle' : 'info-circle'} me-2"></i>
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    `;
+
+    // Add to container
+    toastContainer.appendChild(toast);
+
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        if (toast.parentNode) {
+            toast.classList.remove('show');
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.parentNode.removeChild(toast);
+                }
+            }, 150);
+        }
+    }, 5000);
 }
 </script>
 {% endblock %}

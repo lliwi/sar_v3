@@ -28,10 +28,17 @@ class Role(db.Model):
             {'name': 'Validador', 'description': 'Validador de solicitudes de permisos'},
             {'name': 'Usuario', 'description': 'Usuario estándar del sistema'}
         ]
-        
-        for role_data in roles:
-            if not Role.query.filter_by(name=role_data['name']).first():
-                role = Role(**role_data)
-                db.session.add(role)
-        
-        db.session.commit()
+
+        try:
+            for role_data in roles:
+                existing_role = Role.query.filter_by(name=role_data['name']).first()
+                if not existing_role:
+                    role = Role(**role_data)
+                    db.session.add(role)
+
+            if db.session.new:  # Only commit if there are new objects
+                db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error creating default roles: {e}")
+            raise

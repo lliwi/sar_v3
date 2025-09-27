@@ -165,19 +165,49 @@ def create_app(config_name=None):
 
     # Create tables and default data only if needed
     with app.app_context():
-        # Only create tables if they don't exist (safer for production)
+        # Use database lock to prevent concurrent table creation
         try:
-            # Check if main table exists by trying to query it
+            # Check if tables exist using SQLAlchemy inspector
+            from sqlalchemy import inspect, text
+            inspector = inspect(db.engine)
+            existing_tables = inspector.get_table_names()
+
+            if 'roles' not in existing_tables:
+                # Try to acquire advisory lock to prevent concurrent creation
+                # This ensures only one process creates tables
+                with db.engine.connect() as conn:
+                    # PostgreSQL advisory lock (123456789 is our app-specific lock ID)
+                    lock_result = conn.execute(text("SELECT pg_try_advisory_lock(123456789)")).scalar()
+
+                    if lock_result:
+                        try:
+                            # Double-check tables don't exist (another process might have created them)
+                            inspector = inspect(db.engine)
+                            existing_tables = inspector.get_table_names()
+
+                            if 'roles' not in existing_tables:
+                                app.logger.info("Creating database tables...")
+                                db.create_all()
+                                app.logger.info("Database tables created successfully")
+                            else:
+                                app.logger.info("Tables already exist, skipping creation")
+                        finally:
+                            # Release the advisory lock
+                            conn.execute(text("SELECT pg_advisory_unlock(123456789)"))
+                    else:
+                        app.logger.info("Another process is creating tables, waiting...")
+                        # Wait for the other process to finish
+                        import time
+                        time.sleep(2)
+
+            # Ensure default roles exist (safe to run multiple times)
             from app.models import Role
-            Role.query.first()  # This will fail if table doesn't exist
-        except Exception:
-            # Tables don't exist, create them
-            db.create_all()
-            
-        # Ensure default roles exist (safe to run multiple times)
-        from app.models import Role
-        Role.create_default_roles()
-        
+            Role.create_default_roles()
+
+        except Exception as e:
+            app.logger.error(f"Error during database initialization: {e}")
+            # Don't fail the app startup, continue anyway
+
         # Scheduler is now handled by a separate standalone service
         # to avoid multi-process conflicts in Gunicorn
         app.logger.info("AD Synchronization handled by standalone scheduler service")

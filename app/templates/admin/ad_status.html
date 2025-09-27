@@ -1,0 +1,810 @@
+{% extends "base.html" %}
+
+{% block page_title %}Estado de Objetos AD{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h2 class="mb-0">Estado de Objetos AD</h2>
+                    <p class="text-muted">Usuarios y grupos no encontrados, con errores o deshabilitados en Active Directory</p>
+                </div>
+                <div>
+                    <a href="{{ url_for('admin.admin_dashboard') }}" class="btn btn-outline-secondary me-2">
+                        <i class="fas fa-arrow-left"></i> Volver al Dashboard
+                    </a>
+                    <a href="{{ url_for('admin.sync_users') }}" class="btn btn-primary me-2">
+                        <i class="fas fa-sync-alt"></i> Sincronizar Usuarios
+                    </a>
+                    <a href="{{ url_for('admin.sync_ad_groups') }}" class="btn btn-success">
+                        <i class="fas fa-sync-alt"></i> Sincronizar Grupos
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="row mb-4">
+        <div class="col-md-2">
+            <div class="card text-white bg-primary">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ status_counts.get('total', 0) }}</h4>
+                            <p class="mb-0">Total Objetos</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-list fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card text-white bg-info">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ status_counts.get('users', {}).get('total', 0) }}</h4>
+                            <p class="mb-0">Usuarios</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-users fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card text-white bg-secondary">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ status_counts.get('groups', {}).get('total', 0) }}</h4>
+                            <p class="mb-0">Grupos</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-users-cog fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card text-white bg-success">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ status_counts.get('active', 0) }}</h4>
+                            <p class="mb-0">Activos en AD</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-check-circle fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card text-white bg-danger">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ status_counts.get('problematic', 0) }}</h4>
+                            <p class="mb-0">Con Problemas</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-exclamation-triangle fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card text-white bg-warning">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ ((status_counts.get('active', 0) / status_counts.get('total', 1)) * 100)|round(1) }}%</h4>
+                            <p class="mb-0">Salud del AD</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-heartbeat fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search and Filters -->
+    <div class="row mb-3">
+        <div class="col-md-4">
+            <form method="GET" action="{{ url_for('admin.ad_status') }}" class="d-flex">
+                <input type="hidden" name="status" value="{{ status_filter }}">
+                <input type="hidden" name="type" value="{{ object_type }}">
+                <div class="input-group">
+                    <input type="text" class="form-control" name="search"
+                           placeholder="Buscar por nombre, email, descripción..."
+                           value="{{ search }}" id="searchInput">
+                    <button class="btn btn-outline-secondary" type="submit" title="Buscar">
+                        <i class="fas fa-search"></i>
+                    </button>
+                    {% if search %}
+                    <a href="{{ url_for('admin.ad_status', status=status_filter, type=object_type) }}"
+                       class="btn btn-outline-danger" title="Limpiar búsqueda">
+                        <i class="fas fa-times"></i>
+                    </a>
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+        <div class="col-md-4">
+            <div class="btn-group w-100" role="group" aria-label="Filtros de tipo de objeto">
+                <a href="{{ url_for('admin.ad_status', search=search, status=status_filter, type='all') }}"
+                   class="btn {% if object_type == 'all' %}btn-primary{% else %}btn-outline-primary{% endif %}">
+                    <i class="fas fa-list"></i> Todos
+                </a>
+                <a href="{{ url_for('admin.ad_status', search=search, status=status_filter, type='users') }}"
+                   class="btn {% if object_type == 'users' %}btn-info{% else %}btn-outline-info{% endif %}">
+                    <i class="fas fa-users"></i> Usuarios
+                </a>
+                <a href="{{ url_for('admin.ad_status', search=search, status=status_filter, type='groups') }}"
+                   class="btn {% if object_type == 'groups' %}btn-secondary{% else %}btn-outline-secondary{% endif %}">
+                    <i class="fas fa-users-cog"></i> Grupos
+                </a>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="btn-group w-100" role="group" aria-label="Filtros de estado AD">
+                <a href="{{ url_for('admin.ad_status', search=search, type=object_type, status='all') }}"
+                   class="btn {% if status_filter == 'all' %}btn-primary{% else %}btn-outline-primary{% endif %}">
+                    Todos
+                </a>
+                <a href="{{ url_for('admin.ad_status', search=search, type=object_type, status='problematic') }}"
+                   class="btn {% if status_filter == 'problematic' %}btn-danger{% else %}btn-outline-danger{% endif %}">
+                    Problemas
+                </a>
+                <a href="{{ url_for('admin.ad_status', search=search, type=object_type, status='active') }}"
+                   class="btn {% if status_filter == 'active' %}btn-success{% else %}btn-outline-success{% endif %}">
+                    Activos
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results Info -->
+    {% if search or status_filter != 'all' or object_type != 'all' %}
+    <div class="row mb-3">
+        <div class="col-12">
+            <div class="alert alert-info d-flex justify-content-between align-items-center">
+                <div>
+                    <i class="fas fa-filter me-2"></i>
+                    {% set total_results = objects.total if objects else 0 %}
+                    {% set type_text = 'objetos' if object_type == 'all' else ('usuarios' if object_type == 'users' else 'grupos') %}
+
+                    {% if search and status_filter != 'all' and object_type != 'all' %}
+                        Mostrando {{ total_results }} {{ type_text }} para <strong>"{{ search }}"</strong> con estado <strong>{{ status_filter }}</strong>
+                    {% elif search and status_filter != 'all' %}
+                        Mostrando {{ total_results }} resultados para <strong>"{{ search }}"</strong> con estado <strong>{{ status_filter }}</strong>
+                    {% elif search and object_type != 'all' %}
+                        Mostrando {{ total_results }} {{ type_text }} para <strong>"{{ search }}"</strong>
+                    {% elif status_filter != 'all' and object_type != 'all' %}
+                        Mostrando {{ total_results }} {{ type_text }} con estado <strong>{{ status_filter }}</strong>
+                    {% elif search %}
+                        Mostrando {{ total_results }} resultados para <strong>"{{ search }}"</strong>
+                    {% elif status_filter != 'all' %}
+                        Mostrando {{ total_results }} objetos con estado <strong>{{ status_filter }}</strong>
+                    {% elif object_type != 'all' %}
+                        Mostrando {{ total_results }} {{ type_text }}
+                    {% endif %}
+                </div>
+                <a href="{{ url_for('admin.ad_status') }}" class="btn btn-sm btn-outline-secondary">
+                    <i class="fas fa-times"></i> Limpiar filtros
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Objects Table -->
+    <div class="card">
+        <div class="card-body">
+            {% if objects.items %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Objeto</th>
+                                <th>Información</th>
+                                <th>Estado AD</th>
+                                <th>Última Verificación</th>
+                                <th>Errores Consecutivos</th>
+                                <th>Estado Sistema</th>
+                                <th>Recursos Afectados</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for obj in objects.items %}
+                            <tr class="{% if not obj.is_active %}table-warning{% endif %}">
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <div class="avatar avatar-sm me-2">
+                                            <span class="avatar-initial rounded-circle
+                                                {% if obj.ad_status == 'not_found' %}bg-danger
+                                                {% elif obj.ad_status == 'error' %}bg-warning
+                                                {% elif obj.ad_status == 'disabled' %}bg-secondary
+                                                {% else %}{% if obj.object_type == 'user' %}bg-primary{% else %}bg-info{% endif %}{% endif %}">
+                                                {% if obj.object_type == 'user' %}
+                                                    <i class="fas fa-user"></i>
+                                                {% else %}
+                                                    <i class="fas fa-users"></i>
+                                                {% endif %}
+                                            </span>
+                                        </div>
+                                        <div>
+                                            <strong>{{ obj.name }}</strong>
+                                            <br><small class="text-muted">
+                                                {% if obj.object_type == 'user' %}
+                                                    <i class="fas fa-user"></i> Usuario
+                                                {% else %}
+                                                    <i class="fas fa-users-cog"></i> Grupo AD
+                                                {% endif %}
+                                            </small>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div>
+                                        {% if obj.object_type == 'user' %}
+                                            <strong>{{ obj.display_name }}</strong><br>
+                                            {% if obj.email %}
+                                                <small class="text-muted">{{ obj.email }}</small><br>
+                                            {% endif %}
+                                            {% if obj.department %}
+                                                <span class="badge bg-info">{{ obj.department }}</span>
+                                            {% endif %}
+                                        {% else %}
+                                            <strong>{{ obj.display_name }}</strong><br>
+                                            <small class="text-muted">{{ obj.description }}</small>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="badge
+                                        {% if obj.ad_status == 'not_found' %}bg-danger
+                                        {% elif obj.ad_status == 'error' %}bg-warning
+                                        {% elif obj.ad_status == 'disabled' %}bg-secondary
+                                        {% else %}bg-success{% endif %}">
+                                        {{ obj.ad_status_display }}
+                                    </span>
+                                </td>
+                                <td>
+                                    {% if obj.ad_last_check %}
+                                        {% set check_date = obj.ad_last_check %}
+                                        {% if check_date is string %}
+                                            <small>{{ check_date.split('T')[0] + ' ' + check_date.split('T')[1][:5] if 'T' in check_date else check_date }}</small>
+                                        {% else %}
+                                            <small>{{ check_date.strftime('%d/%m/%Y %H:%M') if check_date else 'Nunca' }}</small>
+                                        {% endif %}
+                                    {% else %}
+                                        <small class="text-muted">Nunca</small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if obj.ad_error_count and obj.ad_error_count > 0 %}
+                                        <span class="badge bg-danger">{{ obj.ad_error_count }}</span>
+                                    {% else %}
+                                        <span class="text-muted">0</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if obj.is_active %}
+                                        <span class="badge bg-success">Activo</span>
+                                    {% else %}
+                                        <span class="badge bg-danger">Inactivo</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div class="d-flex flex-column">
+                                        {% if obj.object_type == 'user' %}
+                                            {% if obj.affected_resources.owned_folders > 0 %}
+                                                <small><i class="fas fa-crown text-warning"></i> <strong>{{ obj.affected_resources.owned_folders }}</strong> propietario</small>
+                                            {% endif %}
+                                            {% if obj.affected_resources.validated_folders > 0 %}
+                                                <small><i class="fas fa-check-circle text-success"></i> <strong>{{ obj.affected_resources.validated_folders }}</strong> validador</small>
+                                            {% endif %}
+                                            {% if obj.affected_resources.owned_folders == 0 and obj.affected_resources.validated_folders == 0 %}
+                                                <small class="text-muted">Sin carpetas</small>
+                                            {% endif %}
+                                        {% else %}
+                                            {% if obj.affected_resources.folders_with_permissions > 0 %}
+                                                <small><i class="fas fa-folder text-primary"></i> <strong>{{ obj.affected_resources.folders_with_permissions }}</strong> carpetas</small>
+                                            {% else %}
+                                                <small class="text-muted">Sin permisos</small>
+                                            {% endif %}
+                                        {% endif %}
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button type="button" class="btn btn-outline-info"
+                                                data-bs-toggle="modal"
+                                                data-bs-target="#detailModal{{ obj.id }}"
+                                                title="Ver detalles">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                        {% if obj.object_type == 'user' %}
+                                        <button type="button" class="btn btn-outline-primary"
+                                                onclick="recheckObjectAD('{{ obj.id }}', 'user')"
+                                                title="Reverificar en AD">
+                                            <i class="fas fa-sync-alt"></i>
+                                        </button>
+                                        {% if obj.id.split('_')[1]|int != current_user.id %}
+                                        <button type="button" class="btn btn-outline-{% if obj.is_active %}warning{% else %}success{% endif %}"
+                                                onclick="toggleObjectStatus('{{ obj.id }}', 'user', {{ obj.is_active|lower }})"
+                                                title="{% if obj.is_active %}Desactivar{% else %}Activar{% endif %} usuario">
+                                            {% if obj.is_active %}
+                                                <i class="fas fa-ban"></i>
+                                            {% else %}
+                                                <i class="fas fa-check"></i>
+                                            {% endif %}
+                                        </button>
+                                        {% endif %}
+                                        {% else %}
+                                        <button type="button" class="btn btn-outline-primary"
+                                                onclick="recheckObjectAD('{{ obj.id }}', 'group')"
+                                                title="Reverificar grupo en AD">
+                                            <i class="fas fa-sync-alt"></i>
+                                        </button>
+                                        <button type="button" class="btn btn-outline-{% if obj.is_active %}warning{% else %}success{% endif %}"
+                                                onclick="toggleObjectStatus('{{ obj.id }}', 'group', {{ obj.is_active|lower }})"
+                                                title="{% if obj.is_active %}Desactivar{% else %}Activar{% endif %} grupo">
+                                            {% if obj.is_active %}
+                                                <i class="fas fa-ban"></i>
+                                            {% else %}
+                                                <i class="fas fa-check"></i>
+                                            {% endif %}
+                                        </button>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                {% if objects.pages > 1 %}
+                <nav aria-label="Navegación de objetos AD" class="mt-3">
+                    <ul class="pagination justify-content-center">
+                        {% if objects.has_prev %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('admin.ad_status', page=objects.prev_num, status=status_filter, search=search, type=object_type) }}">
+                                    <i class="fas fa-chevron-left"></i>
+                                </a>
+                            </li>
+                        {% endif %}
+
+                        {% for page_num in objects.iter_pages() %}
+                            {% if page_num %}
+                                {% if page_num != objects.page %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('admin.ad_status', page=page_num, status=status_filter, search=search, type=object_type) }}">{{ page_num }}</a>
+                                    </li>
+                                {% else %}
+                                    <li class="page-item active">
+                                        <span class="page-link">{{ page_num }}</span>
+                                    </li>
+                                {% endif %}
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">...</span>
+                                </li>
+                            {% endif %}
+                        {% endfor %}
+
+                        {% if objects.has_next %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('admin.ad_status', page=objects.next_num, status=status_filter, search=search, type=object_type) }}">
+                                    <i class="fas fa-chevron-right"></i>
+                                </a>
+                            </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+                {% endif %}
+
+            {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
+                    <h5 class="text-success">¡Excelente!</h5>
+                    <p class="text-muted">No se encontraron usuarios con problemas en Active Directory</p>
+                    <a href="{{ url_for('admin.users') }}" class="btn btn-outline-primary">
+                        Ver todos los usuarios
+                    </a>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Detail Modals -->
+{% if objects and objects.items %}
+{% for obj in objects.items %}
+<div class="modal fade" id="detailModal{{ obj.id }}" tabindex="-1" aria-labelledby="detailModalLabel{{ obj.id }}" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="detailModalLabel{{ obj.id }}">
+                    {{ obj.display_name }} - Estado AD
+                    {% if obj.object_type == 'user' %}
+                        <span class="badge bg-info ms-2">Usuario</span>
+                    {% else %}
+                        <span class="badge bg-secondary ms-2">Grupo AD</span>
+                    {% endif %}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <!-- AD Status Information -->
+                <div class="alert alert-{% if obj.ad_status == 'not_found' %}danger{% elif obj.ad_status == 'error' %}warning{% elif obj.ad_status == 'disabled' %}secondary{% else %}success{% endif %}" role="alert">
+                    <h6 class="alert-heading">Estado en Active Directory</h6>
+                    <p class="mb-0">{{ obj.ad_status_display }}</p>
+                    {% if obj.ad_last_check %}
+                        <hr>
+                        <p class="mb-0"><small>Última verificación:
+                            {% set check_date = obj.ad_last_check %}
+                            {% if check_date is string %}
+                                {{ check_date.split('T')[0] + ' ' + check_date.split('T')[1][:8] if 'T' in check_date else check_date }}
+                            {% else %}
+                                {{ check_date.strftime('%d/%m/%Y %H:%M:%S') if check_date else 'Nunca' }}
+                            {% endif %}
+                        </small></p>
+                    {% endif %}
+                    {% if obj.ad_error_count and obj.ad_error_count > 0 %}
+                        <p class="mb-0"><small>Errores consecutivos: {{ obj.ad_error_count }}</small></p>
+                    {% endif %}
+                </div>
+
+                <!-- Object Basic Information -->
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>{% if obj.object_type == 'user' %}Usuario{% else %}Grupo{% endif %}:</strong>
+                        <p class="text-muted">{{ obj.name }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Estado del Sistema:</strong>
+                        <p class="text-muted">
+                            {% if obj.is_active %}
+                                <span class="badge bg-success">Activo</span>
+                            {% else %}
+                                <span class="badge bg-danger">Inactivo</span>
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+
+                {% if obj.object_type == 'user' %}
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Nombre Completo:</strong>
+                        <p class="text-muted">{{ obj.display_name }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Email:</strong>
+                        <p class="text-muted">{{ obj.email or 'Sin email' }}</p>
+                    </div>
+                </div>
+
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Departamento:</strong>
+                        <p class="text-muted">{{ obj.department or 'Sin asignar' }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Recursos:</strong>
+                        <p class="text-muted">
+                            {% if obj.affected_resources.owned_folders > 0 %}
+                                <span class="badge bg-warning">{{ obj.affected_resources.owned_folders }} propias</span>
+                            {% endif %}
+                            {% if obj.affected_resources.validated_folders > 0 %}
+                                <span class="badge bg-success">{{ obj.affected_resources.validated_folders }} valida</span>
+                            {% endif %}
+                            {% if obj.affected_resources.owned_folders == 0 and obj.affected_resources.validated_folders == 0 %}
+                                Sin carpetas asignadas
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+                {% else %}
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Descripción:</strong>
+                        <p class="text-muted">{{ obj.description or 'Sin descripción' }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Permisos:</strong>
+                        <p class="text-muted">
+                            {% if obj.affected_resources.folders_with_permissions > 0 %}
+                                <span class="badge bg-primary">{{ obj.affected_resources.folders_with_permissions }} carpetas</span>
+                            {% else %}
+                                Sin permisos asignados
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Synchronization Information -->
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Fecha de Creación:</strong>
+                        <p class="text-muted">
+                            {% set created_date = obj.created_at %}
+                            {% if created_date is string %}
+                                {{ created_date.split('T')[0] + ' ' + created_date.split('T')[1][:5] if 'T' in created_date else created_date }}
+                            {% else %}
+                                {{ created_date.strftime('%d/%m/%Y %H:%M') if created_date else 'Sin fecha' }}
+                            {% endif %}
+                        </p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Última Sincronización:</strong>
+                        <p class="text-muted">
+                            {% if obj.last_sync %}
+                                {% set sync_date = obj.last_sync %}
+                                {% if sync_date is string %}
+                                    {{ sync_date.split('T')[0] + ' ' + sync_date.split('T')[1][:5] if 'T' in sync_date else sync_date }}
+                                {% else %}
+                                    {{ sync_date.strftime('%d/%m/%Y %H:%M') if sync_date else 'Nunca' }}
+                                {% endif %}
+                            {% else %}
+                                Nunca sincronizado
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                <button type="button" class="btn btn-primary" onclick="recheckObjectAD('{{ obj.id }}', '{{ obj.object_type }}')">
+                    <i class="fas fa-sync-alt"></i> Reverificar AD
+                </button>
+                {% if obj.object_type == 'user' and obj.id.split('_')[1]|int != current_user.id %}
+                <button type="button" class="btn btn-{% if obj.is_active %}warning{% else %}success{% endif %}"
+                        onclick="toggleObjectStatus('{{ obj.id }}', '{{ obj.object_type }}', {{ obj.is_active|lower }})">
+                    {% if obj.is_active %}
+                        <i class="fas fa-ban"></i> Desactivar
+                    {% else %}
+                        <i class="fas fa-check"></i> Activar
+                    {% endif %}
+                </button>
+                {% elif obj.object_type == 'group' %}
+                <button type="button" class="btn btn-{% if obj.is_active %}warning{% else %}success{% endif %}"
+                        onclick="toggleObjectStatus('{{ obj.id }}', '{{ obj.object_type }}', {{ obj.is_active|lower }})">
+                    {% if obj.is_active %}
+                        <i class="fas fa-ban"></i> Desactivar
+                    {% else %}
+                        <i class="fas fa-check"></i> Activar
+                    {% endif %}
+                </button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+
+<style>
+.avatar {
+    width: 32px;
+    height: 32px;
+}
+
+.avatar-initial {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+}
+
+.table-warning {
+    background-color: rgba(255, 193, 7, 0.1);
+}
+</style>
+
+<script>
+// Enhanced search functionality
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('searchInput');
+    let searchTimeout;
+
+    // Auto-submit search form after 1 second of inactivity
+    if (searchInput) {
+        searchInput.addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                this.form.submit();
+            }, 1000);
+        });
+
+        // Submit immediately on Enter key
+        searchInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                clearTimeout(searchTimeout);
+                this.form.submit();
+            }
+        });
+    }
+
+    // Add loading states to action buttons
+    const actionButtons = document.querySelectorAll('.btn[onclick*="recheck"], .btn[onclick*="toggle"]');
+    actionButtons.forEach(button => {
+        const originalOnClick = button.getAttribute('onclick');
+        button.addEventListener('click', function() {
+            this.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            this.disabled = true;
+        });
+    });
+
+    // Refresh page every 30 seconds if viewing problematic users
+    const currentFilter = '{{ status_filter }}';
+    if (currentFilter === 'problematic' || currentFilter === 'error') {
+        setInterval(() => {
+            // Only refresh if user hasn't interacted recently
+            if (document.hasFocus() && !document.querySelector('.modal.show')) {
+                const now = new Date().getTime();
+                const lastActivity = localStorage.getItem('lastActivity') || now;
+                if (now - lastActivity > 30000) { // 30 seconds
+                    location.reload();
+                }
+            }
+        }, 30000);
+    }
+});
+
+// Track user activity
+document.addEventListener('click', () => {
+    localStorage.setItem('lastActivity', new Date().getTime());
+});
+
+function recheckObjectAD(objectId, objectType) {
+    const isUser = objectType === 'user';
+    const entityName = isUser ? 'usuario' : 'grupo';
+    const realId = objectId.split('_')[1];
+
+    if (confirm(`¿Reverificar el estado de este ${entityName} en Active Directory?`)) {
+        const button = event.target.closest('button');
+        const originalContent = button.innerHTML;
+
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        button.disabled = true;
+
+        const endpoint = isUser ? `/admin/users/${realId}/recheck-ad` : `/admin/groups/${realId}/recheck-ad`;
+
+        fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showToast(`Estado del ${entityName} actualizado: ${data.ad_status_display}`, 'success');
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showToast(`Error al reverificar ${entityName}: ` + data.message, 'error');
+                button.innerHTML = originalContent;
+                button.disabled = false;
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showToast(`Error al reverificar el estado del ${entityName}`, 'error');
+            button.innerHTML = originalContent;
+            button.disabled = false;
+        });
+    }
+}
+
+function toggleObjectStatus(objectId, objectType, isActive) {
+    const isUser = objectType === 'user';
+    const entityName = isUser ? 'usuario' : 'grupo';
+    const realId = objectId.split('_')[1];
+    const action = isActive ? 'desactivar' : 'activar';
+
+    if (confirm(`¿Estás seguro de que deseas ${action} este ${entityName}?`)) {
+        const button = event.target.closest('button');
+        const originalContent = button.innerHTML;
+
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        button.disabled = true;
+
+        const endpoint = isUser ? `/admin/users/${realId}/toggle` : `/admin/groups/${realId}/toggle`;
+
+        fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showToast(`${entityName.charAt(0).toUpperCase() + entityName.slice(1)} ${isActive ? 'desactivado' : 'activado'} exitosamente`, 'success');
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showToast(`Error al cambiar el estado del ${entityName}: ` + data.message, 'error');
+                button.innerHTML = originalContent;
+                button.disabled = false;
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showToast(`Error al cambiar el estado del ${entityName}`, 'error');
+            button.innerHTML = originalContent;
+            button.disabled = false;
+        });
+    }
+}
+
+// Simple toast notification function
+function showToast(message, type = 'info') {
+    // Create toast container if it doesn't exist
+    let toastContainer = document.getElementById('toast-container');
+    if (!toastContainer) {
+        toastContainer = document.createElement('div');
+        toastContainer.id = 'toast-container';
+        toastContainer.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+        `;
+        document.body.appendChild(toastContainer);
+    }
+
+    // Create toast element
+    const toast = document.createElement('div');
+    toast.className = `alert alert-${type === 'success' ? 'success' : type === 'error' ? 'danger' : 'info'} alert-dismissible fade show`;
+    toast.style.cssText = `
+        margin-bottom: 10px;
+        min-width: 300px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    `;
+    toast.innerHTML = `
+        <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-triangle' : 'info-circle'} me-2"></i>
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    `;
+
+    // Add to container
+    toastContainer.appendChild(toast);
+
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        if (toast.parentNode) {
+            toast.classList.remove('show');
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.parentNode.removeChild(toast);
+                }
+            }, 150);
+        }
+    }, 5000);
+}
+</script>
+{% endblock %}

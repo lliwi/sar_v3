@@ -164,26 +164,6 @@
             </div>
         </div>
 
-        <div class="col-md-2-4">
-            <div class="card text-white bg-danger">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between">
-                        <div>
-                            <h4 class="mb-0">{{ stats.problematic_users or 0 }}</h4>
-                            <p class="mb-0">Problemas AD</p>
-                        </div>
-                        <div class="align-self-center">
-                            <i class="fas fa-exclamation-triangle fa-2x"></i>
-                        </div>
-                    </div>
-                </div>
-                <div class="card-footer">
-                    <a href="{{ url_for('admin.users_ad_status') }}" class="text-white">
-                        <small><i class="fas fa-arrow-circle-right"></i> Ver problemas</small>
-                    </a>
-                </div>
-            </div>
-        </div>
     </div>
 
     <!-- Second Row of Statistics Cards -->
@@ -208,7 +188,7 @@
                 </div>
             </div>
         </div>
-        
+
         <div class="col-md-2-4">
             <div class="card text-white bg-warning">
                 <div class="card-body">
@@ -292,6 +272,27 @@
                 </div>
             </div>
         </div>
+
+        <div class="col-md-2-4">
+            <div class="card text-white bg-danger">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ stats.problematic_users or 0 }}</h4>
+                            <p class="mb-0">Problemas AD</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-exclamation-triangle fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <a href="{{ url_for('admin.ad_status') }}" class="text-white">
+                        <small><i class="fas fa-arrow-circle-right"></i> Ver problemas</small>
+                    </a>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Quick Actions -->
@@ -334,7 +335,7 @@
                             </a>
                         </div>
                         <div class="col-md-2-4">
-                            <a href="{{ url_for('admin.users_ad_status') }}" class="btn btn-outline-danger w-100 mb-2">
+                            <a href="{{ url_for('admin.ad_status') }}" class="btn btn-outline-danger w-100 mb-2">
                                 <i class="fas fa-exclamation-triangle me-2"></i>Problemas AD
                             </a>
                         </div>

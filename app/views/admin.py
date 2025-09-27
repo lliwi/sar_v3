@@ -1942,11 +1942,12 @@ def sync_memberships_optimized():
             'error': f'Error iniciando tarea optimizada: {str(e)}'
         }), 500
 
-@admin_bp.route('/users/ad-status', methods=['GET'])
+@admin_bp.route('/ad-status', methods=['GET'])
+@admin_bp.route('/users/ad-status', methods=['GET'])  # Keep old route for compatibility
 @login_required
 @admin_required
-def users_ad_status():
-    """View users with AD status issues"""
+def ad_status():
+    """View AD status for both users and groups"""
     import logging
     from sqlalchemy import or_
 
@@ -1955,34 +1956,151 @@ def users_ad_status():
     try:
         # Get query parameters
         status_filter = request.args.get('status', 'all')
+        search = request.args.get('search', '').strip()
+        object_type = request.args.get('type', 'all')  # all, users, groups
         page = int(request.args.get('page', 1))
         per_page = int(request.args.get('per_page', 50))
 
-        # Base query
-        query = User.query
+        # Prepare results
+        all_objects = []
 
-        # Apply status filter
-        if status_filter == 'problematic':
-            query = query.filter(User.ad_status.in_(['not_found', 'error', 'disabled']))
-        elif status_filter == 'not_found':
-            query = query.filter(User.ad_status == 'not_found')
-        elif status_filter == 'error':
-            query = query.filter(User.ad_status == 'error')
-        elif status_filter == 'disabled':
-            query = query.filter(User.ad_status == 'disabled')
-        elif status_filter == 'active':
-            query = query.filter(User.ad_status == 'active')
+        # Process Users
+        if object_type in ['all', 'users']:
+            user_query = User.query
 
-        # Order by last check date (most recent first), then by error count
-        query = query.order_by(User.ad_last_check.desc().nullslast(), User.ad_error_count.desc())
+            # Apply search filter for users
+            if search:
+                search_term = f'%{search}%'
+                user_query = user_query.filter(or_(
+                    User.username.ilike(search_term),
+                    User.full_name.ilike(search_term),
+                    User.email.ilike(search_term),
+                    User.department.ilike(search_term)
+                ))
 
-        # Paginate
-        users = query.paginate(
-            page=page, per_page=per_page, error_out=False
-        )
+            # Apply status filter for users
+            if status_filter == 'problematic':
+                user_query = user_query.filter(User.ad_status.in_(['not_found', 'error', 'disabled']))
+            elif status_filter == 'not_found':
+                user_query = user_query.filter(User.ad_status == 'not_found')
+            elif status_filter == 'error':
+                user_query = user_query.filter(User.ad_status == 'error')
+            elif status_filter == 'disabled':
+                user_query = user_query.filter(User.ad_status == 'disabled')
+            elif status_filter == 'active':
+                user_query = user_query.filter(User.ad_status == 'active')
+
+            # Get users and format
+            users = user_query.order_by(User.ad_last_check.desc().nullslast(), User.ad_error_count.desc()).all()
+            for user in users:
+                all_objects.append({
+                    'id': f'user_{user.id}',
+                    'object_type': 'user',
+                    'name': user.username,
+                    'display_name': user.full_name,
+                    'email': user.email,
+                    'department': user.department,
+                    'description': f'Departamento: {user.department or "Sin asignar"}',
+                    'is_active': user.is_active,
+                    'ad_status': user.ad_status,
+                    'ad_status_display': user.get_ad_status_display(),
+                    'ad_last_check': user.ad_last_check.isoformat() if user.ad_last_check else None,
+                    'ad_error_count': user.ad_error_count or 0,
+                    'last_sync': user.last_sync.isoformat() if user.last_sync else None,
+                    'created_at': user.created_at.isoformat() if user.created_at else None,
+                    'affected_resources': {
+                        'owned_folders': len(user.owned_folders) if hasattr(user, 'owned_folders') else 0,
+                        'validated_folders': len(user.validated_folders) if hasattr(user, 'validated_folders') else 0
+                    }
+                })
+
+        # Process Groups
+        if object_type in ['all', 'groups']:
+            group_query = ADGroup.query
+
+            # Apply search filter for groups
+            if search:
+                search_term = f'%{search}%'
+                group_query = group_query.filter(or_(
+                    ADGroup.name.ilike(search_term),
+                    ADGroup.description.ilike(search_term),
+                    ADGroup.distinguished_name.ilike(search_term)
+                ))
+
+            # Apply status filter for groups
+            if status_filter == 'problematic':
+                group_query = group_query.filter(ADGroup.ad_status.in_(['not_found', 'error', 'disabled']))
+            elif status_filter == 'not_found':
+                group_query = group_query.filter(ADGroup.ad_status == 'not_found')
+            elif status_filter == 'error':
+                group_query = group_query.filter(ADGroup.ad_status == 'error')
+            elif status_filter == 'disabled':
+                group_query = group_query.filter(ADGroup.ad_status == 'disabled')
+            elif status_filter == 'active':
+                group_query = group_query.filter(ADGroup.ad_status == 'active')
+
+            # Get groups and format
+            groups = group_query.order_by(ADGroup.ad_last_check.desc().nullslast(), ADGroup.ad_error_count.desc()).all()
+            for group in groups:
+                affected_folders = group.get_affected_folders()
+                all_objects.append({
+                    'id': f'group_{group.id}',
+                    'object_type': 'group',
+                    'name': group.name,
+                    'display_name': group.name,
+                    'email': None,
+                    'department': None,
+                    'description': group.description or f'DN: {group.distinguished_name}',
+                    'is_active': group.is_active,
+                    'ad_status': group.ad_status,
+                    'ad_status_display': group.get_ad_status_display(),
+                    'ad_last_check': group.ad_last_check.isoformat() if group.ad_last_check else None,
+                    'ad_error_count': group.ad_error_count or 0,
+                    'last_sync': group.last_sync.isoformat() if group.last_sync else None,
+                    'created_at': group.created_at.isoformat() if group.created_at else None,
+                    'affected_resources': {
+                        'folders_with_permissions': len(affected_folders)
+                    }
+                })
+
+        # Sort all objects by ad_last_check and ad_error_count
+        all_objects.sort(key=lambda x: (
+            x['ad_last_check'] is None,  # None values last
+            x['ad_last_check'] if x['ad_last_check'] is not None else '',
+            -(x['ad_error_count'] or 0)
+        ), reverse=True)
+
+        # Manual pagination
+        total_objects = len(all_objects)
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        paginated_objects = all_objects[start_idx:end_idx]
+
+        # Create pagination object-like structure
+        class PaginationResult:
+            def __init__(self, items, page, per_page, total):
+                self.items = items
+                self.page = page
+                self.per_page = per_page
+                self.total = total
+                self.pages = (total + per_page - 1) // per_page
+                self.has_prev = page > 1
+                self.has_next = page < self.pages
+                self.prev_num = page - 1 if self.has_prev else None
+                self.next_num = page + 1 if self.has_next else None
+
+            def iter_pages(self, left_edge=2, left_current=2, right_current=3, right_edge=2):
+                last = self.pages
+                for num in range(1, last + 1):
+                    if num <= left_edge or \
+                       (self.page - left_current - 1 < num < self.page + right_current) or \
+                       num > last - right_edge:
+                        yield num
+
+        objects_paginated = PaginationResult(paginated_objects, page, per_page, total_objects)
 
         # Get status counts for summary
-        status_counts = {
+        user_counts = {
             'total': User.query.count(),
             'active': User.query.filter(User.ad_status == 'active').count(),
             'not_found': User.query.filter(User.ad_status == 'not_found').count(),
@@ -1991,44 +2109,206 @@ def users_ad_status():
             'problematic': User.query.filter(User.ad_status.in_(['not_found', 'error', 'disabled'])).count()
         }
 
-        # Format users data
-        users_data = []
-        for user in users.items:
-            users_data.append({
-                'id': user.id,
-                'username': user.username,
-                'full_name': user.full_name,
-                'email': user.email,
-                'department': user.department,
-                'is_active': user.is_active,
-                'ad_status': user.ad_status,
-                'ad_status_display': user.get_ad_status_display(),
-                'ad_last_check': user.ad_last_check.isoformat() if user.ad_last_check else None,
-                'ad_error_count': user.ad_error_count or 0,
-                'last_sync': user.last_sync.isoformat() if user.last_sync else None,
-                'created_at': user.created_at.isoformat() if user.created_at else None
+        group_counts = {
+            'total': ADGroup.query.count(),
+            'active': ADGroup.query.filter(ADGroup.ad_status == 'active').count(),
+            'not_found': ADGroup.query.filter(ADGroup.ad_status == 'not_found').count(),
+            'error': ADGroup.query.filter(ADGroup.ad_status == 'error').count(),
+            'disabled': ADGroup.query.filter(ADGroup.ad_status == 'disabled').count(),
+            'problematic': ADGroup.query.filter(ADGroup.ad_status.in_(['not_found', 'error', 'disabled'])).count()
+        }
+
+        # Combined status counts
+        status_counts = {
+            'total': user_counts['total'] + group_counts['total'],
+            'active': user_counts['active'] + group_counts['active'],
+            'not_found': user_counts['not_found'] + group_counts['not_found'],
+            'error': user_counts['error'] + group_counts['error'],
+            'disabled': user_counts['disabled'] + group_counts['disabled'],
+            'problematic': user_counts['problematic'] + group_counts['problematic'],
+            'users': user_counts,
+            'groups': group_counts
+        }
+
+        # Check if it's an AJAX request or API call
+        if request.headers.get('Accept') == 'application/json' or request.args.get('format') == 'json':
+            return jsonify({
+                'success': True,
+                'objects': paginated_objects,
+                'pagination': {
+                    'page': objects_paginated.page,
+                    'pages': objects_paginated.pages,
+                    'per_page': objects_paginated.per_page,
+                    'total': objects_paginated.total,
+                    'has_next': objects_paginated.has_next,
+                    'has_prev': objects_paginated.has_prev
+                },
+                'status_counts': status_counts,
+                'current_filter': status_filter,
+                'object_type': object_type
             })
+
+        # Render HTML template for web interface
+        return render_template('admin/ad_status.html',
+                             objects=objects_paginated,
+                             status_counts=status_counts,
+                             status_filter=status_filter,
+                             search=search,
+                             object_type=object_type,
+                             total_count=status_counts.get('total', 0))
+
+    except Exception as e:
+        logger.error(f"❌ Error getting AD status: {str(e)}")
+
+        # Check if it's an AJAX request or API call
+        if request.headers.get('Accept') == 'application/json' or request.args.get('format') == 'json':
+            return jsonify({
+                'success': False,
+                'error': f'Error obteniendo estado AD: {str(e)}'
+            }), 500
+
+        # For HTML requests, render template with error
+        flash(f'Error al cargar los datos: {str(e)}', 'error')
+        return render_template('admin/ad_status.html',
+                             objects=None,
+                             status_counts={},
+                             status_filter='all',
+                             search='',
+                             object_type='all',
+                             total_count=0)
+
+@admin_bp.route('/groups/<int:group_id>/recheck-ad', methods=['POST'])
+@login_required
+@admin_required
+def recheck_group_ad_status(group_id):
+    """Recheck a specific group's AD status"""
+    try:
+        group = ADGroup.query.get_or_404(group_id)
+
+        # Use LDAP service to verify group exists
+        ldap_service = LDAPService()
+
+        try:
+            # Check if group exists in AD
+            conn = ldap_service.get_connection()
+            if not conn:
+                group.mark_ad_error()
+                db.session.commit()
+                return jsonify({
+                    'success': False,
+                    'message': 'No se pudo conectar a AD'
+                }), 500
+
+            # Search for the group
+            search_filter = f"(&(objectClass=group)(name={group.name}))"
+            conn.search(ldap_service.base_dn, search_filter, attributes=['cn', 'distinguishedName'])
+
+            if conn.entries:
+                # Group found
+                group.mark_ad_active()
+                db.session.commit()
+
+                AuditEvent.log_event(
+                    user=current_user,
+                    event_type='ad_check',
+                    action='recheck_group_status',
+                    resource_type='ad_group',
+                    resource_id=group_id,
+                    description=f'Grupo {group.name} verificado en AD: Activo',
+                    metadata={'group_name': group.name, 'ad_status': 'active'},
+                    ip_address=request.remote_addr,
+                    user_agent=request.headers.get('User-Agent')
+                )
+
+                return jsonify({
+                    'success': True,
+                    'ad_status': group.ad_status,
+                    'ad_status_display': group.get_ad_status_display(),
+                    'message': 'Grupo encontrado en AD'
+                })
+            else:
+                # Group not found
+                group.mark_ad_not_found()
+                db.session.commit()
+
+                AuditEvent.log_event(
+                    user=current_user,
+                    event_type='ad_check',
+                    action='recheck_group_status',
+                    resource_type='ad_group',
+                    resource_id=group_id,
+                    description=f'Grupo {group.name} verificado en AD: No encontrado',
+                    metadata={'group_name': group.name, 'ad_status': 'not_found'},
+                    ip_address=request.remote_addr,
+                    user_agent=request.headers.get('User-Agent')
+                )
+
+                return jsonify({
+                    'success': True,
+                    'ad_status': group.ad_status,
+                    'ad_status_display': group.get_ad_status_display(),
+                    'message': 'Grupo no encontrado en AD'
+                })
+
+        except Exception as ldap_error:
+            group.mark_ad_error()
+            db.session.commit()
+
+            return jsonify({
+                'success': False,
+                'message': f'Error al verificar grupo en AD: {str(ldap_error)}'
+            }), 500
+        finally:
+            if 'conn' in locals():
+                conn.unbind()
+
+    except Exception as e:
+        logger.error(f"Error rechecking group {group_id} AD status: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error interno: {str(e)}'
+        }), 500
+
+@admin_bp.route('/groups/<int:group_id>/toggle', methods=['POST'])
+@login_required
+@admin_required
+def toggle_group_status(group_id):
+    """Toggle a group's active status"""
+    try:
+        group = ADGroup.query.get_or_404(group_id)
+        old_status = group.is_active
+        group.is_active = not group.is_active
+
+        db.session.commit()
+
+        # Log audit event
+        AuditEvent.log_event(
+            user=current_user,
+            event_type='group_management',
+            action='toggle_status',
+            resource_type='ad_group',
+            resource_id=group_id,
+            description=f'Grupo {group.name} {"activado" if group.is_active else "desactivado"}',
+            metadata={
+                'group_name': group.name,
+                'old_status': old_status,
+                'new_status': group.is_active
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent')
+        )
 
         return jsonify({
             'success': True,
-            'users': users_data,
-            'pagination': {
-                'page': users.page,
-                'pages': users.pages,
-                'per_page': users.per_page,
-                'total': users.total,
-                'has_next': users.has_next,
-                'has_prev': users.has_prev
-            },
-            'status_counts': status_counts,
-            'current_filter': status_filter
+            'is_active': group.is_active,
+            'message': f'Grupo {"activado" if group.is_active else "desactivado"} exitosamente'
         })
 
     except Exception as e:
-        logger.error(f"❌ Error getting users AD status: {str(e)}")
+        logger.error(f"Error toggling group {group_id} status: {str(e)}")
         return jsonify({
             'success': False,
-            'error': f'Error obteniendo estado AD de usuarios: {str(e)}'
+            'message': f'Error al cambiar estado del grupo: {str(e)}'
         }), 500
 
 @admin_bp.route('/users/<int:user_id>/recheck-ad', methods=['POST'])
