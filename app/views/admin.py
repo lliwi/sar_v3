@@ -1225,6 +1225,9 @@ def active_permissions_report():
         # Sort by username then folder name for consistent pagination
         flat_permissions.sort(key=lambda x: (x['user'].username.lower(), x['folder'].name.lower()))
 
+        # Calculate total unique users before pagination
+        total_unique_users = len(permissions_by_user)
+
         # Calculate pagination for individual records
         total_records = len(flat_permissions)
         total_pages = (total_records + per_page - 1) // per_page
@@ -1276,6 +1279,7 @@ def active_permissions_report():
         return render_template('admin/active_permissions_report.html',
                              title='Permisos activos',
                              permissions_by_user=paginated_permissions_by_user,
+                             total_unique_users=total_unique_users,
                              approved_permissions=all_permissions,
                              all_folders=all_folders,
                              filters={'permission_type': permission_type},

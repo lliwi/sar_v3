@@ -39,7 +39,7 @@
             <div class="card permissions-card text-center">
                 <div class="card-body">
                     <i class="fas fa-users fa-2x mb-2"></i>
-                    <h4 class="card-title mb-0">{{ permissions_by_user|length }}</h4>
+                    <h4 class="card-title mb-0">{{ total_unique_users }}</h4>
                     <p class="card-text small">Usuarios con Permisos</p>
                 </div>
             </div>
@@ -159,7 +159,7 @@
             <div class="col-12 text-end">
                 <span class="text-muted">
                     <i class="fas fa-info-circle me-1"></i>
-                    {{ permissions_by_user|length }} usuario(s) con permisos activos | {{ approved_permissions|length }} permiso(s) total
+                    {{ total_unique_users }} usuario(s) con permisos activos | {{ approved_permissions|length }} permiso(s) total
                 </span>
             </div>
         </div>
@@ -174,7 +174,7 @@
                     {% if pagination %}
                     <small class="text-muted">
                         <i class="fas fa-info-circle me-1"></i>
-                        {{ pagination.total }} usuario(s) con permisos | 
+                        {{ total_unique_users }} usuario(s) con permisos |
                         {{ approved_permissions|length }} permiso(s) total
                         {% if pagination.pages > 1 %}
                             | Página {{ pagination.page }} de {{ pagination.pages }}
