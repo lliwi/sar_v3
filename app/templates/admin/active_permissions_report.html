@@ -48,7 +48,7 @@
             <div class="card permissions-card text-center">
                 <div class="card-body">
                     <i class="fas fa-check-circle fa-2x mb-2"></i>
-                    <h4 class="card-title mb-0">{{ approved_permissions|length }}</h4>
+                    <h4 class="card-title mb-0">{{ total_active_permissions }}</h4>
                     <p class="card-text small">Permisos Activos</p>
                 </div>
             </div>
@@ -57,17 +57,7 @@
             <div class="card permissions-card text-center">
                 <div class="card-body">
                     <i class="fas fa-folder fa-2x mb-2"></i>
-                    <h4 class="card-title mb-0">
-                        {% set unique_folders = [] %}
-                        {% for user_data in permissions_by_user.values() %}
-                            {% for folder_data in user_data.folders.values() %}
-                                {% if folder_data.folder.id not in unique_folders %}
-                                    {% set _ = unique_folders.append(folder_data.folder.id) %}
-                                {% endif %}
-                            {% endfor %}
-                        {% endfor %}
-                        {{ unique_folders|length }}
-                    </h4>
+                    <h4 class="card-title mb-0">{{ total_unique_folders }}</h4>
                     <p class="card-text small">Carpetas con usuarios</p>
                 </div>
             </div>
@@ -76,15 +66,7 @@
             <div class="card permissions-card text-center">
                 <div class="card-body">
                     <i class="fas fa-shield-alt fa-2x mb-2"></i>
-                    <h4 class="card-title mb-0">
-                        {% set unique_groups = [] %}
-                        {% for permission in approved_permissions %}
-                            {% if permission.ad_group and permission.ad_group.name not in unique_groups %}
-                                {% set _ = unique_groups.append(permission.ad_group.name) %}
-                            {% endif %}
-                        {% endfor %}
-                        {{ unique_groups|length }}
-                    </h4>
+                    <h4 class="card-title mb-0">{{ total_unique_ad_groups }}</h4>
                     <p class="card-text small">Grupos AD Utilizados</p>
                 </div>
             </div>
@@ -159,7 +141,7 @@
             <div class="col-12 text-end">
                 <span class="text-muted">
                     <i class="fas fa-info-circle me-1"></i>
-                    {{ total_unique_users }} usuario(s) con permisos activos | {{ approved_permissions|length }} permiso(s) total
+                    {{ total_unique_users }} usuario(s) con permisos activos | {{ total_active_permissions }} permiso(s) total
                 </span>
             </div>
         </div>
@@ -175,7 +157,7 @@
                     <small class="text-muted">
                         <i class="fas fa-info-circle me-1"></i>
                         {{ total_unique_users }} usuario(s) con permisos |
-                        {{ approved_permissions|length }} permiso(s) total
+                        {{ total_active_permissions }} permiso(s) total
                         {% if pagination.pages > 1 %}
                             | Página {{ pagination.page }} de {{ pagination.pages }}
                         {% endif %}

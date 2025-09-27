@@ -1070,8 +1070,10 @@ def permissions_report():
     from datetime import datetime
     
     # Get filter parameters
-    folder_id = request.args.get('folder_id', '').strip()
-    group_id = request.args.get('group_id', '').strip()
+    folder_id_raw = request.args.get('folder_id', '')
+    folder_id = str(folder_id_raw).strip() if folder_id_raw else ''
+    group_id_raw = request.args.get('group_id', '')
+    group_id = str(group_id_raw).strip() if group_id_raw else ''
     folder_search = request.args.get('folder_search', '').strip()
     group_search = request.args.get('group_search', '').strip()
     permission_type = request.args.get('permission_type', 'all')
@@ -1081,11 +1083,11 @@ def permissions_report():
     query = FolderPermission.query.join(Folder).join(ADGroup)
     
     # Filter by specific folder
-    if folder_id and folder_id.isdigit():
+    if folder_id and str(folder_id).isdigit():
         query = query.filter(Folder.id == int(folder_id))
     
     # Filter by specific group
-    if group_id and group_id.isdigit():
+    if group_id and str(group_id).isdigit():
         query = query.filter(ADGroup.id == int(group_id))
     
     # Filter by permission type
@@ -1127,7 +1129,8 @@ def active_permissions_report():
     
     try:
         # Get filter parameters
-        folder_id = request.args.get('folder_id', '').strip()
+        folder_id_raw = request.args.get('folder_id', '')
+        folder_id = str(folder_id_raw).strip() if folder_id_raw else ''
         user_search = request.args.get('user_search', '').strip()
         permission_type = request.args.get('permission_type', 'all')
         
@@ -1142,7 +1145,7 @@ def active_permissions_report():
         query = PermissionRequest.query.filter_by(status='approved')
         
         # Apply filters
-        if folder_id and folder_id.isdigit():
+        if folder_id and str(folder_id).isdigit():
             query = query.filter(PermissionRequest.folder_id == int(folder_id))
         
         if permission_type and permission_type != 'all':
@@ -1207,7 +1210,7 @@ def active_permissions_report():
         )
         
         # Apply filters at database level
-        if folder_id and folder_id.isdigit():
+        if folder_id and str(folder_id).isdigit():
             membership_permissions_query = membership_permissions_query.filter(
                 Folder.id == int(folder_id)
             )
@@ -1294,7 +1297,100 @@ def active_permissions_report():
         # Sort by username then folder name for consistent pagination
         flat_permissions.sort(key=lambda x: (x['user'].username.lower(), x['folder'].name.lower()))
 
-        # Calculate total unique users before pagination
+        # =================================================================
+        # GLOBAL CARD CALCULATIONS (WITHOUT ANY FILTERS)
+        # =================================================================
+
+        # Global calculation: Total unique users with ANY active permissions
+        global_users_query = db.session.query(User.id).distinct().join(
+            UserADGroupMembership, User.id == UserADGroupMembership.user_id
+        ).join(
+            ADGroup, UserADGroupMembership.ad_group_id == ADGroup.id
+        ).join(
+            FolderPermission, ADGroup.id == FolderPermission.ad_group_id
+        ).join(
+            Folder, FolderPermission.folder_id == Folder.id
+        ).filter(
+            UserADGroupMembership.is_active == True,
+            FolderPermission.is_active == True,
+            Folder.is_active == True
+        )
+
+        # Also include users from approved requests
+        users_from_requests_query = db.session.query(PermissionRequest.requester_id).distinct().filter(
+            PermissionRequest.status == 'approved'
+        )
+
+        global_users_from_memberships = set(user_id[0] for user_id in global_users_query.all())
+        global_users_from_requests = set(user_id[0] for user_id in users_from_requests_query.all())
+        global_total_unique_users = len(global_users_from_memberships | global_users_from_requests)
+
+        # Global calculation: Total unique folders with ANY active permissions
+        global_folders_query = db.session.query(Folder.id).distinct().join(
+            FolderPermission, Folder.id == FolderPermission.folder_id
+        ).join(
+            ADGroup, FolderPermission.ad_group_id == ADGroup.id
+        ).join(
+            UserADGroupMembership, ADGroup.id == UserADGroupMembership.ad_group_id
+        ).filter(
+            UserADGroupMembership.is_active == True,
+            FolderPermission.is_active == True,
+            Folder.is_active == True
+        )
+
+        # Also include folders from approved requests
+        folders_from_requests_query = db.session.query(PermissionRequest.folder_id).distinct().filter(
+            PermissionRequest.status == 'approved'
+        )
+
+        global_folders_from_memberships = set(folder_id[0] for folder_id in global_folders_query.all())
+        global_folders_from_requests = set(folder_id[0] for folder_id in folders_from_requests_query.all() if folder_id[0] is not None)
+        global_total_unique_folders = len(global_folders_from_memberships | global_folders_from_requests)
+
+        # Global calculation: Total unique AD groups used
+        global_ad_groups_query = db.session.query(ADGroup.id).distinct().join(
+            FolderPermission, ADGroup.id == FolderPermission.ad_group_id
+        ).join(
+            UserADGroupMembership, ADGroup.id == UserADGroupMembership.ad_group_id
+        ).filter(
+            UserADGroupMembership.is_active == True,
+            FolderPermission.is_active == True
+        )
+
+        # Also include AD groups from approved requests
+        ad_groups_from_requests_query = db.session.query(PermissionRequest.ad_group_id).distinct().filter(
+            PermissionRequest.status == 'approved',
+            PermissionRequest.ad_group_id.isnot(None)
+        )
+
+        global_ad_groups_from_memberships = set(ad_group_id[0] for ad_group_id in global_ad_groups_query.all())
+        global_ad_groups_from_requests = set(ad_group_id[0] for ad_group_id in ad_groups_from_requests_query.all())
+        global_total_unique_ad_groups = len(global_ad_groups_from_memberships | global_ad_groups_from_requests)
+
+        # Global calculation: Total active permissions count
+        global_membership_permissions_count = db.session.query(UserADGroupMembership).join(
+            ADGroup, UserADGroupMembership.ad_group_id == ADGroup.id
+        ).join(
+            FolderPermission, ADGroup.id == FolderPermission.ad_group_id
+        ).join(
+            Folder, FolderPermission.folder_id == Folder.id
+        ).filter(
+            UserADGroupMembership.is_active == True,
+            FolderPermission.is_active == True,
+            Folder.is_active == True
+        ).count()
+
+        global_approved_requests_count = db.session.query(PermissionRequest).filter(
+            PermissionRequest.status == 'approved'
+        ).count()
+
+        global_total_active_permissions = global_membership_permissions_count + global_approved_requests_count
+
+        # =================================================================
+        # FILTERED CALCULATIONS (FOR DISPLAY DATA AND PAGINATION)
+        # =================================================================
+
+        # Calculate total unique users before pagination (filtered)
         total_unique_users = len(permissions_by_user)
 
         # Calculate pagination for individual records
@@ -1318,7 +1414,7 @@ def active_permissions_report():
             permission = record['permission']
 
             user_id = user.id
-            folder_id = folder.id
+            current_folder_id = folder.id
 
             if user_id not in paginated_permissions_by_user:
                 paginated_permissions_by_user[user_id] = {
@@ -1326,13 +1422,13 @@ def active_permissions_report():
                     'folders': {}
                 }
 
-            if folder_id not in paginated_permissions_by_user[user_id]['folders']:
-                paginated_permissions_by_user[user_id]['folders'][folder_id] = {
+            if current_folder_id not in paginated_permissions_by_user[user_id]['folders']:
+                paginated_permissions_by_user[user_id]['folders'][current_folder_id] = {
                     'folder': folder,
                     'permissions': []
                 }
 
-            paginated_permissions_by_user[user_id]['folders'][folder_id]['permissions'].append(permission)
+            paginated_permissions_by_user[user_id]['folders'][current_folder_id]['permissions'].append(permission)
 
         pagination = {
             'page': page,
@@ -1344,11 +1440,15 @@ def active_permissions_report():
             'prev_num': prev_num,
             'next_num': next_num
         }
-        
+
+
         return render_template('admin/active_permissions_report.html',
                              title='Permisos activos',
                              permissions_by_user=paginated_permissions_by_user,
-                             total_unique_users=total_unique_users,
+                             total_unique_users=global_total_unique_users,
+                             total_unique_folders=global_total_unique_folders,
+                             total_unique_ad_groups=global_total_unique_ad_groups,
+                             total_active_permissions=global_total_active_permissions,
                              approved_permissions=all_permissions,
                              all_folders=all_folders,
                              filters={'permission_type': permission_type},
@@ -1380,7 +1480,8 @@ def active_permissions_export():
 
     try:
         # Get filter parameters (same as the main report)
-        folder_id = request.args.get('folder_id', '').strip()
+        folder_id_raw = request.args.get('folder_id', '')
+        folder_id = str(folder_id_raw).strip() if folder_id_raw else ''
         user_search = request.args.get('user_search', '').strip()
         permission_type = request.args.get('permission_type', 'all')
 
@@ -1391,7 +1492,7 @@ def active_permissions_export():
         query = PermissionRequest.query.filter_by(status='approved')
 
         # Apply filters
-        if folder_id and folder_id.isdigit():
+        if folder_id and str(folder_id).isdigit():
             query = query.filter(PermissionRequest.folder_id == int(folder_id))
 
         if permission_type and permission_type != 'all':
@@ -1453,7 +1554,7 @@ def active_permissions_export():
         )
 
         # Apply filters at database level
-        if folder_id and folder_id.isdigit():
+        if folder_id and str(folder_id).isdigit():
             membership_permissions_query = membership_permissions_query.filter(
                 Folder.id == int(folder_id)
             )
@@ -1666,10 +1767,10 @@ def validate_ad():
         ldap_service = LDAPService()
         
         if validation_type == 'folders':
-            folder_id = int(target_id) if target_id and target_id.isdigit() else None
+            folder_id = int(target_id) if target_id and str(target_id).isdigit() else None
             results = ldap_service.validate_folder_permissions(folder_id)
         elif validation_type == 'users':
-            user_id = int(target_id) if target_id and target_id.isdigit() else None
+            user_id = int(target_id) if target_id and str(target_id).isdigit() else None
             results = ldap_service.validate_user_groups(user_id)
         else:
             flash('Tipo de validación no válido', 'error')
