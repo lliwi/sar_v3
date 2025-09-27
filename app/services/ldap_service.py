@@ -523,7 +523,7 @@ class LDAPService:
                     ad_group.description = description
                     ad_group.group_type = group_type
                     ad_group.last_sync = current_time
-                    ad_group.is_active = True
+                    ad_group.mark_ad_active()  # This sets is_active=True AND ad_status='active'
                 else:
                     # Create new group only if it doesn't exist by name or DN
                     ad_group = ADGroup(
@@ -559,7 +559,7 @@ class LDAPService:
                 
                 inactive_count = 0
                 for group in old_groups:
-                    group.is_active = False
+                    group.mark_ad_not_found()  # This marks as not_found AND inactive
                     inactive_count += 1
                     
                     if inactive_count % batch_size == 0:

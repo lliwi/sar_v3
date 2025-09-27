@@ -41,16 +41,18 @@ class ADGroup(db.Model):
         return status_map.get(self.ad_status, self.ad_status)
 
     def mark_ad_active(self):
-        """Mark group as active in AD"""
+        """Mark group as active in AD and reactivate if needed"""
         self.ad_status = 'active'
         self.ad_last_check = datetime.utcnow()
         self.ad_error_count = 0
+        self.is_active = True  # Reactivate group when found in AD
 
     def mark_ad_not_found(self):
-        """Mark group as not found in AD"""
+        """Mark group as not found in AD and set as inactive"""
         self.ad_status = 'not_found'
         self.ad_last_check = datetime.utcnow()
         self.ad_error_count = (self.ad_error_count or 0) + 1
+        self.is_active = False  # Deactivate group when not found in AD
 
     def mark_ad_error(self):
         """Mark group as having AD verification error"""

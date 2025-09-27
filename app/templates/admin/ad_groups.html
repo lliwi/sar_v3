@@ -134,6 +134,11 @@
                                                 <i class="fas fa-check"></i>
                                             {% endif %}
                                         </button>
+                                        <button type="button" class="btn btn-outline-danger"
+                                                onclick="deleteGroup({{ group.id }}, '{{ group.name }}')"
+                                                title="Eliminar grupo de la base de datos">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
                                     </div>
                                 </td>
                             </tr>
@@ -308,6 +313,9 @@
                 <button type="button" class="btn btn-warning" onclick="syncSingleGroup({{ group.id }})">
                     <i class="fas fa-sync"></i> Sincronizar
                 </button>
+                <button type="button" class="btn btn-danger" onclick="deleteGroup({{ group.id }}, '{{ group.name }}')">
+                    <i class="fas fa-trash"></i> Eliminar
+                </button>
             </div>
         </div>
     </div>
@@ -365,6 +373,34 @@ function toggleGroupStatus(groupId, isActive) {
             console.error('Error:', error);
             alert('Error al cambiar el estado del grupo');
         });
+    }
+}
+
+function deleteGroup(groupId, groupName) {
+    if (confirm(`¿Estás seguro de que deseas ELIMINAR PERMANENTEMENTE el grupo "${groupName}" de la base de datos?\n\n⚠️ ADVERTENCIA: Esta acción NO se puede deshacer. El grupo y todos sus datos asociados serán eliminados permanentemente.\n\nSolo procede si estás completamente seguro.`)) {
+        // Double confirmation for critical action
+        if (confirm(`CONFIRMACIÓN FINAL:\n\n¿Realmente quieres eliminar "${groupName}"?\n\nEsta es tu última oportunidad para cancelar.`)) {
+            fetch(`/admin/ad-groups/${groupId}/delete`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token() }}'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('✅ ' + data.message);
+                    location.reload();
+                } else {
+                    alert('❌ Error: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('❌ Error al eliminar el grupo');
+            });
+        }
     }
 }
 

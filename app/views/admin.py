@@ -954,6 +954,75 @@ def toggle_ad_group_status(group_id):
             'message': f'Error al cambiar el estado: {str(e)}'
         }), 500
 
+@admin_bp.route('/ad-groups/<int:group_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def delete_ad_group(group_id):
+    """Delete AD group from database"""
+    try:
+        ad_group = ADGroup.query.get_or_404(group_id)
+        group_name = ad_group.name
+
+        # Check if group has active permissions
+        active_permissions = FolderPermission.query.filter_by(
+            ad_group_id=group_id,
+            is_active=True
+        ).count()
+
+        if active_permissions > 0:
+            return jsonify({
+                'success': False,
+                'message': f'No se puede eliminar el grupo. Tiene {active_permissions} permiso(s) activo(s) asignado(s). Desactívelos primero.'
+            }), 400
+
+        # Check if group has active memberships
+        from app.models.user_ad_group import UserADGroupMembership
+        active_memberships = UserADGroupMembership.query.filter_by(
+            ad_group_id=group_id,
+            is_active=True
+        ).count()
+
+        if active_memberships > 0:
+            return jsonify({
+                'success': False,
+                'message': f'No se puede eliminar el grupo. Tiene {active_memberships} miembro(s) activo(s). Elimine las membresías primero.'
+            }), 400
+
+        # Log audit event before deletion
+        AuditEvent.log_event(
+            user=current_user,
+            event_type='ad_group_management',
+            action='delete',
+            resource_type='ad_group',
+            resource_id=group_id,
+            description=f'Grupo AD eliminado de la base de datos: {group_name}',
+            metadata={
+                'group_id': group_id,
+                'group_name': group_name,
+                'distinguished_name': ad_group.distinguished_name,
+                'deletion_reason': 'Manual deletion from admin interface'
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent')
+        )
+
+        # Delete the group
+        db.session.delete(ad_group)
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': f'Grupo {group_name} eliminado correctamente de la base de datos'
+        })
+
+    except Exception as e:
+        logger.error(f"Error deleting group {group_id}: {str(e)}")
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'message': f'Error al eliminar el grupo: {str(e)}'
+        }), 500
+
 # Audit and Reports
 @admin_bp.route('/audit')
 @login_required
