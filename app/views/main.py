@@ -113,10 +113,23 @@ def dashboard():
         logging.error(f"Error getting user groups for dashboard stats for {current_user.username}: {e}")
         user_permissions_count = 0
 
+    # Calculate user's managed resources (owned + validated folders)
+    owned_folders = current_user.owned_folders
+    validated_folders = current_user.validated_folders
+
+    # Combine and remove duplicates while preserving folder objects
+    all_managed_folders = list(owned_folders)
+    for folder in validated_folders:
+        if folder not in all_managed_folders:
+            all_managed_folders.append(folder)
+
+    # Filter only active folders
+    managed_folders_count = len([f for f in all_managed_folders if f.is_active])
+
     stats = {
         'pending_requests': len(pending_requests),
         'validation_requests': len(validation_requests),
-        'total_folders': Folder.query.filter_by(is_active=True).count(),
+        'my_resources': managed_folders_count,
         'user_permissions': user_permissions_count
     }
     
