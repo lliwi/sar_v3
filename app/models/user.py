@@ -35,6 +35,9 @@ class User(UserMixin, db.Model):
     # Possible values: 'active', 'not_found', 'error', 'disabled'
     ad_last_check = db.Column(db.DateTime)  # Last time AD status was checked
     ad_error_count = db.Column(db.Integer, default=0, nullable=False, server_default='0')  # Consecutive errors
+    ad_acknowledged = db.Column(db.Boolean, default=False, nullable=False, server_default='false')  # Issue acknowledged by admin
+    ad_acknowledged_at = db.Column(db.DateTime)  # When the issue was acknowledged
+    ad_acknowledged_by = db.Column(db.Integer, db.ForeignKey('users.id'))  # Who acknowledged the issue
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -46,6 +49,7 @@ class User(UserMixin, db.Model):
                                    backref=db.backref('owners', lazy=True))
     validated_folders = db.relationship('Folder', secondary=folder_validators, lazy='subquery',
                                        backref=db.backref('validators', lazy=True))
+    acknowledged_by_user = db.relationship('User', remote_side=[id], backref='acknowledged_users')
     
     def __repr__(self):
         return f'<User {self.username}>'
@@ -62,6 +66,8 @@ class User(UserMixin, db.Model):
         self.ad_last_check = datetime.utcnow()
         self.ad_error_count = (self.ad_error_count or 0) + 1
         self.is_active = False  # Deactivate user when not found in AD
+        # Reset acknowledgment when status changes
+        self.unacknowledge_ad_issue()
 
     def mark_ad_active(self):
         """Mark user as active in AD and reactivate if needed"""
@@ -70,22 +76,44 @@ class User(UserMixin, db.Model):
         self.ad_error_count = 0
         self.last_sync = datetime.utcnow()
         self.is_active = True  # Reactivate user when found in AD
+        # Reset acknowledgment when user becomes active
+        self.unacknowledge_ad_issue()
 
     def mark_ad_error(self):
         """Mark user as having AD lookup error"""
         self.ad_status = 'error'
         self.ad_last_check = datetime.utcnow()
         self.ad_error_count = (self.ad_error_count or 0) + 1
+        # Reset acknowledgment when status changes
+        self.unacknowledge_ad_issue()
 
     def mark_ad_disabled(self):
         """Mark user as disabled in AD"""
         self.ad_status = 'disabled'
         self.ad_last_check = datetime.utcnow()
         self.is_active = False
+        # Reset acknowledgment when status changes
+        self.unacknowledge_ad_issue()
 
-    def is_ad_problematic(self):
+    def is_ad_problematic(self, include_acknowledged=True):
         """Check if user has AD issues"""
-        return self.ad_status in ['not_found', 'error', 'disabled']
+        has_issues = self.ad_status in ['not_found', 'error', 'disabled']
+        if not include_acknowledged and has_issues:
+            return not self.ad_acknowledged
+        return has_issues
+
+    def acknowledge_ad_issue(self, acknowledged_by_user):
+        """Acknowledge the AD issue"""
+        if self.is_ad_problematic():
+            self.ad_acknowledged = True
+            self.ad_acknowledged_at = datetime.utcnow()
+            self.ad_acknowledged_by = acknowledged_by_user.id
+
+    def unacknowledge_ad_issue(self):
+        """Remove acknowledgment of AD issue"""
+        self.ad_acknowledged = False
+        self.ad_acknowledged_at = None
+        self.ad_acknowledged_by = None
 
     def get_ad_status_display(self):
         """Get human-readable AD status"""
@@ -95,7 +123,10 @@ class User(UserMixin, db.Model):
             'error': 'Error de consulta AD',
             'disabled': 'Deshabilitado en AD'
         }
-        return status_map.get(self.ad_status, 'Estado desconocido')
+        base_status = status_map.get(self.ad_status, 'Estado desconocido')
+        if self.ad_acknowledged and self.is_ad_problematic():
+            base_status += ' (Reconocido)'
+        return base_status
     
     def can_validate_folder(self, folder):
         return self.is_admin() or self in folder.owners or self in folder.validators

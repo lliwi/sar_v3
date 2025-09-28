@@ -86,6 +86,83 @@ def init_database():
         except Exception as e:
             print(f"⚠ Warning: Could not verify/add deletion_in_progress column: {e}")
 
+        # Ensure acknowledge columns exist in users table
+        print("Verifying users table acknowledge schema...")
+        try:
+            from sqlalchemy import text
+
+            # First check if users table exists
+            table_check = db.session.execute(text("""
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_name = 'users'
+            """))
+            table_exists = table_check.fetchone()
+
+            if table_exists:
+                acknowledge_columns = ['ad_acknowledged', 'ad_acknowledged_at', 'ad_acknowledged_by']
+
+                for column in acknowledge_columns:
+                    # Check if column exists
+                    result = db.session.execute(text(f"""
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_name = 'users'
+                        AND column_name = '{column}'
+                    """))
+                    column_exists = result.fetchone()
+
+                    if not column_exists:
+                        print(f"Adding {column} column to users table...")
+                        if column == 'ad_acknowledged':
+                            db.session.execute(text("""
+                                ALTER TABLE users
+                                ADD COLUMN ad_acknowledged BOOLEAN NOT NULL DEFAULT FALSE
+                            """))
+                        elif column == 'ad_acknowledged_at':
+                            db.session.execute(text("""
+                                ALTER TABLE users
+                                ADD COLUMN ad_acknowledged_at TIMESTAMP
+                            """))
+                        elif column == 'ad_acknowledged_by':
+                            db.session.execute(text("""
+                                ALTER TABLE users
+                                ADD COLUMN ad_acknowledged_by INTEGER
+                            """))
+                        print(f"✓ {column} column added successfully")
+                    else:
+                        print(f"✓ {column} column already exists")
+
+                # Add foreign key constraint for ad_acknowledged_by if it doesn't exist
+                try:
+                    fk_check = db.session.execute(text("""
+                        SELECT conname
+                        FROM pg_constraint
+                        WHERE conname = 'fk_users_ad_acknowledged_by'
+                        AND conrelid = 'users'::regclass
+                    """))
+                    fk_exists = fk_check.fetchone()
+
+                    if not fk_exists:
+                        print("Adding foreign key constraint for ad_acknowledged_by...")
+                        db.session.execute(text("""
+                            ALTER TABLE users
+                            ADD CONSTRAINT fk_users_ad_acknowledged_by
+                            FOREIGN KEY (ad_acknowledged_by) REFERENCES users(id) ON DELETE SET NULL
+                        """))
+                        print("✓ Foreign key constraint added successfully")
+                    else:
+                        print("✓ Foreign key constraint already exists")
+                except Exception as fk_error:
+                    print(f"⚠ Warning: Could not add foreign key constraint: {fk_error}")
+
+                db.session.commit()
+            else:
+                print("ℹ users table will be created by db.create_all() with all fields")
+
+        except Exception as e:
+            print(f"⚠ Warning: Could not verify/add acknowledge columns: {e}")
+
         # Create default roles
         print("Creating default roles...")
         Role.create_default_roles()

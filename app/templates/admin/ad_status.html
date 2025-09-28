@@ -105,6 +105,21 @@
             </div>
         </div>
         <div class="col-md-2">
+            <div class="card text-white bg-secondary">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4 class="mb-0">{{ status_counts.get('acknowledged', 0) }}</h4>
+                            <p class="mb-0">Reconocidos</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-check-circle fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
             <div class="card text-white bg-warning">
                 <div class="card-body">
                     <div class="d-flex justify-content-between">
@@ -168,6 +183,10 @@
                 <a href="{{ url_for('admin.ad_status', search=search, type=object_type, status='problematic') }}"
                    class="btn {% if status_filter == 'problematic' %}btn-danger{% else %}btn-outline-danger{% endif %}">
                     Problemas
+                </a>
+                <a href="{{ url_for('admin.ad_status', search=search, type='users', status='acknowledged') }}"
+                   class="btn {% if status_filter == 'acknowledged' %}btn-secondary{% else %}btn-outline-secondary{% endif %}">
+                    Reconocidos
                 </a>
                 <a href="{{ url_for('admin.ad_status', search=search, type=object_type, status='active') }}"
                    class="btn {% if status_filter == 'active' %}btn-success{% else %}btn-outline-success{% endif %}">
@@ -280,8 +299,12 @@
                                         {% if obj.ad_status == 'not_found' %}bg-danger
                                         {% elif obj.ad_status == 'error' %}bg-warning
                                         {% elif obj.ad_status == 'disabled' %}bg-secondary
-                                        {% else %}bg-success{% endif %}">
+                                        {% else %}bg-success{% endif %}
+                                        {% if obj.object_type == 'user' and obj.ad_acknowledged and obj.ad_status in ['not_found', 'error', 'disabled'] %} opacity-75{% endif %}">
                                         {{ obj.ad_status_display }}
+                                        {% if obj.object_type == 'user' and obj.ad_acknowledged and obj.ad_status in ['not_found', 'error', 'disabled'] %}
+                                        <i class="fas fa-check-circle ms-1" title="Problema reconocido"></i>
+                                        {% endif %}
                                     </span>
                                 </td>
                                 <td>
@@ -345,6 +368,17 @@
                                                 title="Reverificar en AD">
                                             <i class="fas fa-sync-alt"></i>
                                         </button>
+                                        {% if obj.ad_status in ['not_found', 'error', 'disabled'] %}
+                                        <button type="button" class="btn btn-outline-{% if obj.ad_acknowledged %}secondary{% else %}warning{% endif %}"
+                                                onclick="toggleAcknowledgeStatus('{{ obj.id }}', '{{ obj.ad_acknowledged|lower }}')"
+                                                title="{% if obj.ad_acknowledged %}Quitar reconocimiento{% else %}Marcar como reconocido{% endif %}">
+                                            {% if obj.ad_acknowledged %}
+                                                <i class="fas fa-times-circle"></i>
+                                            {% else %}
+                                                <i class="fas fa-check-circle"></i>
+                                            {% endif %}
+                                        </button>
+                                        {% endif %}
                                         {% if obj.id.split('_')[1]|int != current_user.id %}
                                         <button type="button" class="btn btn-outline-{% if obj.is_active %}warning{% else %}success{% endif %}"
                                                 onclick="toggleObjectStatus('{{ obj.id }}', 'user', {{ obj.is_active|lower }})"
@@ -471,6 +505,20 @@
                     {% if obj.ad_error_count and obj.ad_error_count > 0 %}
                         <p class="mb-0"><small>Errores consecutivos: {{ obj.ad_error_count }}</small></p>
                     {% endif %}
+                    {% if obj.object_type == 'user' and obj.ad_acknowledged and obj.ad_status in ['not_found', 'error', 'disabled'] %}
+                        <hr>
+                        <p class="mb-0"><small><i class="fas fa-check-circle text-warning"></i> <strong>Problema reconocido</strong>
+                            {% if obj.ad_acknowledged_by %} por {{ obj.ad_acknowledged_by }}{% endif %}
+                            {% if obj.ad_acknowledged_at %}
+                                {% set ack_date = obj.ad_acknowledged_at %}
+                                {% if ack_date is string %}
+                                    el {{ ack_date.split('T')[0] + ' ' + ack_date.split('T')[1][:5] if 'T' in ack_date else ack_date }}
+                                {% else %}
+                                    el {{ ack_date.strftime('%d/%m/%Y %H:%M') if ack_date else '' }}
+                                {% endif %}
+                            {% endif %}
+                        </small></p>
+                    {% endif %}
                 </div>
 
                 <!-- Object Basic Information -->
@@ -577,6 +625,16 @@
                 <button type="button" class="btn btn-primary" onclick="recheckObjectAD('{{ obj.id }}', '{{ obj.object_type }}')">
                     <i class="fas fa-sync-alt"></i> Reverificar AD
                 </button>
+                {% if obj.object_type == 'user' and obj.ad_status in ['not_found', 'error', 'disabled'] %}
+                <button type="button" class="btn btn-{% if obj.ad_acknowledged %}secondary{% else %}warning{% endif %}"
+                        onclick="toggleAcknowledgeStatus('{{ obj.id }}', '{{ obj.ad_acknowledged|lower }}')">
+                    {% if obj.ad_acknowledged %}
+                        <i class="fas fa-times-circle"></i> Quitar Reconocimiento
+                    {% else %}
+                        <i class="fas fa-check-circle"></i> Marcar como Reconocido
+                    {% endif %}
+                </button>
+                {% endif %}
                 {% if obj.object_type == 'user' and obj.id.split('_')[1]|int != current_user.id %}
                 <button type="button" class="btn btn-{% if obj.is_active %}warning{% else %}success{% endif %}"
                         onclick="toggleObjectStatus('{{ obj.id }}', '{{ obj.object_type }}', {{ obj.is_active|lower }})">
@@ -755,6 +813,50 @@ function toggleObjectStatus(objectId, objectType, isActive) {
         .catch(error => {
             console.error('Error:', error);
             showToast(`Error al cambiar el estado del ${entityName}`, 'error');
+            button.innerHTML = originalContent;
+            button.disabled = false;
+        });
+    }
+}
+
+function toggleAcknowledgeStatus(objectId, isAcknowledged) {
+    const realId = objectId.split('_')[1];
+    const isCurrentlyAcknowledged = isAcknowledged === 'true';
+    const action = isCurrentlyAcknowledged ? 'quitar el reconocimiento' : 'reconocer el problema';
+
+    if (confirm(`¿Estás seguro de que deseas ${action} para este usuario?`)) {
+        const button = event.target.closest('button');
+        const originalContent = button.innerHTML;
+
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        button.disabled = true;
+
+        const endpoint = isCurrentlyAcknowledged ?
+            `/admin/users/${realId}/unacknowledge` :
+            `/admin/users/${realId}/acknowledge`;
+
+        fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const actionText = isCurrentlyAcknowledged ? 'removido' : 'reconocido';
+                showToast(`Problema ${actionText} exitosamente`, 'success');
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showToast(`Error al cambiar reconocimiento: ` + data.message, 'error');
+                button.innerHTML = originalContent;
+                button.disabled = false;
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showToast('Error al cambiar el reconocimiento', 'error');
             button.innerHTML = originalContent;
             button.disabled = false;
         });

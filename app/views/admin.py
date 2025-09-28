@@ -40,7 +40,10 @@ def admin_dashboard():
         'pending_requests': PermissionRequest.query.filter_by(status='pending').count(),
         'total_permissions': FolderPermission.query.filter_by(is_active=True).count(),
         'active_permissions': FolderPermission.query.filter_by(is_active=True).count(),
-        'problematic_users': User.query.filter(User.ad_status.in_(['not_found', 'error', 'disabled'])).count(),
+        'problematic_users': User.query.filter(
+            User.ad_status.in_(['not_found', 'error', 'disabled']),
+            User.ad_acknowledged == False
+        ).count(),
         'total_tasks': Task.query.count(),
         'pending_tasks': Task.query.filter_by(status='pending').count(),
         'running_tasks': Task.query.filter_by(status='running').count(),
@@ -2154,15 +2157,32 @@ def ad_status():
 
             # Apply status filter for users
             if status_filter == 'problematic':
-                user_query = user_query.filter(User.ad_status.in_(['not_found', 'error', 'disabled']))
+                user_query = user_query.filter(
+                    User.ad_status.in_(['not_found', 'error', 'disabled']),
+                    User.ad_acknowledged == False
+                )
             elif status_filter == 'not_found':
-                user_query = user_query.filter(User.ad_status == 'not_found')
+                user_query = user_query.filter(
+                    User.ad_status == 'not_found',
+                    User.ad_acknowledged == False
+                )
             elif status_filter == 'error':
-                user_query = user_query.filter(User.ad_status == 'error')
+                user_query = user_query.filter(
+                    User.ad_status == 'error',
+                    User.ad_acknowledged == False
+                )
             elif status_filter == 'disabled':
-                user_query = user_query.filter(User.ad_status == 'disabled')
+                user_query = user_query.filter(
+                    User.ad_status == 'disabled',
+                    User.ad_acknowledged == False
+                )
             elif status_filter == 'active':
                 user_query = user_query.filter(User.ad_status == 'active')
+            elif status_filter == 'acknowledged':
+                user_query = user_query.filter(
+                    User.ad_status.in_(['not_found', 'error', 'disabled']),
+                    User.ad_acknowledged == True
+                )
 
             # Get users and format
             users = user_query.order_by(User.ad_last_check.desc().nullslast(), User.ad_error_count.desc()).all()
@@ -2182,14 +2202,17 @@ def ad_status():
                     'ad_error_count': user.ad_error_count or 0,
                     'last_sync': user.last_sync.isoformat() if user.last_sync else None,
                     'created_at': user.created_at.isoformat() if user.created_at else None,
+                    'ad_acknowledged': user.ad_acknowledged,
+                    'ad_acknowledged_at': user.ad_acknowledged_at.isoformat() if user.ad_acknowledged_at else None,
+                    'ad_acknowledged_by': user.acknowledged_by_user.username if user.acknowledged_by_user else None,
                     'affected_resources': {
                         'owned_folders': len(user.owned_folders) if hasattr(user, 'owned_folders') else 0,
                         'validated_folders': len(user.validated_folders) if hasattr(user, 'validated_folders') else 0
                     }
                 })
 
-        # Process Groups
-        if object_type in ['all', 'groups']:
+        # Process Groups (skip groups when viewing acknowledged items since only users have acknowledge functionality)
+        if object_type in ['all', 'groups'] and status_filter != 'acknowledged':
             group_query = ADGroup.query
 
             # Apply search filter for groups
@@ -2277,10 +2300,26 @@ def ad_status():
         user_counts = {
             'total': User.query.count(),
             'active': User.query.filter(User.ad_status == 'active').count(),
-            'not_found': User.query.filter(User.ad_status == 'not_found').count(),
-            'error': User.query.filter(User.ad_status == 'error').count(),
-            'disabled': User.query.filter(User.ad_status == 'disabled').count(),
-            'problematic': User.query.filter(User.ad_status.in_(['not_found', 'error', 'disabled'])).count()
+            'not_found': User.query.filter(
+                User.ad_status == 'not_found',
+                User.ad_acknowledged == False
+            ).count(),
+            'error': User.query.filter(
+                User.ad_status == 'error',
+                User.ad_acknowledged == False
+            ).count(),
+            'disabled': User.query.filter(
+                User.ad_status == 'disabled',
+                User.ad_acknowledged == False
+            ).count(),
+            'problematic': User.query.filter(
+                User.ad_status.in_(['not_found', 'error', 'disabled']),
+                User.ad_acknowledged == False
+            ).count(),
+            'acknowledged': User.query.filter(
+                User.ad_status.in_(['not_found', 'error', 'disabled']),
+                User.ad_acknowledged == True
+            ).count()
         }
 
         group_counts = {
@@ -2300,6 +2339,7 @@ def ad_status():
             'error': user_counts['error'] + group_counts['error'],
             'disabled': user_counts['disabled'] + group_counts['disabled'],
             'problematic': user_counts['problematic'] + group_counts['problematic'],
+            'acknowledged': user_counts['acknowledged'],  # Only users have acknowledged
             'users': user_counts,
             'groups': group_counts
         }
@@ -4620,4 +4660,105 @@ def restore_backup(filename):
         return jsonify({
             'success': False,
             'error': f'Error crítico durante la restauración: {str(e)}'
+        }), 500
+
+@admin_bp.route('/users/<int:user_id>/acknowledge', methods=['POST'])
+@login_required
+@admin_required
+def acknowledge_user_ad_issue(user_id):
+    """Acknowledge AD issue for a user"""
+    try:
+        user = User.query.get_or_404(user_id)
+
+        if not user.is_ad_problematic():
+            return jsonify({
+                'success': False,
+                'message': 'El usuario no tiene problemas de AD para reconocer'
+            }), 400
+
+        # Acknowledge the issue
+        user.acknowledge_ad_issue(current_user)
+        db.session.commit()
+
+        # Log audit event
+        AuditEvent.log_event(
+            user=current_user,
+            event_type='ad_management',
+            action='acknowledge_user_issue',
+            resource_type='user',
+            resource_id=user.id,
+            description=f'Problema AD reconocido para usuario {user.username}',
+            metadata={
+                'username': user.username,
+                'ad_status': user.ad_status,
+                'acknowledged_by': current_user.username,
+                'acknowledged_at': user.ad_acknowledged_at.isoformat() if user.ad_acknowledged_at else None
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent')
+        )
+
+        return jsonify({
+            'success': True,
+            'message': f'Problema AD reconocido para usuario {user.username}',
+            'ad_status_display': user.get_ad_status_display(),
+            'acknowledged': user.ad_acknowledged
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f'Error acknowledging user {user_id} AD issue: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': f'Error al reconocer problema: {str(e)}'
+        }), 500
+
+@admin_bp.route('/users/<int:user_id>/unacknowledge', methods=['POST'])
+@login_required
+@admin_required
+def unacknowledge_user_ad_issue(user_id):
+    """Remove acknowledgment of AD issue for a user"""
+    try:
+        user = User.query.get_or_404(user_id)
+
+        if not user.ad_acknowledged:
+            return jsonify({
+                'success': False,
+                'message': 'El usuario no tiene problemas reconocidos'
+            }), 400
+
+        # Remove acknowledgment
+        user.unacknowledge_ad_issue()
+        db.session.commit()
+
+        # Log audit event
+        AuditEvent.log_event(
+            user=current_user,
+            event_type='ad_management',
+            action='unacknowledge_user_issue',
+            resource_type='user',
+            resource_id=user.id,
+            description=f'Reconocimiento removido para usuario {user.username}',
+            metadata={
+                'username': user.username,
+                'ad_status': user.ad_status,
+                'unacknowledged_by': current_user.username
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent')
+        )
+
+        return jsonify({
+            'success': True,
+            'message': f'Reconocimiento removido para usuario {user.username}',
+            'ad_status_display': user.get_ad_status_display(),
+            'acknowledged': user.ad_acknowledged
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f'Error unacknowledging user {user_id} AD issue: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': f'Error al remover reconocimiento: {str(e)}'
         }), 500
