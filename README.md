@@ -68,7 +68,9 @@ Editar el archivo `.env` con tus configuraciones:
 ```bash
 # Flask Configuration
 FLASK_ENV=production
+FLASK_PORT=8081
 SECRET_KEY=tu-clave-secreta-muy-segura
+LOG_LEVEL=INFO
 
 # Database Configuration
 DATABASE_URL=postgresql://saruser:password@db:5432/sarapp
@@ -83,6 +85,8 @@ LDAP_USER_DN=ou=Users,dc=empresa,dc=com
 LDAP_GROUP_DN=ou=Groups,dc=empresa,dc=com
 LDAP_BIND_USER_DN=cn=cuenta-servicio,ou=Users,dc=empresa,dc=com
 LDAP_BIND_USER_PASSWORD=password-cuenta-servicio
+LDAP_ADMIN_GROUPS=Domain Admins,Administrators,Enterprise Admins
+LDAP_SEARCH_OUS=ou=Users,dc=empresa,dc=com
 
 # SMTP Configuration
 SMTP_SERVER=smtp.empresa.com
@@ -90,15 +94,42 @@ SMTP_PORT=587
 SMTP_USERNAME=noreply@empresa.com
 SMTP_PASSWORD=password-smtp
 SMTP_USE_TLS=true
+SMTP_FROM=noreply@empresa.com
+
+# Admin Notifications
+ADMIN_EMAIL=admin@empresa.com
+ADMIN_NOTIFICATION_ENABLED=true
 
 # Celery Configuration
 CELERY_BROKER_URL=redis://redis:6379/0
 CELERY_RESULT_BACKEND=redis://redis:6379/0
+CELERY_TIMEZONE=UTC
+CELERY_ENABLE_UTC=true
 
-# Airflow Configuration (Opcional)
+# Airflow Configuration
 AIRFLOW_API_URL=http://airflow:8080/api/v1
 AIRFLOW_USERNAME=admin
 AIRFLOW_PASSWORD=password-airflow
+AIRFLOW_DAG_NAME=SAR_V3
+AIRFLOW_FORCE_VERSION=
+
+# Task Management Configuration
+TASK_PROCESSING_INTERVAL=300
+TASK_MAX_RETRIES=3
+TASK_RETRY_DELAY=300
+IMMEDIATE_AIRFLOW_TIMEOUT=300
+IMMEDIATE_VERIFICATION_TIMEOUT=60
+
+# AD Synchronization Configuration
+AD_USER_SYNC_ENABLED=true
+AD_GROUP_SYNC_ENABLED=true
+AD_USER_SYNC_INTERVAL=600
+AD_GROUP_SYNC_INTERVAL=300
+
+# CSV and Application URLs
+CSV_OUTPUT_DIR=/tmp/sar_csv_files
+SERVER_URL=http://localhost:5000
+BASE_URL=http://localhost:5000
 
 ```
 
@@ -124,21 +155,21 @@ docker-compose exec web flask db upgrade
 
 ### 5. Verificar Instalación
 
-Abrir navegador en `http://localhost:8080` y usar credenciales de Active Directory.
+Abrir navegador en `http://localhost:8081` y usar credenciales de Active Directory.
 
 ## 🐳 Servicios Docker
 
 El `docker-compose.yml` incluye los siguientes servicios:
 
 ### Servicios Principales
-- **web** - Aplicación Flask principal (puerto 8080)
+- **web** - Aplicación Flask principal (puerto 8081)
 - **db** - Base de datos PostgreSQL (puerto 5432)
 - **redis** - Cache y broker para Celery (puerto 6379)
 
 ### Workers Celery Especializados
-- **celery-sync** - Worker para sincronizaciones pesadas de AD (concurrency: 2)
-- **celery-notifications** - Worker para emails y notificaciones (concurrency: 4)
-- **celery-reports** - Worker para reportes y tareas generales (concurrency: 3)
+- **celery-sync** - Worker para sincronizaciones pesadas de AD
+- **celery-notifications** - Worker para emails y notificaciones
+- **celery-reports** - Worker para reportes y tareas generales
 
 ### Servicios de Automatización
 - **ad-scheduler** - Sincronización automática de metadatos de AD (cada 30 min)
@@ -313,11 +344,9 @@ Todos los eventos se registran en la tabla `audit_events`:
 
 3. **Seguridad**:
    ```bash
-   # Habilitar HTTPS
-   TALISMAN_FORCE_HTTPS=true
-   
    # Configurar dominio base
    BASE_URL=https://sar.empresa.com
+   SERVER_URL=https://sar.empresa.com
    ```
 
 4. **Escalabilidad**:
