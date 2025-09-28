@@ -133,6 +133,9 @@ exports/
 *.xlsx
 *.pdf
 
+# PowerBI reports directory
+powerbi_reports/
+
 # Flask session files
 flask_session/
 

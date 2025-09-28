@@ -1,0 +1,134 @@
+---
+# =============================================================================
+# EJEMPLO DE PLAYBOOK ANSIBLE PARA EJECUTAR CONSULTAS POWERBI
+# =============================================================================
+# Este playbook muestra cómo usar el script execute_query.sh desde Ansible
+# para generar reportes CSV para PowerBI
+# =============================================================================
+
+- name: Generar reportes PowerBI para sistema SAR
+  hosts: servidor_sar
+  gather_facts: false
+  vars:
+    reports_dir: "/ruta/al/proyecto/powerbi_reports"
+    output_dir: "/var/reports/powerbi"
+
+  tasks:
+    - name: Crear directorio de salida para reportes
+      file:
+        path: "{{ output_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Ejecutar reporte de métricas dashboard
+      shell: |
+        cd {{ reports_dir }}
+        ./execute_query.sh dashboard_metricas.sql csv "" --quiet
+      register: dashboard_metrics
+      changed_when: false
+
+    - name: Guardar métricas dashboard en archivo
+      copy:
+        content: "{{ dashboard_metrics.stdout }}"
+        dest: "{{ output_dir }}/dashboard_metricas_{{ ansible_date_time.epoch }}.csv"
+        mode: '0644'
+
+    - name: Ejecutar reporte de usuarios con problemas AD
+      shell: |
+        cd {{ reports_dir }}
+        ./execute_query.sh usuarios_problemas_ad.sql csv "" --quiet
+      register: usuarios_problemas
+      changed_when: false
+
+    - name: Guardar reporte usuarios con problemas AD
+      copy:
+        content: "{{ usuarios_problemas.stdout }}"
+        dest: "{{ output_dir }}/usuarios_problemas_ad_{{ ansible_date_time.epoch }}.csv"
+        mode: '0644'
+
+    - name: Ejecutar reporte de solicitudes pendientes
+      shell: |
+        cd {{ reports_dir }}
+        ./execute_query.sh solicitudes_pendientes.sql csv "" --quiet
+      register: solicitudes_pendientes
+      changed_when: false
+
+    - name: Guardar reporte de solicitudes pendientes
+      copy:
+        content: "{{ solicitudes_pendientes.stdout }}"
+        dest: "{{ output_dir }}/solicitudes_pendientes_{{ ansible_date_time.epoch }}.csv"
+        mode: '0644'
+
+    - name: Mostrar resumen de archivos generados
+      debug:
+        msg:
+          - "Reportes generados en: {{ output_dir }}"
+          - "dashboard_metricas_{{ ansible_date_time.epoch }}.csv"
+          - "usuarios_problemas_ad_{{ ansible_date_time.epoch }}.csv"
+          - "solicitudes_pendientes_{{ ansible_date_time.epoch }}.csv"
+
+# =============================================================================
+# EJEMPLO DE EJECUCIÓN CON CAPTURA DIRECTA (sin guardar archivo)
+# =============================================================================
+- name: Ejemplo de uso directo de datos CSV
+  hosts: servidor_sar
+  gather_facts: false
+  vars:
+    reports_dir: "/ruta/al/proyecto/powerbi_reports"
+
+  tasks:
+    - name: Obtener métricas y procesar directamente
+      shell: |
+        cd {{ reports_dir }}
+        ./execute_query.sh dashboard_metricas.sql csv "" --quiet
+      register: csv_data
+      changed_when: false
+
+    - name: Procesar datos CSV (ejemplo)
+      debug:
+        msg: "{{ csv_data.stdout_lines | length - 1 }} filas de datos obtenidas"
+
+    - name: Enviar datos por email o API (ejemplo)
+      uri:
+        url: "https://api.powerbi.com/v1.0/datasets/upload"
+        method: POST
+        body: "{{ csv_data.stdout }}"
+        headers:
+          Content-Type: "text/csv"
+          Authorization: "Bearer {{ powerbi_token }}"
+      when: csv_data.stdout | length > 0
+
+# =============================================================================
+# EJEMPLO CON LOOP PARA MÚLTIPLES CONSULTAS
+# =============================================================================
+- name: Ejecutar múltiples reportes en loop
+  hosts: servidor_sar
+  gather_facts: false
+  vars:
+    reports_dir: "/ruta/al/proyecto/powerbi_reports"
+    output_dir: "/var/reports/powerbi"
+    queries:
+      - name: "dashboard_metricas"
+        file: "dashboard_metricas.sql"
+      - name: "usuarios_problemas_ad"
+        file: "usuarios_problemas_ad.sql"
+      - name: "solicitudes_pendientes"
+        file: "solicitudes_pendientes.sql"
+
+  tasks:
+    - name: Ejecutar consultas PowerBI
+      shell: |
+        cd {{ reports_dir }}
+        ./execute_query.sh {{ item.file }} csv "" --quiet
+      register: query_results
+      loop: "{{ queries }}"
+      changed_when: false
+
+    - name: Guardar resultados de consultas
+      copy:
+        content: "{{ item.stdout }}"
+        dest: "{{ output_dir }}/{{ queries[ansible_loop.index0].name }}_{{ ansible_date_time.epoch }}.csv"
+        mode: '0644'
+      loop: "{{ query_results.results }}"
+      loop_control:
+        extended: true
