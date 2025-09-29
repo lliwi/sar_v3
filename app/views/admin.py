@@ -550,10 +550,10 @@ def import_folders():
                     errors.append(f'Fila {row_num}: Faltan campos obligatorios (nombre, ruta)')
                     error_count += 1
                     continue
-                
+
                 # Check if folder exists
                 existing_folder = Folder.query.filter_by(path=row['ruta']).first()
-                
+
                 if existing_folder:
                     # Update existing folder
                     existing_folder.name = row['nombre']
@@ -570,9 +570,9 @@ def import_folders():
                     )
                     db.session.add(folder)
                     created_count += 1
-                
+
                 db.session.flush()  # Get folder ID
-                
+
                 # Handle owner
                 if row.get('propietario_username'):
                     owner = User.query.filter_by(username=row['propietario_username']).first()
@@ -582,26 +582,34 @@ def import_folders():
                         folder.owners.append(owner)
                     else:
                         errors.append(f'Fila {row_num}: Usuario propietario "{row["propietario_username"]}" no encontrado')
-                
+
                 # Handle validators
                 if row.get('validadores_usernames'):
+                    # DEBUG: Log validator processing
+                    current_app.logger.info(f"DEBUG - Fila {row_num}: Procesando validadores '{row.get('validadores_usernames')}'")
                     folder.validators.clear()
                     validator_usernames = [u.strip() for u in row['validadores_usernames'].split('#') if u.strip()]
+                    current_app.logger.info(f"DEBUG - Fila {row_num}: Lista parseada: {validator_usernames}")
+
                     for username in validator_usernames:
                         validator = User.query.filter_by(username=username).first()
                         if validator:
                             folder.validators.append(validator)
+                            current_app.logger.info(f"DEBUG - Fila {row_num}: Validador '{username}' agregado (ID: {validator.id})")
                         else:
+                            current_app.logger.warning(f"DEBUG - Fila {row_num}: Validador '{username}' NO encontrado")
                             errors.append(f'Fila {row_num}: Usuario validador "{username}" no encontrado')
-                
+
+                    current_app.logger.info(f"DEBUG - Fila {row_num}: Total validadores en carpeta: {len(folder.validators)}")
+
                 # Handle read groups
                 if row.get('grupo_lectura'):
                     # Remove existing read permissions
                     FolderPermission.query.filter_by(
-                        folder_id=folder.id, 
+                        folder_id=folder.id,
                         permission_type='read'
                     ).delete()
-                    
+
                     group_names = [g.strip() for g in row['grupo_lectura'].split('#') if g.strip()]
                     for group_name in group_names:
                         ad_group = ADGroup.query.filter_by(name=group_name).first()
@@ -615,15 +623,15 @@ def import_folders():
                             db.session.add(permission)
                         else:
                             errors.append(f'Fila {row_num}: Grupo AD de lectura "{group_name}" no encontrado')
-                
+
                 # Handle write groups
                 if row.get('grupo_escritura'):
                     # Remove existing write permissions
                     FolderPermission.query.filter_by(
-                        folder_id=folder.id, 
+                        folder_id=folder.id,
                         permission_type='write'
                     ).delete()
-                    
+
                     group_names = [g.strip() for g in row['grupo_escritura'].split('#') if g.strip()]
                     for group_name in group_names:
                         ad_group = ADGroup.query.filter_by(name=group_name).first()
@@ -637,14 +645,31 @@ def import_folders():
                             db.session.add(permission)
                         else:
                             errors.append(f'Fila {row_num}: Grupo AD de escritura "{group_name}" no encontrado')
-                
+
+                # Commit changes for this specific folder
+                try:
+                    db.session.commit()
+                    current_app.logger.info(f"DEBUG - Fila {row_num}: Commit exitoso para carpeta '{folder.name}'")
+
+                    # Verify validators after commit
+                    saved_folder = Folder.query.filter_by(id=folder.id).first()
+                    if saved_folder:
+                        saved_validators = [v.username for v in saved_folder.validators]
+                        current_app.logger.info(f"DEBUG - Fila {row_num}: Validadores guardados en BD: {saved_validators}")
+                    else:
+                        current_app.logger.error(f"DEBUG - Fila {row_num}: No se pudo recuperar carpeta después del commit")
+
+                except Exception as commit_error:
+                    db.session.rollback()
+                    current_app.logger.error(f"DEBUG - Fila {row_num}: Error en commit: {str(commit_error)}")
+                    errors.append(f'Fila {row_num}: Error al guardar - {str(commit_error)}')
+                    error_count += 1
+
             except Exception as e:
+                db.session.rollback()
                 errors.append(f'Fila {row_num}: Error procesando - {str(e)}')
                 error_count += 1
                 continue
-        
-        # Commit all changes
-        db.session.commit()
         
         # Log audit event
         AuditEvent.log_event(
@@ -667,17 +692,16 @@ def import_folders():
         success_msg = f'Importación completada: {created_count} carpetas creadas, {updated_count} actualizadas'
         if error_count > 0:
             success_msg += f', {error_count} errores'
-        
+
         flash(success_msg, 'success' if error_count == 0 else 'warning')
-        
+
         if errors and error_count <= 10:
             for error in errors:
                 flash(error, 'error')
         elif error_count > 10:
             flash(f'Se encontraron {error_count} errores adicionales. Revise el log de auditoría para más detalles.', 'warning')
-            
+
     except Exception as e:
-        db.session.rollback()
         flash(f'Error procesando el archivo CSV: {str(e)}', 'error')
     
     return redirect(url_for('admin.folders'))
