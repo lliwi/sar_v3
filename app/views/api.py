@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify, current_app, send_file, abort
+from flask import Blueprint, request, jsonify, current_app, send_file, abort, render_template
 from flask_login import login_required, current_user
 from app.models import PermissionRequest, AuditEvent, Folder, FolderPermission, ADGroup, User
 from app import db
@@ -85,33 +85,48 @@ def get_active_ad_groups():
 def validate_permission_by_email(request_id, token):
     """API endpoint for email validation links"""
     if not verify_validation_token(request_id, token):
-        return jsonify({'error': 'Token de validación inválido o expirado'}), 400
-    
+        return render_template('api/validation_result.html',
+                             success=False,
+                             title='Error de Validación',
+                             message='Token de validación inválido o expirado'), 400
+
     permission_request = PermissionRequest.query.get_or_404(request_id)
-    
+
     if not permission_request.is_pending():
-        return jsonify({'error': 'Esta solicitud ya ha sido procesada'}), 400
+        return render_template('api/validation_result.html',
+                             success=False,
+                             title='Solicitud Ya Procesada',
+                             message='Esta solicitud ya ha sido procesada anteriormente'), 400
     
     action = request.args.get('action')  # 'approve' or 'reject'
     comment = request.args.get('comment', '')
-    
+
     if action not in ['approve', 'reject']:
-        return jsonify({'error': 'Acción inválida'}), 400
-    
+        return render_template('api/validation_result.html',
+                             success=False,
+                             title='Error',
+                             message='Acción inválida'), 400
+
     # For security, we'll require the validator to be one of the folder owners/validators
     folder = permission_request.folder
     if not any(owner.email for owner in folder.owners) and not any(validator.email for validator in folder.validators):
-        return jsonify({'error': 'No se encontraron validadores autorizados'}), 400
-    
+        return render_template('api/validation_result.html',
+                             success=False,
+                             title='Error',
+                             message='No se encontraron validadores autorizados'), 400
+
     # We'll use the first owner/validator as the validator for the API call
     validator = None
     if folder.owners:
         validator = folder.owners[0]
     elif folder.validators:
         validator = folder.validators[0]
-    
+
     if not validator:
-        return jsonify({'error': 'No se encontró un validador para esta carpeta'}), 400
+        return render_template('api/validation_result.html',
+                             success=False,
+                             title='Error',
+                             message='No se encontró un validador para esta carpeta'), 400
     
     if action == 'approve':
         # Check if this is a change request (has special metadata)
@@ -194,13 +209,11 @@ def validate_permission_by_email(request_id, token):
         message = 'Solicitud rechazada exitosamente'
     
     db.session.commit()
-    
-    return jsonify({
-        'success': True,
-        'message': message,
-        'request_id': request_id,
-        'status': permission_request.status
-    })
+
+    return render_template('api/validation_result.html',
+                         success=True,
+                         title='Solicitud Procesada',
+                         message=message)
 
 @api_bp.route('/audit-events')
 @login_required
