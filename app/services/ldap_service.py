@@ -1,4 +1,5 @@
 import ldap3
+from ldap3.utils.conv import escape_filter_chars
 from flask import current_app
 from app.models import ADGroup, User, Role
 from app import db
@@ -135,9 +136,11 @@ class LDAPService:
             conn = self.get_connection()
             if not conn:
                 return None
-            
+
             # Search for user by sAMAccountName or cn across all OUs
-            search_filter = f"(&(objectClass=user)(|(sAMAccountName={username})({self.attr_user}={username})(userPrincipalName={username}@*)))"
+            # Escape username to prevent LDAP injection
+            safe_username = escape_filter_chars(username)
+            search_filter = f"(&(objectClass=user)(|(sAMAccountName={safe_username})({self.attr_user}={safe_username})(userPrincipalName={safe_username}@*)))"
             attributes = [
                 'cn', 'distinguishedName', 'sAMAccountName', 'displayName', 'memberOf', 'userPrincipalName',
                 self.attr_email, self.attr_department, self.attr_firstname, self.attr_lastname, self.attr_user
@@ -219,7 +222,9 @@ class LDAPService:
                 return None
 
             # Search for user by sAMAccountName or cn across all OUs
-            search_filter = f"(&(objectClass=user)(|(sAMAccountName={username})({self.attr_user}={username})(userPrincipalName={username}@*)))"
+            # Escape username to prevent LDAP injection
+            safe_username = escape_filter_chars(username)
+            search_filter = f"(&(objectClass=user)(|(sAMAccountName={safe_username})({self.attr_user}={safe_username})(userPrincipalName={safe_username}@*)))"
             attributes = [
                 'cn', 'distinguishedName', 'sAMAccountName', 'displayName', 'memberOf', 'userPrincipalName',
                 self.attr_email, self.attr_department, self.attr_firstname, self.attr_lastname, self.attr_user
@@ -447,9 +452,11 @@ class LDAPService:
             conn = self.get_connection()
             if not conn:
                 return []
-            
+
             # Search for user by sAMAccountName or configured user attribute across all OUs
-            search_filter = f"(&(objectClass=user)(|(sAMAccountName={username})({self.attr_user}={username})))"
+            # Escape username to prevent LDAP injection
+            safe_username = escape_filter_chars(username)
+            search_filter = f"(&(objectClass=user)(|(sAMAccountName={safe_username})({self.attr_user}={safe_username})))"
             attributes = ['memberOf']
             
             # Use multi-OU search if configured, otherwise search base DN
@@ -601,7 +608,9 @@ class LDAPService:
                 return False
             
             # Search for the specific group
-            search_filter = f"(distinguishedName={group_dn})"
+            # Escape group_dn to prevent LDAP injection
+            safe_group_dn = escape_filter_chars(group_dn)
+            search_filter = f"(distinguishedName={safe_group_dn})"
             attributes = ['cn', 'distinguishedName', 'description', 'groupType']
             
             conn.search(
@@ -665,8 +674,10 @@ class LDAPService:
             conn = self.get_connection()
             if not conn:
                 return []
-            
-            search_filter = f"(distinguishedName={group_dn})"
+
+            # Escape group_dn to prevent LDAP injection
+            safe_group_dn = escape_filter_chars(group_dn)
+            search_filter = f"(distinguishedName={safe_group_dn})"
             attributes = ['member']
             
             # Use multi-OU search if configured, otherwise use group_dn or base_dn
@@ -713,8 +724,10 @@ class LDAPService:
             conn = self.get_connection()
             if not conn:
                 return False
-            
-            search_filter = f"(&(objectClass=group)(cn={group_name}))"
+
+            # Escape group_name to prevent LDAP injection
+            safe_group_name = escape_filter_chars(group_name)
+            search_filter = f"(&(objectClass=group)(cn={safe_group_name}))"
             attributes = ['cn']
             
             # Use multi-OU search if configured, otherwise use group_dn or base_dn

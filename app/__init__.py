@@ -211,6 +211,88 @@ def create_app(config_name=None):
         # Scheduler is now handled by a separate standalone service
         # to avoid multi-process conflicts in Gunicorn
         app.logger.info("AD Synchronization handled by standalone scheduler service")
-    
+
+    # Register error handlers
+    register_error_handlers(app)
+
     return app
+
+
+def register_error_handlers(app):
+    """
+    Register centralized error handlers for the application.
+    Prevents information disclosure in production by showing generic error messages.
+    """
+    from flask import render_template, request
+
+    # Support multiple debug flag formats: true/false, 1/0, yes/no
+    debug_flag = os.getenv('FLASK_DEBUG', 'false').lower()
+    is_debug = debug_flag in ('true', '1', 'yes')
+
+    def wants_json():
+        """Check if the request wants JSON response"""
+        return request.accept_mimetypes.accept_json and \
+               not request.accept_mimetypes.accept_html
+
+    @app.errorhandler(400)
+    def bad_request(error):
+        """Handle 400 Bad Request errors"""
+        if wants_json():
+            if is_debug:
+                return {'error': 'Bad Request', 'details': str(error)}, 400
+            return {'error': 'Solicitud incorrecta'}, 400
+        # For HTML requests, you could create a 400.html template
+        return {'error': 'Solicitud incorrecta'}, 400
+
+    @app.errorhandler(403)
+    def forbidden(error):
+        """Handle 403 Forbidden errors"""
+        if wants_json():
+            return {'error': 'Acceso denegado'}, 403
+        try:
+            return render_template('errors/403.html'), 403
+        except:
+            return {'error': 'Acceso denegado'}, 403
+
+    @app.errorhandler(404)
+    def not_found(error):
+        """Handle 404 Not Found errors"""
+        if wants_json():
+            return {'error': 'Recurso no encontrado'}, 404
+        try:
+            return render_template('errors/404.html'), 404
+        except:
+            return {'error': 'Recurso no encontrado'}, 404
+
+    @app.errorhandler(500)
+    def internal_error(error):
+        """Handle 500 Internal Server Error"""
+        # Log the full error for administrators
+        app.logger.error(f"Internal Server Error: {str(error)}", exc_info=True)
+
+        if wants_json():
+            if is_debug:
+                return {'error': 'Error interno del servidor', 'details': str(error)}, 500
+            return {'error': 'Error interno del servidor. Por favor, contacte al administrador.'}, 500
+
+        try:
+            return render_template('errors/500.html'), 500
+        except:
+            return {'error': 'Error interno del servidor. Por favor, contacte al administrador.'}, 500
+
+    @app.errorhandler(Exception)
+    def handle_exception(error):
+        """Handle unexpected exceptions"""
+        # Log the full error
+        app.logger.error(f"Unhandled Exception: {str(error)}", exc_info=True)
+
+        if wants_json():
+            if is_debug:
+                return {'error': 'Error inesperado', 'details': str(error), 'type': type(error).__name__}, 500
+            return {'error': 'Error inesperado. Por favor, contacte al administrador.'}, 500
+
+        try:
+            return render_template('errors/500.html'), 500
+        except:
+            return {'error': 'Error inesperado. Por favor, contacte al administrador.'}, 500
 

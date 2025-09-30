@@ -4,6 +4,7 @@ from app.models import User, Role, Folder, ADGroup, FolderPermission, Permission
 from app.forms import UserForm, FolderForm, ADGroupForm
 from app.services.ldap_service import LDAPService
 from app import db
+from app.utils.decorators import debug_only
 from functools import wraps
 from datetime import datetime
 import os
@@ -3031,6 +3032,7 @@ def sync_users_from_ad_old():
 
 @admin_bp.route('/debug/sync-analysis/<folder_name>', methods=['GET'])
 @admin_required
+@debug_only
 def debug_sync_analysis(folder_name):
     """Debug sync process for a specific folder"""
     try:
@@ -3202,6 +3204,7 @@ def debug_sync_analysis(folder_name):
 
 @admin_bp.route('/debug/compare-ad-vs-db', methods=['GET'])
 @admin_required
+@debug_only
 def compare_ad_vs_db():
     """Compare what's in AD vs what's in DB for all folders"""
     try:
@@ -3322,6 +3325,7 @@ def compare_ad_vs_db():
 
 @admin_bp.route('/debug/force-sync-discrepancies', methods=['POST'])
 @admin_required
+@debug_only
 def force_sync_discrepancies():
     """Force sync for users that are in AD but not in DB"""
     try:
@@ -3492,6 +3496,7 @@ def force_sync_discrepancies():
 
 @admin_bp.route('/debug/permissions-data', methods=['GET'])
 @admin_required
+@debug_only
 def debug_permissions_data():
     """Debug endpoint to check what data exists for permissions report"""
     try:
@@ -3618,6 +3623,7 @@ def debug_permissions_data():
 
 @admin_bp.route('/debug/test-specific-users', methods=['GET'])
 @admin_required
+@debug_only
 def test_specific_users():
     """Test if the specific users we know about are in the system"""
     try:
@@ -3678,6 +3684,7 @@ def test_specific_users():
 
 @admin_bp.route('/debug/test-report-logic', methods=['GET'])
 @admin_required
+@debug_only
 def test_report_logic():
     """Test the permissions report logic step by step"""
     try:
@@ -3834,6 +3841,7 @@ def test_report_logic():
 
 @admin_bp.route('/debug/tasks', methods=['GET'])
 @admin_required
+@debug_only
 def debug_tasks():
     """Debug endpoint to check task status"""
     try:
@@ -3881,6 +3889,7 @@ def debug_tasks():
 
 @admin_bp.route('/debug/test-task-creation', methods=['POST'])
 @admin_required
+@debug_only
 def test_task_creation():
     """Test endpoint to manually create tasks for a permission request"""
     try:

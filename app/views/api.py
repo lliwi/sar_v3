@@ -1214,21 +1214,36 @@ def download_csv_file():
                 'message': 'Ruta del archivo requerida'
             }), 400
         
-        # Security check: only allow files from the CSV output directory
+        # Security check: prevent path traversal attacks
         csv_output_dir = current_app.config.get('CSV_OUTPUT_DIR', '/tmp/sar_csv_files')
-        if not file_path.startswith(csv_output_dir):
+
+        # Resolve to absolute paths to prevent path traversal
+        csv_output_dir_real = os.path.realpath(csv_output_dir)
+        file_path_real = os.path.realpath(file_path)
+
+        # Verify the file is within the allowed directory
+        try:
+            common_path = os.path.commonpath([csv_output_dir_real, file_path_real])
+        except ValueError:
+            # Paths are on different drives (Windows) or invalid
+            return jsonify({
+                'success': False,
+                'message': 'Acceso denegado a la ruta especificada'
+            }), 403
+
+        if common_path != csv_output_dir_real:
             return jsonify({
                 'success': False,
                 'message': 'Acceso denegado a la ruta especificada'
             }), 403
         
-        if not os.path.exists(file_path):
+        if not os.path.exists(file_path_real):
             return jsonify({
                 'success': False,
                 'message': 'Archivo no encontrado'
             }), 404
-        
-        if not file_path.endswith('.csv'):
+
+        if not file_path_real.endswith('.csv'):
             return jsonify({
                 'success': False,
                 'message': 'Solo se permiten archivos CSV'
@@ -1239,19 +1254,19 @@ def download_csv_file():
             user=current_user,
             event_type='file_access',
             action='download_csv_file',
-            description=f'Descarga de archivo CSV: {os.path.basename(file_path)}',
+            description=f'Descarga de archivo CSV: {os.path.basename(file_path_real)}',
             metadata={
-                'csv_file_path': file_path,
-                'file_size': os.path.getsize(file_path)
+                'csv_file_path': file_path_real,
+                'file_size': os.path.getsize(file_path_real)
             },
             ip_address=request.remote_addr,
             user_agent=request.headers.get('User-Agent')
         )
         
         return send_file(
-            file_path,
+            file_path_real,
             as_attachment=True,
-            download_name=os.path.basename(file_path),
+            download_name=os.path.basename(file_path_real),
             mimetype='text/csv'
         )
     
