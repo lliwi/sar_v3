@@ -152,6 +152,8 @@ test_data/
 test_env/
 test_files/
 csv_files/
+scripts/
+dags/
 
 # Cookies and session files from testing
 cookies*.txt
@@ -173,6 +175,8 @@ csrf_token.txt
 config_local.py
 local_settings.py
 instance/
+Dockerfile
+migrations/
 
 # Node.js dependencies (if any)
 node_modules/
