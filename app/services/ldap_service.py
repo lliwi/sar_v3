@@ -3,6 +3,7 @@ from ldap3.utils.conv import escape_filter_chars
 from flask import current_app
 from app.models import ADGroup, User, Role
 from app import db
+from app.utils.db_utils import commit_with_retry, retry_on_deadlock
 from datetime import datetime
 import logging
 
@@ -553,14 +554,12 @@ class LDAPService:
                 
                 # Commit in batches to avoid long transactions
                 if batch_count >= batch_size or i == len(all_entries) - 1:
-                    try:
-                        db.session.commit()
+                    if commit_with_retry(max_attempts=3):
                         logger.debug(f"Groups batch {(i//batch_size)+1} committed: {batch_count} groups")
                         batch_count = 0
-                    except Exception as e:
-                        logger.error(f"Error committing groups batch: {str(e)}")
-                        db.session.rollback()
-                        raise e
+                    else:
+                        logger.error(f"Failed to commit groups batch after retries")
+                        batch_count = 0
             
             # Mark groups not found in LDAP as inactive (separate transaction)
             try:
@@ -573,12 +572,12 @@ class LDAPService:
                 for group in old_groups:
                     group.mark_ad_not_found()  # This marks as not_found AND inactive
                     inactive_count += 1
-                    
+
                     if inactive_count % batch_size == 0:
-                        db.session.commit()
+                        commit_with_retry(max_attempts=3)
                         logger.debug(f"Marked {inactive_count} groups as inactive")
-                
-                db.session.commit()
+
+                commit_with_retry(max_attempts=3)
                 logger.info(f"Marked {len(old_groups)} old groups as inactive")
                 
             except Exception as e:
@@ -890,14 +889,12 @@ class LDAPService:
                     
                     # Commit in batches to avoid long transactions
                     if batch_count >= batch_size or i == len(all_entries) - 1:
-                        try:
-                            db.session.commit()
+                        if commit_with_retry(max_attempts=3):
                             logger.debug(f"Users batch {(i//batch_size)+1} committed: {batch_count} users")
                             batch_count = 0
-                        except Exception as e:
-                            logger.error(f"Error committing users batch: {str(e)}")
-                            db.session.rollback()
-                            raise e
+                        else:
+                            logger.error(f"Failed to commit users batch after retries")
+                            batch_count = 0
                     
                 except Exception as e:
                     logger.warning(f"Error processing user entry: {str(e)}")
@@ -915,12 +912,12 @@ class LDAPService:
                 for user in old_users:
                     user.mark_ad_not_found()  # This marks as not_found AND inactive
                     inactive_count += 1
-                    
+
                     if inactive_count % batch_size == 0:
-                        db.session.commit()
+                        commit_with_retry(max_attempts=3)
                         logger.debug(f"Marked {inactive_count} users as inactive")
-                
-                db.session.commit()
+
+                commit_with_retry(max_attempts=3)
                 logger.info(f"Marked {len(old_users)} old users as inactive")
                 
             except Exception as e:

@@ -20,19 +20,81 @@ csrf = CSRFProtect()
 def create_app(config_name=None):
     app = Flask(__name__)
     
-    # Configure logging
+    # Configure asynchronous logging with QueueHandler
     log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
-    logging.basicConfig(
-        level=getattr(logging, log_level),
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler('/app/logs/app.log') if os.path.exists('/app/logs') else logging.StreamHandler()
-        ]
+
+    from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
+    import queue
+    import atexit
+
+    # Create queue for async logging (non-blocking)
+    log_queue = queue.Queue(-1)  # Unlimited size
+    queue_handler = QueueHandler(log_queue)
+
+    # Real handlers (executed in separate thread)
+    handlers = []
+
+    # File handler with rotation (only if directory exists and LOG_TO_FILE is enabled)
+    if os.path.exists('/app/logs') and os.getenv('LOG_TO_FILE', 'true').lower() == 'true':
+        file_handler = RotatingFileHandler(
+            '/app/logs/app.log',
+            maxBytes=int(os.getenv('LOG_MAX_BYTES', 10*1024*1024)),  # 10MB default
+            backupCount=int(os.getenv('LOG_BACKUP_COUNT', 5)),        # 5 files default
+            encoding='utf-8'
+        )
+        file_handler.setLevel(logging.DEBUG)
+        handlers.append(file_handler)
+
+    # Console handler (STDOUT)
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(getattr(logging, log_level))
+    handlers.append(console_handler)
+
+    # Format: detailed for DEBUG, lightweight for production
+    if log_level == 'DEBUG':
+        log_format = '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s'
+    else:
+        log_format = '%(levelname)s - %(name)s - %(message)s'  # No timestamp overhead in production
+
+    formatter = logging.Formatter(log_format)
+    for handler in handlers:
+        handler.setFormatter(formatter)
+
+    # Queue listener processes logs in background thread
+    queue_listener = QueueListener(
+        log_queue,
+        *handlers,
+        respect_handler_level=True
     )
-    
+    queue_listener.start()
+
+    # Ensure listener stops on app shutdown
+    atexit.register(queue_listener.stop)
+
+    # Configure root logger with queue handler only
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, log_level))
+    # Clear any existing handlers to avoid duplicates
+    root_logger.handlers.clear()
+    root_logger.addHandler(queue_handler)
+
+    # Disable propagation for all existing loggers to avoid duplicates
+    for name in logging.root.manager.loggerDict:
+        logger_obj = logging.getLogger(name)
+        logger_obj.handlers.clear()
+        logger_obj.propagate = True  # Let messages propagate to root
+
     # Set Flask app logger level
     app.logger.setLevel(getattr(logging, log_level))
+    app.logger.handlers.clear()
+    app.logger.propagate = True
+
+    # Suppress noisy loggers in production
+    if log_level != 'DEBUG':
+        logging.getLogger('urllib3').setLevel(logging.WARNING)
+        logging.getLogger('werkzeug').setLevel(logging.WARNING)
+        logging.getLogger('sqlalchemy').setLevel(logging.WARNING)
+        logging.getLogger('ldap3').setLevel(logging.WARNING)
     
     # Configuration - Security validation
     secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')

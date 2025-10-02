@@ -14,6 +14,7 @@ from flask import current_app
 from app import db
 from app.models import AuditEvent, Task, User
 from app.services.ldap_service import LDAPService
+from app.utils.db_utils import commit_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -571,13 +572,11 @@ class SchedulerService:
 
                             # Commit in batches
                             if batch_operations % batch_size_commits == 0:
-                                try:
-                                    db.session.commit()
+                                if commit_with_retry(max_attempts=3):
                                     logger.debug(f"✅ Batch committed: {batch_operations} operations")
-                                except Exception as commit_error:
-                                    logger.error(f"❌ Batch commit failed: {str(commit_error)}")
-                                    db.session.rollback()
-                                    results['errors'].append(f"Error en commit: {str(commit_error)}")
+                                else:
+                                    logger.error(f"❌ Batch commit failed after retries")
+                                    results['errors'].append(f"Error en commit batch después de reintentos")
 
                         except Exception as member_error:
                             logger.error(f"❌ Error processing member {username}: {str(member_error)}")
@@ -592,13 +591,11 @@ class SchedulerService:
                     continue
 
             # Final commit
-            try:
-                db.session.commit()
+            if commit_with_retry(max_attempts=3):
                 logger.info("✅ Final commit completed")
-            except Exception as final_commit_error:
-                logger.error(f"❌ Final commit failed: {str(final_commit_error)}")
-                db.session.rollback()
-                results['errors'].append(f"Error en commit final: {str(final_commit_error)}")
+            else:
+                logger.error(f"❌ Final commit failed after retries")
+                results['errors'].append(f"Error en commit final después de reintentos")
 
             # Update last sync time
             self.last_active_permissions_sync = datetime.utcnow()
@@ -657,7 +654,7 @@ class SchedulerService:
                 is_active=True
             )
             db.session.add(system_user)
-            db.session.commit()
+            commit_with_retry(max_attempts=3)
 
         return system_user
 

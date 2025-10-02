@@ -4,6 +4,7 @@ from app.celery_app import make_celery
 from app import create_app
 from app.services.email_service import send_permission_request_notification as _send_permission_request_notification
 from app.services.email_service import send_permission_status_notification as _send_permission_status_notification
+from app.utils.db_utils import commit_with_retry
 
 # Create Flask app and configure Celery
 app = create_app()
@@ -303,13 +304,11 @@ def sync_memberships_optimized_task(self, user_id):
 
                             # Commit in batches
                             if batch_operations % batch_size_commits == 0:
-                                try:
-                                    db.session.commit()
+                                if commit_with_retry(max_attempts=3):
                                     logger.debug(f"✅ Batch committed: {batch_operations} operations")
-                                except Exception as commit_error:
-                                    logger.error(f"❌ Batch commit failed: {str(commit_error)}")
-                                    db.session.rollback()
-                                    stats['errors'].append(f"Error en commit: {str(commit_error)}")
+                                else:
+                                    logger.error(f"❌ Batch commit failed after retries")
+                                    stats['errors'].append(f"Error en commit batch después de reintentos")
 
                         except Exception as member_error:
                             logger.error(f"❌ Error processing member {username}: {str(member_error)}")
@@ -332,13 +331,11 @@ def sync_memberships_optimized_task(self, user_id):
                 )
 
             # Final commit
-            try:
-                db.session.commit()
+            if commit_with_retry(max_attempts=3):
                 logger.info("✅ Final commit completed")
-            except Exception as final_commit_error:
-                logger.error(f"❌ Final commit failed: {str(final_commit_error)}")
-                db.session.rollback()
-                stats['errors'].append(f"Error en commit final: {str(final_commit_error)}")
+            else:
+                logger.error(f"❌ Final commit failed after retries")
+                stats['errors'].append(f"Error en commit final después de reintentos")
 
             # Generate comprehensive summary
             stats['summary'] = {
@@ -755,13 +752,11 @@ def sync_users_from_ad_task(self, user_id):
                                     
                                     # Commit in batches
                                     if processed_members % batch_size == 0:
-                                        try:
-                                            db.session.commit()
+                                        if commit_with_retry(max_attempts=3):
                                             logger.debug(f"✅ Batch committed: {processed_members} members processed")
-                                        except Exception as commit_error:
-                                            logger.error(f"❌ Batch commit failed: {str(commit_error)}")
-                                            db.session.rollback()
-                                            results['errors'].append(f"Error en commit: {str(commit_error)}")
+                                        else:
+                                            logger.error(f"❌ Batch commit failed after retries")
+                                            results['errors'].append(f"Error en commit batch después de reintentos")
                                 
                                 except Exception as member_error:
                                     logger.error(f"❌ Error processing member {member_dn}: {str(member_error)}")
@@ -790,13 +785,11 @@ def sync_users_from_ad_task(self, user_id):
             logger.info(f"🎉 All batches completed: {total_processed} folders processed in total")
             
             # Final commit for any remaining changes
-            try:
-                db.session.commit()
+            if commit_with_retry(max_attempts=3):
                 logger.info("✅ Final commit completed")
-            except Exception as final_commit_error:
-                logger.error(f"❌ Final commit failed: {str(final_commit_error)}")
-                db.session.rollback()
-                results['errors'].append(f"Error en commit final: {str(final_commit_error)}")
+            else:
+                logger.error(f"❌ Final commit failed after retries")
+                results['errors'].append(f"Error en commit final después de reintentos")
             
             conn.unbind()
             
