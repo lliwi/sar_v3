@@ -230,14 +230,60 @@
     </div>
     {% endif %}
 
+    <!-- Select All Users Bar (initially visible if users exist) -->
+    <div id="selectAllUsersBar" class="alert alert-secondary mb-2" style="{% if not objects.items %}display: none;{% endif %}">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <i class="fas fa-info-circle me-2"></i>
+                <span id="selectAllMessage">
+                    Selecciona usuarios de esta página o
+                    <a href="javascript:void(0)" onclick="selectAllFromAllPages()" class="alert-link">
+                        <strong>selecciona TODOS los usuarios {{ status_counts.get('problematic', 0) if status_filter == 'problematic' else 'del filtro' }}</strong>
+                    </a>
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Actions Bar (initially hidden) -->
+    <div id="bulkActionsBar" class="alert alert-info" style="display: none;">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <i class="fas fa-check-square me-2"></i>
+                <strong>
+                    <span id="selectedCount">0</span> usuarios seleccionados
+                    <span id="allPagesIndicator" style="display: none;" class="badge bg-primary ms-2">
+                        Todas las páginas
+                    </span>
+                </strong>
+            </div>
+            <div class="btn-group" role="group">
+                <button type="button" class="btn btn-sm btn-warning" onclick="bulkAcknowledge()">
+                    <i class="fas fa-check-circle"></i> Reconocer Seleccionados
+                </button>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="bulkUnacknowledge()">
+                    <i class="fas fa-times-circle"></i> Quitar Reconocimiento
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearSelection()">
+                    <i class="fas fa-times"></i> Cancelar
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Objects Table -->
     <div class="card">
         <div class="card-body">
             {% if objects.items %}
                 <div class="table-responsive">
-                    <table class="table table-hover">
+                    <table class="table table-hover" id="objectsTable">
                         <thead>
                             <tr>
+                                <th style="width: 40px;">
+                                    <input type="checkbox" class="form-check-input" id="selectAll"
+                                           title="Seleccionar todos los usuarios con problemas AD"
+                                           onclick="toggleSelectAll(this)">
+                                </th>
                                 <th>Objeto</th>
                                 <th>Información</th>
                                 <th>Estado AD</th>
@@ -251,6 +297,15 @@
                         <tbody>
                             {% for obj in objects.items %}
                             <tr class="{% if not obj.is_active %}table-warning{% endif %}">
+                                <td>
+                                    {% if obj.object_type == 'user' and obj.ad_status in ['not_found', 'error', 'disabled'] %}
+                                    <input type="checkbox" class="form-check-input user-checkbox"
+                                           data-user-id="{{ obj.id.split('_')[1] }}"
+                                           data-username="{{ obj.name }}"
+                                           data-acknowledged="{{ obj.ad_acknowledged|lower }}"
+                                           onchange="updateBulkActionsBar()">
+                                    {% endif %}
+                                </td>
                                 <td>
                                     <div class="d-flex align-items-center">
                                         <div class="avatar avatar-sm me-2">
@@ -907,6 +962,235 @@ function showToast(message, type = 'info') {
             }, 150);
         }
     }, 5000);
+}
+
+// ========== Bulk Actions Functions ==========
+
+// Global state for multi-page selection
+let allPageUserIds = [];  // Store IDs from all pages
+let isAllPagesSelected = false;
+
+function toggleSelectAll(checkbox) {
+    const userCheckboxes = document.querySelectorAll('.user-checkbox');
+    userCheckboxes.forEach(cb => {
+        cb.checked = checkbox.checked;
+    });
+    isAllPagesSelected = false;  // Reset all-pages selection
+    allPageUserIds = [];
+    updateBulkActionsBar();
+}
+
+function bulkAcknowledge() {
+    const userIds = getSelectedUserIds();
+    const count = userIds.length;
+
+    if (count === 0) {
+        showToast('No hay usuarios seleccionados', 'warning');
+        return;
+    }
+
+    if (!confirm(`¿Estás seguro de que deseas reconocer ${count} usuario(s) seleccionado(s)?`)) {
+        return;
+    }
+
+    // Disable buttons and show loading
+    const bulkActionsBar = document.getElementById('bulkActionsBar');
+    const buttons = bulkActionsBar.querySelectorAll('button');
+    buttons.forEach(btn => btn.disabled = true);
+
+    fetch('/admin/users/bulk-acknowledge', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token() }}'
+        },
+        body: JSON.stringify({ user_ids: userIds })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast(data.message, 'success');
+
+            // Show details if there are errors
+            if (data.errors && data.errors.length > 0) {
+                console.warn('Bulk acknowledge errors:', data.errors);
+            }
+
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            showToast(`Error: ${data.message}`, 'error');
+            buttons.forEach(btn => btn.disabled = false);
+        }
+    })
+    .catch(error => {
+        showToast('Error en la operación masiva', 'error');
+        console.error('Bulk acknowledge error:', error);
+        buttons.forEach(btn => btn.disabled = false);
+    });
+}
+
+function bulkUnacknowledge() {
+    const userIds = getSelectedUserIds();
+    const count = userIds.length;
+
+    if (count === 0) {
+        showToast('No hay usuarios seleccionados', 'warning');
+        return;
+    }
+
+    if (!confirm(`¿Estás seguro de que deseas quitar el reconocimiento a ${count} usuario(s) seleccionado(s)?`)) {
+        return;
+    }
+
+    // Disable buttons and show loading
+    const bulkActionsBar = document.getElementById('bulkActionsBar');
+    const buttons = bulkActionsBar.querySelectorAll('button');
+    buttons.forEach(btn => btn.disabled = true);
+
+    fetch('/admin/users/bulk-unacknowledge', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token() }}'
+        },
+        body: JSON.stringify({ user_ids: userIds })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast(data.message, 'success');
+
+            // Show details if there are errors
+            if (data.errors && data.errors.length > 0) {
+                console.warn('Bulk unacknowledge errors:', data.errors);
+            }
+
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            showToast(`Error: ${data.message}`, 'error');
+            buttons.forEach(btn => btn.disabled = false);
+        }
+    })
+    .catch(error => {
+        showToast('Error en la operación masiva', 'error');
+        console.error('Bulk unacknowledge error:', error);
+        buttons.forEach(btn => btn.disabled = false);
+    });
+}
+
+// ========== Select All from All Pages ==========
+
+function selectAllFromAllPages() {
+    // Get current filter params from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const status = urlParams.get('status') || 'problematic';
+    const search = urlParams.get('search') || '';
+
+    // Build query string
+    let queryParams = `status=${status}`;
+    if (search) {
+        queryParams += `&search=${encodeURIComponent(search)}`;
+    }
+
+    // Show loading message
+    showToast('Cargando todos los usuarios...', 'info');
+
+    // Fetch all user IDs
+    fetch(`/admin/users/get-all-problematic-ids?${queryParams}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                allPageUserIds = data.user_ids;
+                isAllPagesSelected = true;
+
+                if (allPageUserIds.length === 0) {
+                    showToast('No hay usuarios que coincidan con el filtro', 'warning');
+                    return;
+                }
+
+                // Mark all checkboxes on current page
+                document.querySelectorAll('.user-checkbox').forEach(cb => {
+                    const userId = parseInt(cb.dataset.userId);
+                    if (allPageUserIds.includes(userId)) {
+                        cb.checked = true;
+                    }
+                });
+
+                // Update UI
+                updateBulkActionsBar();
+
+                // Show success message with details
+                let message = `Seleccionados ${data.total_count} usuarios ${data.status_display}`;
+                if (data.search) {
+                    message += ` (búsqueda: "${data.search}")`;
+                }
+                showToast(message, 'success');
+
+                // Hide the select all bar
+                document.getElementById('selectAllUsersBar').style.display = 'none';
+
+            } else {
+                showToast(`Error: ${data.message}`, 'error');
+            }
+        })
+        .catch(error => {
+            showToast('Error al cargar usuarios', 'error');
+            console.error('Select all pages error:', error);
+        });
+}
+
+function updateBulkActionsBar() {
+    const selectedCheckboxes = document.querySelectorAll('.user-checkbox:checked');
+    const count = isAllPagesSelected ? allPageUserIds.length : selectedCheckboxes.length;
+    const bulkActionsBar = document.getElementById('bulkActionsBar');
+    const selectedCountSpan = document.getElementById('selectedCount');
+    const allPagesIndicator = document.getElementById('allPagesIndicator');
+
+    if (count > 0) {
+        bulkActionsBar.style.display = 'block';
+        selectedCountSpan.textContent = count;
+
+        // Show "Todas las páginas" badge if applicable
+        if (isAllPagesSelected) {
+            allPagesIndicator.style.display = 'inline';
+        } else {
+            allPagesIndicator.style.display = 'none';
+        }
+    } else {
+        bulkActionsBar.style.display = 'none';
+        document.getElementById('selectAll').checked = false;
+        isAllPagesSelected = false;
+        allPageUserIds = [];
+        allPagesIndicator.style.display = 'none';
+    }
+
+    // Update "select all" checkbox state
+    const allCheckboxes = document.querySelectorAll('.user-checkbox');
+    const allChecked = allCheckboxes.length > 0 && selectedCheckboxes.length === allCheckboxes.length;
+    document.getElementById('selectAll').checked = allChecked;
+}
+
+function getSelectedUserIds() {
+    // If all pages selected, return all IDs
+    if (isAllPagesSelected && allPageUserIds.length > 0) {
+        return allPageUserIds;
+    }
+
+    // Otherwise return only checked ones from current page
+    const selectedCheckboxes = document.querySelectorAll('.user-checkbox:checked');
+    return Array.from(selectedCheckboxes).map(cb => parseInt(cb.dataset.userId));
+}
+
+function clearSelection() {
+    document.querySelectorAll('.user-checkbox').forEach(cb => cb.checked = false);
+    document.getElementById('selectAll').checked = false;
+    isAllPagesSelected = false;
+    allPageUserIds = [];
+
+    // Show select all bar again
+    document.getElementById('selectAllUsersBar').style.display = 'block';
+
+    updateBulkActionsBar();
 }
 </script>
 {% endblock %}

@@ -4795,3 +4795,294 @@ def unacknowledge_user_ad_issue(user_id):
             'success': False,
             'message': f'Error al remover reconocimiento: {str(e)}'
         }), 500
+
+
+@admin_bp.route('/users/bulk-acknowledge', methods=['POST'])
+@login_required
+@admin_required
+def bulk_acknowledge_users():
+    """Acknowledge AD issues for multiple users at once"""
+    try:
+        data = request.get_json()
+        user_ids = data.get('user_ids', [])
+
+        if not user_ids:
+            return jsonify({
+                'success': False,
+                'message': 'No se proporcionaron IDs de usuarios'
+            }), 400
+
+        if not isinstance(user_ids, list):
+            return jsonify({
+                'success': False,
+                'message': 'El formato de user_ids debe ser una lista'
+            }), 400
+
+        # Process each user
+        acknowledged_count = 0
+        skipped_count = 0
+        errors = []
+        acknowledged_users = []
+
+        for user_id in user_ids:
+            try:
+                user = User.query.get(user_id)
+
+                if not user:
+                    errors.append(f'Usuario ID {user_id} no encontrado')
+                    continue
+
+                if not user.is_ad_problematic():
+                    skipped_count += 1
+                    continue
+
+                if user.ad_acknowledged:
+                    skipped_count += 1
+                    continue
+
+                # Acknowledge the issue
+                user.acknowledge_ad_issue(current_user)
+                acknowledged_count += 1
+                acknowledged_users.append({
+                    'id': user.id,
+                    'username': user.username,
+                    'ad_status': user.ad_status
+                })
+
+            except Exception as e:
+                errors.append(f'Error en usuario ID {user_id}: {str(e)}')
+                continue
+
+        # Commit all changes
+        db.session.commit()
+
+        # Log audit event
+        AuditEvent.log_event(
+            user=current_user,
+            event_type='ad_management',
+            action='bulk_acknowledge_users',
+            resource_type='user',
+            resource_id=None,
+            description=f'Reconocimiento masivo: {acknowledged_count} usuarios',
+            metadata={
+                'total_requested': len(user_ids),
+                'acknowledged': acknowledged_count,
+                'skipped': skipped_count,
+                'errors_count': len(errors),
+                'acknowledged_users': acknowledged_users,
+                'errors': errors[:10]  # Limit errors in metadata
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent')
+        )
+
+        message = f'Reconocidos: {acknowledged_count} usuarios'
+        if skipped_count > 0:
+            message += f', Omitidos: {skipped_count}'
+        if errors:
+            message += f', Errores: {len(errors)}'
+
+        return jsonify({
+            'success': True,
+            'message': message,
+            'acknowledged_count': acknowledged_count,
+            'skipped_count': skipped_count,
+            'errors': errors,
+            'acknowledged_users': acknowledged_users
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f'Error in bulk acknowledge: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': f'Error en reconocimiento masivo: {str(e)}'
+        }), 500
+
+
+@admin_bp.route('/users/bulk-unacknowledge', methods=['POST'])
+@login_required
+@admin_required
+def bulk_unacknowledge_users():
+    """Remove acknowledgment for multiple users at once"""
+    try:
+        data = request.get_json()
+        user_ids = data.get('user_ids', [])
+
+        if not user_ids:
+            return jsonify({
+                'success': False,
+                'message': 'No se proporcionaron IDs de usuarios'
+            }), 400
+
+        if not isinstance(user_ids, list):
+            return jsonify({
+                'success': False,
+                'message': 'El formato de user_ids debe ser una lista'
+            }), 400
+
+        # Process each user
+        unacknowledged_count = 0
+        skipped_count = 0
+        errors = []
+        unacknowledged_users = []
+
+        for user_id in user_ids:
+            try:
+                user = User.query.get(user_id)
+
+                if not user:
+                    errors.append(f'Usuario ID {user_id} no encontrado')
+                    continue
+
+                if not user.ad_acknowledged:
+                    skipped_count += 1
+                    continue
+
+                # Remove acknowledgment
+                user.unacknowledge_ad_issue()
+                unacknowledged_count += 1
+                unacknowledged_users.append({
+                    'id': user.id,
+                    'username': user.username,
+                    'ad_status': user.ad_status
+                })
+
+            except Exception as e:
+                errors.append(f'Error en usuario ID {user_id}: {str(e)}')
+                continue
+
+        # Commit all changes
+        db.session.commit()
+
+        # Log audit event
+        AuditEvent.log_event(
+            user=current_user,
+            event_type='ad_management',
+            action='bulk_unacknowledge_users',
+            resource_type='user',
+            resource_id=None,
+            description=f'Remoción masiva reconocimiento: {unacknowledged_count} usuarios',
+            metadata={
+                'total_requested': len(user_ids),
+                'unacknowledged': unacknowledged_count,
+                'skipped': skipped_count,
+                'errors_count': len(errors),
+                'unacknowledged_users': unacknowledged_users,
+                'errors': errors[:10]
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent')
+        )
+
+        message = f'Reconocimientos removidos: {unacknowledged_count} usuarios'
+        if skipped_count > 0:
+            message += f', Omitidos: {skipped_count}'
+        if errors:
+            message += f', Errores: {len(errors)}'
+
+        return jsonify({
+            'success': True,
+            'message': message,
+            'unacknowledged_count': unacknowledged_count,
+            'skipped_count': skipped_count,
+            'errors': errors,
+            'unacknowledged_users': unacknowledged_users
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f'Error in bulk unacknowledge: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': f'Error en remoción masiva: {str(e)}'
+        }), 500
+
+
+@admin_bp.route('/users/get-all-problematic-ids', methods=['GET'])
+@login_required
+@admin_required
+def get_all_problematic_user_ids():
+    """Get all user IDs that match the current filter (for select all across pages)"""
+    try:
+        from sqlalchemy import or_
+
+        # Get query parameters (same as ad_status route)
+        status_filter = request.args.get('status', 'problematic')
+        search = request.args.get('search', '').strip()
+
+        # Build query for users only (not groups)
+        user_query = User.query
+
+        # Apply search filter
+        if search:
+            search_term = f'%{search}%'
+            user_query = user_query.filter(or_(
+                User.username.ilike(search_term),
+                User.full_name.ilike(search_term),
+                User.email.ilike(search_term),
+                User.department.ilike(search_term)
+            ))
+
+        # Apply status filter
+        if status_filter == 'problematic':
+            user_query = user_query.filter(
+                User.ad_status.in_(['not_found', 'error', 'disabled']),
+                User.ad_acknowledged == False
+            )
+        elif status_filter == 'not_found':
+            user_query = user_query.filter(
+                User.ad_status == 'not_found',
+                User.ad_acknowledged == False
+            )
+        elif status_filter == 'error':
+            user_query = user_query.filter(
+                User.ad_status == 'error',
+                User.ad_acknowledged == False
+            )
+        elif status_filter == 'disabled':
+            user_query = user_query.filter(
+                User.ad_status == 'disabled',
+                User.ad_acknowledged == False
+            )
+        elif status_filter == 'active':
+            user_query = user_query.filter(User.ad_status == 'active')
+        elif status_filter == 'acknowledged':
+            user_query = user_query.filter(
+                User.ad_status.in_(['not_found', 'error', 'disabled']),
+                User.ad_acknowledged == True
+            )
+        elif status_filter == 'all':
+            # All users (no filter)
+            pass
+
+        # Get only IDs
+        user_ids = [user.id for user in user_query.all()]
+
+        # Get status display name for UI
+        status_names = {
+            'problematic': 'problemáticos',
+            'not_found': 'no encontrados',
+            'error': 'con errores',
+            'disabled': 'deshabilitados',
+            'active': 'activos',
+            'acknowledged': 'reconocidos',
+            'all': 'totales'
+        }
+        status_display = status_names.get(status_filter, status_filter)
+
+        return jsonify({
+            'success': True,
+            'user_ids': user_ids,
+            'total_count': len(user_ids),
+            'status_filter': status_filter,
+            'status_display': status_display,
+            'search': search if search else None
+        })
+
+    except Exception as e:
+        current_app.logger.error(f'Error getting all user IDs: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': f'Error obteniendo IDs: {str(e)}'
+        }), 500
