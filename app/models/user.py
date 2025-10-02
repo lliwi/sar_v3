@@ -66,8 +66,7 @@ class User(UserMixin, db.Model):
         self.ad_last_check = datetime.utcnow()
         self.ad_error_count = (self.ad_error_count or 0) + 1
         self.is_active = False  # Deactivate user when not found in AD
-        # Reset acknowledgment when status changes
-        self.unacknowledge_ad_issue()
+        # Note: Acknowledgment is preserved while problem persists
 
     def mark_ad_active(self):
         """Mark user as active in AD and reactivate if needed"""
@@ -76,7 +75,7 @@ class User(UserMixin, db.Model):
         self.ad_error_count = 0
         self.last_sync = datetime.utcnow()
         self.is_active = True  # Reactivate user when found in AD
-        # Reset acknowledgment when user becomes active
+        # Reset acknowledgment when user becomes active (problem resolved)
         self.unacknowledge_ad_issue()
 
     def mark_ad_error(self):
@@ -84,16 +83,14 @@ class User(UserMixin, db.Model):
         self.ad_status = 'error'
         self.ad_last_check = datetime.utcnow()
         self.ad_error_count = (self.ad_error_count or 0) + 1
-        # Reset acknowledgment when status changes
-        self.unacknowledge_ad_issue()
+        # Note: Acknowledgment is preserved while problem persists
 
     def mark_ad_disabled(self):
         """Mark user as disabled in AD"""
         self.ad_status = 'disabled'
         self.ad_last_check = datetime.utcnow()
         self.is_active = False
-        # Reset acknowledgment when status changes
-        self.unacknowledge_ad_issue()
+        # Note: Acknowledgment is preserved while problem persists
 
     def is_ad_problematic(self, include_acknowledged=True):
         """Check if user has AD issues"""
