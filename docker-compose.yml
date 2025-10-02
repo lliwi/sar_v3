@@ -120,7 +120,7 @@ services:
       - ./backups:/app/backups
       - ./csv_files:/app/sar_csv_files
       - /etc/localtime:/etc/localtime:ro
-    restart: unless-stopped
+    restart: always
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -144,7 +144,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
-    restart: unless-stopped
+    restart: always
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-saruser} -d ${POSTGRES_DB:-sarapp}"]
       interval: 30s
@@ -160,7 +160,7 @@ services:
     volumes:
       - redis_data:/data
       - /etc/localtime:/etc/localtime:ro
-    restart: unless-stopped
+    restart: always
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
@@ -240,7 +240,7 @@ services:
       - ./data:/app/data
       - ./csv_files:/app/sar_csv_files
       - /etc/localtime:/etc/localtime:ro
-    restart: unless-stopped
+    restart: always
     healthcheck:
       test: ["CMD", "celery", "-A", "celery_worker.celery", "inspect", "ping"]
       interval: 60s
@@ -292,7 +292,7 @@ services:
       - ./celery_worker.py:/app/celery_worker.py:ro
       - ./logs:/app/logs
       - /etc/localtime:/etc/localtime:ro
-    restart: unless-stopped
+    restart: always
     healthcheck:
       test: ["CMD", "celery", "-A", "celery_worker.celery", "inspect", "ping"]
       interval: 60s
@@ -345,7 +345,7 @@ services:
       - ./exports:/app/exports
       - ./csv_files:/app/sar_csv_files
       - /etc/localtime:/etc/localtime:ro
-    restart: unless-stopped
+    restart: always
     healthcheck:
       test: ["CMD", "celery", "-A", "celery_worker.celery", "inspect", "ping"]
       interval: 60s
@@ -406,7 +406,7 @@ services:
       - ./scheduler_standalone.py:/app/scheduler_standalone.py:ro
       - ./logs:/app/logs
       - /etc/localtime:/etc/localtime:ro
-    restart: unless-stopped
+    restart: always
 
   # Task Scheduler Service - Processes pending tasks every 5 minutes
   task-scheduler:
@@ -448,7 +448,7 @@ services:
       - ./logs:/app/logs
       - ./csv_files:/app/sar_csv_files
       - /etc/localtime:/etc/localtime:ro
-    restart: unless-stopped
+    restart: always
 
   # MailHog for email testing (optional)
   mailhog:
@@ -456,7 +456,7 @@ services:
     ports:
       - "1025:1025"  # SMTP server
       - "8025:8025"  # Web UI
-    restart: unless-stopped
+    restart: always
 
 volumes:
   postgres_data:

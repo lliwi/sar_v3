@@ -456,8 +456,32 @@ class SchedulerService:
                             # Check cache first (99% of cases)
                             if username in existing_users:
                                 user = existing_users[username]
-                                # Mark user as active in AD since they're in group membership
-                                user.mark_ad_active()
+
+                                # If user has problematic status, verify in AD before changing status
+                                if user.ad_status in ['not_found', 'error', 'disabled']:
+                                    logger.info(f"🔍 User {username} has problematic status '{user.ad_status}', verifying in AD...")
+                                    try:
+                                        user_details = self.ldap_service.get_user_details(username)
+                                        if user_details:
+                                            # Check if user is disabled in AD
+                                            if user_details.get('is_disabled', False):
+                                                user.mark_ad_disabled()
+                                                logger.info(f"🔒 User {username} verified as DISABLED in AD")
+                                            else:
+                                                # Verified as active - update status
+                                                user.mark_ad_active()
+                                                logger.info(f"✅ User {username} verified and reactivated")
+                                        else:
+                                            # Still not found - skip
+                                            logger.warning(f"❌ User {username} in group but not found in AD verification")
+                                            continue
+                                    except Exception as verify_error:
+                                        logger.error(f"❌ Error verifying user {username}: {str(verify_error)}")
+                                        continue
+                                else:
+                                    # User status is OK, just update last_sync timestamp
+                                    user.last_sync = datetime.utcnow()
+
                                 results['users_found_in_cache'] += 1
                             else:
                                 # User not in cache - fallback lookup

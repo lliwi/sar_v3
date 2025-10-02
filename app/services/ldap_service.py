@@ -227,7 +227,8 @@ class LDAPService:
             search_filter = f"(&(objectClass=user)(|(sAMAccountName={safe_username})({self.attr_user}={safe_username})(userPrincipalName={safe_username}@*)))"
             attributes = [
                 'cn', 'distinguishedName', 'sAMAccountName', 'displayName', 'memberOf', 'userPrincipalName',
-                self.attr_email, self.attr_department, self.attr_firstname, self.attr_lastname, self.attr_user
+                self.attr_email, self.attr_department, self.attr_firstname, self.attr_lastname, self.attr_user,
+                'userAccountControl'  # Include to detect disabled accounts
             ]
 
             # Use multi-OU search if configured, otherwise search base DN
@@ -257,6 +258,9 @@ class LDAPService:
                 distinguished_name = str(user_entry.distinguishedName)
                 sam_account = str(user_entry.sAMAccountName) if user_entry.sAMAccountName else username
 
+                # Check if user is disabled
+                is_disabled = self._is_user_disabled(user_entry)
+
                 conn.unbind()
 
                 return {
@@ -264,7 +268,8 @@ class LDAPService:
                     'full_name': full_name,
                     'email': email,
                     'department': department,
-                    'distinguished_name': distinguished_name
+                    'distinguished_name': distinguished_name,
+                    'is_disabled': is_disabled
                 }
             else:
                 logger.warning(f"User {username} not found in LDAP")
@@ -758,11 +763,29 @@ class LDAPService:
             exists = len(all_entries) > 0
             conn.unbind()
             return exists
-            
+
         except Exception as e:
             logger.error(f"Error verifying group {group_name}: {str(e)}")
             return False
-    
+
+    def _is_user_disabled(self, entry):
+        """Check if user account is disabled in AD"""
+        try:
+            if hasattr(entry, 'userAccountControl'):
+                # Extract value from LDAP3 Attribute object
+                uac_value = entry.userAccountControl.value if hasattr(entry.userAccountControl, 'value') else entry.userAccountControl
+                uac = int(uac_value)
+                # Bit 2 (0x0002) = ACCOUNTDISABLE
+                is_disabled = (uac & 0x0002) != 0
+                if is_disabled:
+                    username = str(entry.sAMAccountName) if hasattr(entry, 'sAMAccountName') else 'unknown'
+                    logger.info(f"🔒 User {username} detected as DISABLED (UAC={uac})")
+                return is_disabled
+        except (ValueError, TypeError, AttributeError) as e:
+            username = str(entry.sAMAccountName) if hasattr(entry, 'sAMAccountName') else 'unknown'
+            logger.warning(f"Could not parse userAccountControl for {username}: {str(e)}")
+        return False
+
     def sync_users(self):
         """Sync AD users to database"""
         try:
@@ -772,7 +795,8 @@ class LDAPService:
             
             # Search for all users using multi-OU search if configured,
             # otherwise fallback to base_dn
-            search_filter = "(&(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"  # Exclude disabled accounts
+            # Include ALL users (active and disabled) to properly detect status
+            search_filter = "(objectClass=user)"
             attributes = [
                 'cn', 'distinguishedName', 'sAMAccountName', 'displayName', 'memberOf', 'userPrincipalName',
                 self.attr_email, self.attr_department, self.attr_firstname, self.attr_lastname, self.attr_user,
@@ -839,7 +863,12 @@ class LDAPService:
                         user.department = department
                         user.distinguished_name = distinguished_name
                         user.last_sync = current_time
-                        user.mark_ad_active()  # This sets is_active=True AND ad_status='active'
+
+                        # Check if user is disabled in AD
+                        if self._is_user_disabled(entry):
+                            user.mark_ad_disabled()
+                        else:
+                            user.mark_ad_active()  # This sets is_active=True AND ad_status='active'
                     else:
                         # Create new user
                         user = User(
