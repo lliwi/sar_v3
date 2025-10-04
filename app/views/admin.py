@@ -2149,9 +2149,10 @@ def sync_memberships_optimized():
 @login_required
 @admin_required
 def ad_status():
-    """View AD status for both users and groups"""
+    """View AD status for both users and groups - OPTIMIZED VERSION"""
     import logging
-    from sqlalchemy import or_
+    from sqlalchemy import or_, func, case
+    from app.models import FolderPermission
 
     logger = logging.getLogger(__name__)
 
@@ -2163,14 +2164,96 @@ def ad_status():
         page = int(request.args.get('page', 1))
         per_page = int(request.args.get('per_page', 50))
 
-        # Prepare results
+        # OPTIMIZATION 1: Calculate aggregate counts in single queries
+        # Users count aggregation
+        user_stats = db.session.query(
+            func.count(User.id).label('total'),
+            func.sum(case((User.ad_status == 'active', 1), else_=0)).label('active'),
+            func.sum(case((User.ad_status == 'not_found', 1), else_=0)).label('not_found_all'),
+            func.sum(case((User.ad_status == 'error', 1), else_=0)).label('error_all'),
+            func.sum(case((User.ad_status == 'disabled', 1), else_=0)).label('disabled_all'),
+            func.sum(case(
+                ((User.ad_status.in_(['not_found', 'error', 'disabled'])) & (User.ad_acknowledged == False), 1),
+                else_=0
+            )).label('problematic'),
+            func.sum(case(
+                ((User.ad_status.in_(['not_found', 'error', 'disabled'])) & (User.ad_acknowledged == True), 1),
+                else_=0
+            )).label('acknowledged'),
+            func.sum(case(
+                ((User.ad_status == 'not_found') & (User.ad_acknowledged == False), 1),
+                else_=0
+            )).label('not_found'),
+            func.sum(case(
+                ((User.ad_status == 'error') & (User.ad_acknowledged == False), 1),
+                else_=0
+            )).label('error'),
+            func.sum(case(
+                ((User.ad_status == 'disabled') & (User.ad_acknowledged == False), 1),
+                else_=0
+            )).label('disabled')
+        ).first()
+
+        # Groups count aggregation
+        group_stats = db.session.query(
+            func.count(ADGroup.id).label('total'),
+            func.sum(case((ADGroup.ad_status == 'active', 1), else_=0)).label('active'),
+            func.sum(case((ADGroup.ad_status == 'not_found', 1), else_=0)).label('not_found'),
+            func.sum(case((ADGroup.ad_status == 'error', 1), else_=0)).label('error'),
+            func.sum(case((ADGroup.ad_status == 'disabled', 1), else_=0)).label('disabled'),
+            func.sum(case(
+                (ADGroup.ad_status.in_(['not_found', 'error', 'disabled']), 1),
+                else_=0
+            )).label('problematic')
+        ).first()
+
+        user_counts = {
+            'total': user_stats.total or 0,
+            'active': user_stats.active or 0,
+            'not_found': user_stats.not_found or 0,
+            'error': user_stats.error or 0,
+            'disabled': user_stats.disabled or 0,
+            'problematic': user_stats.problematic or 0,
+            'acknowledged': user_stats.acknowledged or 0
+        }
+
+        group_counts = {
+            'total': group_stats.total or 0,
+            'active': group_stats.active or 0,
+            'not_found': group_stats.not_found or 0,
+            'error': group_stats.error or 0,
+            'disabled': group_stats.disabled or 0,
+            'problematic': group_stats.problematic or 0
+        }
+
+        # Combined status counts
+        status_counts = {
+            'total': user_counts['total'] + group_counts['total'],
+            'active': user_counts['active'] + group_counts['active'],
+            'not_found': user_counts['not_found'] + group_counts['not_found'],
+            'error': user_counts['error'] + group_counts['error'],
+            'disabled': user_counts['disabled'] + group_counts['disabled'],
+            'problematic': user_counts['problematic'] + group_counts['problematic'],
+            'acknowledged': user_counts['acknowledged'],
+            'users': user_counts,
+            'groups': group_counts
+        }
+
+        # OPTIMIZATION 2: Build queries with filters and pagination, but don't execute yet
         all_objects = []
 
         # Process Users
         if object_type in ['all', 'users']:
             user_query = User.query
 
-            # Apply search filter for users
+            # OPTIMIZATION 3: Eager load relationships to avoid N+1
+            user_query = user_query.options(
+                db.joinedload(User.owned_folders),
+                db.joinedload(User.validated_folders),
+                db.joinedload(User.acknowledged_by_user)
+            )
+
+            # Apply search filter
             if search:
                 search_term = f'%{search}%'
                 user_query = user_query.filter(or_(
@@ -2180,7 +2263,7 @@ def ad_status():
                     User.department.ilike(search_term)
                 ))
 
-            # Apply status filter for users
+            # Apply status filter
             if status_filter == 'problematic':
                 user_query = user_query.filter(
                     User.ad_status.in_(['not_found', 'error', 'disabled']),
@@ -2209,8 +2292,20 @@ def ad_status():
                     User.ad_acknowledged == True
                 )
 
-            # Get users and format
-            users = user_query.order_by(User.ad_last_check.desc().nullslast(), User.ad_error_count.desc()).all()
+            # OPTIMIZATION 4: Apply pagination differently for 'all' vs single type
+            if object_type == 'all':
+                # When showing both users and groups, load all users and paginate in Python
+                users = user_query.order_by(
+                    User.ad_last_check.desc().nullslast(),
+                    User.ad_error_count.desc()
+                ).all()
+            else:
+                # When showing only users, paginate in SQL
+                users = user_query.order_by(
+                    User.ad_last_check.desc().nullslast(),
+                    User.ad_error_count.desc()
+                ).limit(per_page).offset((page - 1) * per_page).all()
+
             for user in users:
                 all_objects.append({
                     'id': f'user_{user.id}',
@@ -2231,16 +2326,24 @@ def ad_status():
                     'ad_acknowledged_at': user.ad_acknowledged_at.isoformat() if user.ad_acknowledged_at else None,
                     'ad_acknowledged_by': user.acknowledged_by_user.username if user.acknowledged_by_user else None,
                     'affected_resources': {
-                        'owned_folders': len(user.owned_folders) if hasattr(user, 'owned_folders') else 0,
-                        'validated_folders': len(user.validated_folders) if hasattr(user, 'validated_folders') else 0
-                    }
+                        'owned_folders': len(user.owned_folders),
+                        'validated_folders': len(user.validated_folders)
+                    },
+                    # Add sortable fields for combined sorting
+                    '_sort_date': user.ad_last_check or datetime.min,
+                    '_sort_error_count': user.ad_error_count or 0
                 })
 
-        # Process Groups (skip groups when viewing acknowledged items since only users have acknowledge functionality)
+        # Process Groups
         if object_type in ['all', 'groups'] and status_filter != 'acknowledged':
             group_query = ADGroup.query
 
-            # Apply search filter for groups
+            # OPTIMIZATION 5: Eager load permissions to avoid N+1
+            group_query = group_query.options(
+                db.joinedload(ADGroup.permissions).joinedload(FolderPermission.folder)
+            )
+
+            # Apply search filter
             if search:
                 search_term = f'%{search}%'
                 group_query = group_query.filter(or_(
@@ -2249,7 +2352,7 @@ def ad_status():
                     ADGroup.distinguished_name.ilike(search_term)
                 ))
 
-            # Apply status filter for groups
+            # Apply status filter
             if status_filter == 'problematic':
                 group_query = group_query.filter(ADGroup.ad_status.in_(['not_found', 'error', 'disabled']))
             elif status_filter == 'not_found':
@@ -2261,10 +2364,24 @@ def ad_status():
             elif status_filter == 'active':
                 group_query = group_query.filter(ADGroup.ad_status == 'active')
 
-            # Get groups and format
-            groups = group_query.order_by(ADGroup.ad_last_check.desc().nullslast(), ADGroup.ad_error_count.desc()).all()
+            # OPTIMIZATION 6: Apply pagination differently for 'all' vs single type
+            if object_type == 'all':
+                # When showing both users and groups, load all groups and paginate in Python
+                groups = group_query.order_by(
+                    ADGroup.ad_last_check.desc().nullslast(),
+                    ADGroup.ad_error_count.desc()
+                ).all()
+            else:
+                # When showing only groups, paginate in SQL
+                groups = group_query.order_by(
+                    ADGroup.ad_last_check.desc().nullslast(),
+                    ADGroup.ad_error_count.desc()
+                ).limit(per_page).offset((page - 1) * per_page).all()
+
             for group in groups:
-                affected_folders = group.get_affected_folders()
+                # OPTIMIZATION 7: Use preloaded permissions instead of get_affected_folders()
+                affected_folders_count = sum(1 for fp in group.permissions if fp.is_active)
+
                 all_objects.append({
                     'id': f'group_{group.id}',
                     'object_type': 'group',
@@ -2281,22 +2398,73 @@ def ad_status():
                     'last_sync': group.last_sync.isoformat() if group.last_sync else None,
                     'created_at': group.created_at.isoformat() if group.created_at else None,
                     'affected_resources': {
-                        'folders_with_permissions': len(affected_folders)
-                    }
+                        'folders_with_permissions': affected_folders_count
+                    },
+                    # Add sortable fields for combined sorting
+                    '_sort_date': group.ad_last_check or datetime.min,
+                    '_sort_error_count': group.ad_error_count or 0
                 })
 
-        # Sort all objects by ad_last_check and ad_error_count
-        all_objects.sort(key=lambda x: (
-            x['ad_last_check'] is None,  # None values last
-            x['ad_last_check'] if x['ad_last_check'] is not None else '',
-            -(x['ad_error_count'] or 0)
-        ), reverse=True)
+        # OPTIMIZATION 9: When showing 'all', sort and paginate the combined list in Python
+        if object_type == 'all':
+            # Sort combined list by date (desc) and error count (desc)
+            all_objects.sort(key=lambda x: (x['_sort_date'], x['_sort_error_count']), reverse=True)
 
-        # Manual pagination
-        total_objects = len(all_objects)
-        start_idx = (page - 1) * per_page
-        end_idx = start_idx + per_page
-        paginated_objects = all_objects[start_idx:end_idx]
+            # Apply pagination to the sorted combined list
+            start_idx = (page - 1) * per_page
+            end_idx = start_idx + per_page
+            all_objects = all_objects[start_idx:end_idx]
+
+        # OPTIMIZATION 8: Use counts from aggregates instead of len(all_objects)
+        if object_type == 'users':
+            if status_filter == 'all':
+                total_objects = user_counts['total']
+            elif status_filter == 'problematic':
+                total_objects = user_counts['problematic']
+            elif status_filter == 'active':
+                total_objects = user_counts['active']
+            elif status_filter == 'not_found':
+                total_objects = user_counts['not_found']
+            elif status_filter == 'error':
+                total_objects = user_counts['error']
+            elif status_filter == 'disabled':
+                total_objects = user_counts['disabled']
+            elif status_filter == 'acknowledged':
+                total_objects = user_counts['acknowledged']
+            else:
+                total_objects = user_counts['total']
+        elif object_type == 'groups':
+            if status_filter == 'all':
+                total_objects = group_counts['total']
+            elif status_filter == 'problematic':
+                total_objects = group_counts['problematic']
+            elif status_filter == 'active':
+                total_objects = group_counts['active']
+            elif status_filter == 'not_found':
+                total_objects = group_counts['not_found']
+            elif status_filter == 'error':
+                total_objects = group_counts['error']
+            elif status_filter == 'disabled':
+                total_objects = group_counts['disabled']
+            else:
+                total_objects = group_counts['total']
+        else:  # 'all'
+            if status_filter == 'all':
+                total_objects = status_counts['total']
+            elif status_filter == 'problematic':
+                total_objects = status_counts['problematic']
+            elif status_filter == 'active':
+                total_objects = status_counts['active']
+            elif status_filter == 'not_found':
+                total_objects = status_counts['not_found']
+            elif status_filter == 'error':
+                total_objects = status_counts['error']
+            elif status_filter == 'disabled':
+                total_objects = status_counts['disabled']
+            elif status_filter == 'acknowledged':
+                total_objects = status_counts['acknowledged']
+            else:
+                total_objects = status_counts['total']
 
         # Create pagination object-like structure
         class PaginationResult:
@@ -2305,7 +2473,7 @@ def ad_status():
                 self.page = page
                 self.per_page = per_page
                 self.total = total
-                self.pages = (total + per_page - 1) // per_page
+                self.pages = (total + per_page - 1) // per_page if total > 0 else 1
                 self.has_prev = page > 1
                 self.has_next = page < self.pages
                 self.prev_num = page - 1 if self.has_prev else None
@@ -2319,61 +2487,13 @@ def ad_status():
                        num > last - right_edge:
                         yield num
 
-        objects_paginated = PaginationResult(paginated_objects, page, per_page, total_objects)
-
-        # Get status counts for summary
-        user_counts = {
-            'total': User.query.count(),
-            'active': User.query.filter(User.ad_status == 'active').count(),
-            'not_found': User.query.filter(
-                User.ad_status == 'not_found',
-                User.ad_acknowledged == False
-            ).count(),
-            'error': User.query.filter(
-                User.ad_status == 'error',
-                User.ad_acknowledged == False
-            ).count(),
-            'disabled': User.query.filter(
-                User.ad_status == 'disabled',
-                User.ad_acknowledged == False
-            ).count(),
-            'problematic': User.query.filter(
-                User.ad_status.in_(['not_found', 'error', 'disabled']),
-                User.ad_acknowledged == False
-            ).count(),
-            'acknowledged': User.query.filter(
-                User.ad_status.in_(['not_found', 'error', 'disabled']),
-                User.ad_acknowledged == True
-            ).count()
-        }
-
-        group_counts = {
-            'total': ADGroup.query.count(),
-            'active': ADGroup.query.filter(ADGroup.ad_status == 'active').count(),
-            'not_found': ADGroup.query.filter(ADGroup.ad_status == 'not_found').count(),
-            'error': ADGroup.query.filter(ADGroup.ad_status == 'error').count(),
-            'disabled': ADGroup.query.filter(ADGroup.ad_status == 'disabled').count(),
-            'problematic': ADGroup.query.filter(ADGroup.ad_status.in_(['not_found', 'error', 'disabled'])).count()
-        }
-
-        # Combined status counts
-        status_counts = {
-            'total': user_counts['total'] + group_counts['total'],
-            'active': user_counts['active'] + group_counts['active'],
-            'not_found': user_counts['not_found'] + group_counts['not_found'],
-            'error': user_counts['error'] + group_counts['error'],
-            'disabled': user_counts['disabled'] + group_counts['disabled'],
-            'problematic': user_counts['problematic'] + group_counts['problematic'],
-            'acknowledged': user_counts['acknowledged'],  # Only users have acknowledged
-            'users': user_counts,
-            'groups': group_counts
-        }
+        objects_paginated = PaginationResult(all_objects, page, per_page, total_objects)
 
         # Check if it's an AJAX request or API call
         if request.headers.get('Accept') == 'application/json' or request.args.get('format') == 'json':
             return jsonify({
                 'success': True,
-                'objects': paginated_objects,
+                'objects': all_objects,
                 'pagination': {
                     'page': objects_paginated.page,
                     'pages': objects_paginated.pages,
