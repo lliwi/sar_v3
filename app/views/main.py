@@ -334,99 +334,121 @@ def my_requests():
 def my_permissions():
     """Show only folders where the user has real access permissions through AD groups"""
     page = request.args.get('page', 1, type=int)
-    
-    # Get approved permission requests for the current user
+
+    # Get approved permission requests for the current user with eager loading
     approved_requests = PermissionRequest.query.filter_by(
         requester=current_user,
         status='approved'
     ).options(
         db.joinedload(PermissionRequest.folder),
-        db.joinedload(PermissionRequest.ad_group)
+        db.joinedload(PermissionRequest.ad_group),
+        db.joinedload(PermissionRequest.validator)  # Added to avoid N+1
     ).order_by(PermissionRequest.validation_date.desc()).paginate(
         page=page, per_page=20, error_out=False
     )
-    
-    try:
-        # Get current user's AD groups
-        from app.services.ldap_service import LDAPService
-        ldap_service = LDAPService()
-        user_groups = ldap_service.get_user_groups(current_user.username)
-        
-        if not user_groups:
-            # If no groups found, show empty result
-            return render_template('main/my_permissions.html',
-                                 title='Mis Permisos',
-                                 approved_requests=approved_requests,
-                                 permissions_by_folder={})
-        
-        # Get AD group names (extract CN from full DN)
-        user_group_names = []
-        for group in user_groups:
-            # Extract CN from LDAP DN format: CN=groupname,OU=...
-            if group.startswith('CN='):
-                group_name = group.split(',')[0].replace('CN=', '')
-                user_group_names.append(group_name)
-            else:
-                user_group_names.append(group)
-        
-        # Find folders where user has access through their AD groups
-        from app.models import ADGroup
-        accessible_folders = []
-        permissions_by_folder = {}
-        
-        # Get all folder permissions for groups the user belongs to
-        user_ad_groups = ADGroup.query.filter(ADGroup.name.in_(user_group_names)).all()
-        
-        if user_ad_groups:
-            folder_permissions = FolderPermission.query.filter(
-                FolderPermission.ad_group_id.in_([g.id for g in user_ad_groups]),
-                FolderPermission.is_active == True
-            ).options(
-                db.joinedload(FolderPermission.folder),
-                db.joinedload(FolderPermission.ad_group)
-            ).all()
-            
-            # Organize permissions by folder
-            for permission in folder_permissions:
-                folder_id = permission.folder_id
-                folder = permission.folder
-                
-                # Only show active folders
-                if not folder.is_active:
-                    continue
-                    
-                if folder_id not in permissions_by_folder:
-                    permissions_by_folder[folder_id] = {
-                        'folder': folder,
-                        'read_groups': [],
-                        'write_groups': []
-                    }
-                    if folder not in accessible_folders:
-                        accessible_folders.append(folder)
-                
-                # Add the group to the appropriate permission type with deletion status
-                # Check if current user specifically has deletion in progress for this folder
-                user_has_deletion_in_progress = folder.has_user_deletion_in_progress(current_user.id)
-                group_info = {
-                    'group': permission.ad_group,
-                    'deletion_in_progress': user_has_deletion_in_progress
-                }
 
-                if permission.permission_type == 'read':
-                    permissions_by_folder[folder_id]['read_groups'].append(group_info)
-                elif permission.permission_type == 'write':
-                    permissions_by_folder[folder_id]['write_groups'].append(group_info)
-        
-    except Exception as e:
-        # If LDAP is not available or there's an error, fall back to empty result
-        import logging
-        logging.error(f"Error getting user groups for {current_user.username}: {e}")
-        permissions_by_folder = {}
-    
+    # Get user's AD groups from synced database (no LDAP call)
+    from app.models import UserADGroupMembership
+    user_ad_groups = (
+        db.session.query(ADGroup)
+        .join(UserADGroupMembership, UserADGroupMembership.ad_group_id == ADGroup.id)
+        .filter(
+            UserADGroupMembership.user_id == current_user.id,
+            UserADGroupMembership.is_active == True
+        )
+        .all()
+    )
+
+    # Early return if user has no AD groups
+    if not user_ad_groups:
+        return render_template('main/my_permissions.html',
+                             title='Mis Permisos',
+                             approved_requests=approved_requests,
+                             permissions_by_folder={},
+                             total_unique_groups=0)
+
+    accessible_folders = []
+    permissions_by_folder = {}
+
+    # Get all folder permissions for groups the user belongs to with eager loading
+    folder_permissions = FolderPermission.query.filter(
+        FolderPermission.ad_group_id.in_([g.id for g in user_ad_groups]),
+        FolderPermission.is_active == True
+    ).options(
+        db.joinedload(FolderPermission.folder),
+        db.joinedload(FolderPermission.ad_group)
+    ).all()
+
+    # Batch query for deletion status - get ALL deletion tasks for this user in one query
+    from app.models.task import Task
+    from sqlalchemy import and_, or_
+    import json
+
+    folder_ids_with_deletion = set()
+    active_deletion_tasks = Task.query.filter(
+        and_(
+            Task.status.in_(['pending', 'processing']),
+            or_(
+                Task.task_type == 'airflow_dag',
+                Task.task_type == 'ad_verification'
+            ),
+            Task.task_data.contains(f'"user_id": {current_user.id}'),
+            Task.task_data.contains('"action": "delete"')
+        )
+    ).all()
+
+    # Extract folder_ids from task_data JSON
+    for task in active_deletion_tasks:
+        try:
+            task_data = json.loads(task.task_data)
+            if 'folder_id' in task_data:
+                folder_ids_with_deletion.add(task_data['folder_id'])
+        except:
+            pass
+
+    # Organize permissions by folder
+    unique_groups = set()  # For counting unique groups
+    for permission in folder_permissions:
+        folder_id = permission.folder_id
+        folder = permission.folder
+
+        # Only show active folders
+        if not folder.is_active:
+            continue
+
+        if folder_id not in permissions_by_folder:
+            permissions_by_folder[folder_id] = {
+                'folder': folder,
+                'read_groups': [],
+                'write_groups': []
+            }
+            if folder not in accessible_folders:
+                accessible_folders.append(folder)
+
+        # Check deletion status using the batch-loaded data (no N+1 query)
+        user_has_deletion_in_progress = folder.id in folder_ids_with_deletion
+
+        group_info = {
+            'group': permission.ad_group,
+            'deletion_in_progress': user_has_deletion_in_progress
+        }
+
+        # Track unique groups
+        unique_groups.add(permission.ad_group.id)
+
+        if permission.permission_type == 'read':
+            permissions_by_folder[folder_id]['read_groups'].append(group_info)
+        elif permission.permission_type == 'write':
+            permissions_by_folder[folder_id]['write_groups'].append(group_info)
+
+    # Calculate total unique groups
+    total_unique_groups = len(unique_groups)
+
     return render_template('main/my_permissions.html',
                          title='Mis Permisos',
                          approved_requests=approved_requests,
-                         permissions_by_folder=permissions_by_folder)
+                         permissions_by_folder=permissions_by_folder,
+                         total_unique_groups=total_unique_groups)
 
 @main_bp.route('/pending-validations')
 @login_required

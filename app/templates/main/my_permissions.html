@@ -197,17 +197,7 @@
                     <div class="d-flex justify-content-between">
                         <div>
                             <h5 class="card-title">Grupos AD Asignados</h5>
-                            <h2 class="stats-number mb-0">
-                                {% set total_groups = [] %}
-                                {% for folder_data in permissions_by_folder.values() %}
-                                    {% for group in folder_data.read_groups + folder_data.write_groups %}
-                                        {% if group not in total_groups %}
-                                            {% set _ = total_groups.append(group) %}
-                                        {% endif %}
-                                    {% endfor %}
-                                {% endfor %}
-                                {{ total_groups|length }}
-                            </h2>
+                            <h2 class="stats-number mb-0">{{ total_unique_groups }}</h2>
                         </div>
                         <div class="align-self-center">
                             <i class="fas fa-users stats-icon" aria-hidden="true"></i>
