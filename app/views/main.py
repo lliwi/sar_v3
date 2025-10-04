@@ -52,79 +52,93 @@ def health_check():
 @main_bp.route('/')
 @login_required
 def dashboard():
-    # Get user's pending requests
-    pending_requests = PermissionRequest.query.filter_by(
-        requester=current_user,
-        status='pending'
-    ).order_by(PermissionRequest.created_at.desc()).limit(5).all()
+    # Get user's pending requests with eager loading to avoid N+1 queries
+    pending_requests = (
+        PermissionRequest.query
+        .filter_by(requester=current_user, status='pending')
+        .options(
+            db.joinedload(PermissionRequest.folder),
+            db.joinedload(PermissionRequest.ad_group)
+        )
+        .order_by(PermissionRequest.created_at.desc())
+        .limit(5)
+        .all()
+    )
     
-    # Get requests pending validation by current user
-    validation_requests = []
+    # Get requests pending validation by current user with eager loading
     if current_user.is_admin():
-        validation_requests = PermissionRequest.query.filter_by(status='pending').limit(5).all()
+        validation_requests = (
+            PermissionRequest.query
+            .filter_by(status='pending')
+            .options(
+                db.joinedload(PermissionRequest.folder),
+                db.joinedload(PermissionRequest.requester),
+                db.joinedload(PermissionRequest.ad_group)
+            )
+            .limit(5)
+            .all()
+        )
     else:
         # Non-admin users see ONLY requests specifically assigned to them as validator
         # This matches the filtering logic used in pending_validations()
-        validation_requests = PermissionRequest.query.filter_by(
-            status='pending',
-            validator_id=current_user.id
-        ).limit(5).all()
+        validation_requests = (
+            PermissionRequest.query
+            .filter_by(status='pending', validator_id=current_user.id)
+            .options(
+                db.joinedload(PermissionRequest.folder),
+                db.joinedload(PermissionRequest.requester),
+                db.joinedload(PermissionRequest.ad_group)
+            )
+            .limit(5)
+            .all()
+        )
     
     # Get recent audit events
     recent_events = AuditEvent.query.filter_by(user=current_user).order_by(
         AuditEvent.created_at.desc()
     ).limit(5).all()
     
-    # Calculate user permissions count based on real AD group membership
-    user_permissions_count = 0
-    try:
-        # Get current user's AD groups
-        from app.services.ldap_service import LDAPService
-        ldap_service = LDAPService()
-        user_groups = ldap_service.get_user_groups(current_user.username)
+    # Calculate user permissions count using synced UserADGroupMembership (no LDAP call)
+    # This uses the already synchronized AD group memberships from the database
+    from app.models import UserADGroupMembership
+    user_permissions_count = (
+        db.session.query(Folder.id)
+        .join(FolderPermission, FolderPermission.folder_id == Folder.id)
+        .join(UserADGroupMembership, UserADGroupMembership.ad_group_id == FolderPermission.ad_group_id)
+        .filter(
+            UserADGroupMembership.user_id == current_user.id,
+            UserADGroupMembership.is_active == True,
+            FolderPermission.is_active == True,
+            Folder.is_active == True
+        )
+        .distinct()
+        .count()
+    )
 
-        if user_groups:
-            # Get AD group names (extract CN from full DN)
-            user_group_names = []
-            for group in user_groups:
-                # Extract CN from LDAP DN format: CN=groupname,OU=...
-                if group.startswith('CN='):
-                    group_name = group.split(',')[0].replace('CN=', '')
-                    user_group_names.append(group_name)
-                else:
-                    user_group_names.append(group)
+    # Calculate user's managed resources (owned + validated folders) using optimized SQL
+    from app.models.user import folder_owners, folder_validators
+    from sqlalchemy import union
 
-            # Find folders where user has access through their AD groups
-            user_ad_groups = ADGroup.query.filter(ADGroup.name.in_(user_group_names)).all()
+    owned_query = (
+        db.session.query(Folder.id)
+        .join(folder_owners, folder_owners.c.folder_id == Folder.id)
+        .filter(
+            folder_owners.c.user_id == current_user.id,
+            Folder.is_active == True
+        )
+    )
 
-            if user_ad_groups:
-                # Get distinct folders where user has permissions
-                accessible_folders = Folder.query.join(FolderPermission).filter(
-                    FolderPermission.ad_group_id.in_([g.id for g in user_ad_groups]),
-                    FolderPermission.is_active == True,
-                    Folder.is_active == True
-                ).distinct().count()
+    validated_query = (
+        db.session.query(Folder.id)
+        .join(folder_validators, folder_validators.c.folder_id == Folder.id)
+        .filter(
+            folder_validators.c.user_id == current_user.id,
+            Folder.is_active == True
+        )
+    )
 
-                user_permissions_count = accessible_folders
-
-    except Exception as e:
-        # If LDAP is not available or there's an error, fall back to 0
-        import logging
-        logging.error(f"Error getting user groups for dashboard stats for {current_user.username}: {e}")
-        user_permissions_count = 0
-
-    # Calculate user's managed resources (owned + validated folders)
-    owned_folders = current_user.owned_folders
-    validated_folders = current_user.validated_folders
-
-    # Combine and remove duplicates while preserving folder objects
-    all_managed_folders = list(owned_folders)
-    for folder in validated_folders:
-        if folder not in all_managed_folders:
-            all_managed_folders.append(folder)
-
-    # Filter only active folders
-    managed_folders_count = len([f for f in all_managed_folders if f.is_active])
+    # Union removes duplicates automatically, then count
+    managed_folders_count = owned_query.union(validated_query).count()
 
     stats = {
         'pending_requests': len(pending_requests),
@@ -133,15 +147,26 @@ def dashboard():
         'user_permissions': user_permissions_count
     }
     
-    # Add task statistics for administrators
+    # Add task statistics for administrators using optimized aggregate query
     if current_user.is_admin():
         from app.models import Task
+        from sqlalchemy import func, case
+
+        # Single query with aggregates instead of 5 separate queries
+        task_stats = db.session.query(
+            func.count(Task.id).label('total'),
+            func.sum(case((Task.status == 'pending', 1), else_=0)).label('pending'),
+            func.sum(case((Task.status == 'running', 1), else_=0)).label('running'),
+            func.sum(case((Task.status == 'failed', 1), else_=0)).label('failed'),
+            func.sum(case((Task.status == 'completed', 1), else_=0)).label('completed')
+        ).first()
+
         stats.update({
-            'total_tasks': Task.query.count(),
-            'pending_tasks': Task.query.filter_by(status='pending').count(),
-            'running_tasks': Task.query.filter_by(status='running').count(),
-            'failed_tasks': Task.query.filter_by(status='failed').count(),
-            'completed_tasks': Task.query.filter_by(status='completed').count()
+            'total_tasks': task_stats.total or 0,
+            'pending_tasks': task_stats.pending or 0,
+            'running_tasks': task_stats.running or 0,
+            'failed_tasks': task_stats.failed or 0,
+            'completed_tasks': task_stats.completed or 0
         })
     
     return render_template('main/dashboard.html', 
