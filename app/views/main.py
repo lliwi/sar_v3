@@ -321,11 +321,17 @@ def request_permission():
 @login_required
 def my_requests():
     page = request.args.get('page', 1, type=int)
-    requests = PermissionRequest.query.filter_by(requester=current_user).order_by(
+
+    # OPTIMIZATION: Add eager loading to avoid N+1 queries
+    requests = PermissionRequest.query.filter_by(requester=current_user).options(
+        db.joinedload(PermissionRequest.folder),
+        db.joinedload(PermissionRequest.ad_group),
+        db.joinedload(PermissionRequest.validator)
+    ).order_by(
         PermissionRequest.created_at.desc()
     ).paginate(page=page, per_page=20, error_out=False)
-    
-    return render_template('main/my_requests.html', 
+
+    return render_template('main/my_requests.html',
                          title='Mis Solicitudes',
                          requests=requests)
 
@@ -486,49 +492,74 @@ def my_resources():
     """Show folders that the current user owns or validates"""
     page = request.args.get('page', 1, type=int)
     folder_filter = request.args.get('filter', '').strip()
-    
-    # Get folders where the user is owner or validator
-    owned_folders = current_user.owned_folders
-    validated_folders = current_user.validated_folders
-    
-    # Combine and remove duplicates while preserving folder objects
-    all_managed_folders = list(owned_folders)
-    for folder in validated_folders:
-        if folder not in all_managed_folders:
-            all_managed_folders.append(folder)
-    
-    # Filter only active folders
-    managed_folders = [f for f in all_managed_folders if f.is_active]
-    
+
+    # OPTIMIZATION: Use eager loading to get folders with their permissions in fewer queries
+    from app.models.user import folder_owners, folder_validators
+
+    # Get folders where user is owner (using many-to-many relationship)
+    owned_query = Folder.query.join(folder_owners).filter(
+        folder_owners.c.user_id == current_user.id,
+        Folder.is_active == True
+    ).options(
+        db.joinedload(Folder.permissions).joinedload(FolderPermission.ad_group)
+    )
+
+    # Get folders where user is validator (using many-to-many relationship)
+    validated_query = Folder.query.join(folder_validators).filter(
+        folder_validators.c.user_id == current_user.id,
+        Folder.is_active == True
+    ).options(
+        db.joinedload(Folder.permissions).joinedload(FolderPermission.ad_group)
+    )
+
     # Apply name filter if provided
     if folder_filter:
-        filtered_folders = []
-        for f in managed_folders:
-            matches = folder_filter.lower() in f.name.lower() or folder_filter.lower() in f.path.lower()
-            if matches:
-                filtered_folders.append(f)
-        managed_folders = filtered_folders
-        print(f"DEBUG: After filtering: {len(managed_folders)} folders remain")
-    
-    # Sort by name
-    managed_folders.sort(key=lambda x: x.name.lower())
-    
-    # Get folder details with permissions
+        filter_condition = db.or_(
+            Folder.name.ilike(f'%{folder_filter}%'),
+            Folder.path.ilike(f'%{folder_filter}%')
+        )
+        owned_query = owned_query.filter(filter_condition)
+        validated_query = validated_query.filter(filter_condition)
+
+    # Execute queries
+    owned_folders = owned_query.all()
+    validated_folders = validated_query.all()
+
+    # Combine and remove duplicates
+    folder_dict = {}
+    for folder in owned_folders:
+        folder_dict[folder.id] = {
+            'folder': folder,
+            'is_owner': True,
+            'is_validator': False
+        }
+    for folder in validated_folders:
+        if folder.id in folder_dict:
+            folder_dict[folder.id]['is_validator'] = True
+        else:
+            folder_dict[folder.id] = {
+                'folder': folder,
+                'is_owner': False,
+                'is_validator': True
+            }
+
+    # Build folder details with preloaded permissions
     folder_details = []
-    for folder in managed_folders:
-        # Determine user's role for this folder
-        is_owner = folder in owned_folders
-        is_validator = folder in validated_folders
+    for folder_info in folder_dict.values():
+        folder = folder_info['folder']
+        is_owner = folder_info['is_owner']
+        is_validator = folder_info['is_validator']
+
         role = []
         if is_owner:
             role.append('Propietario')
         if is_validator:
             role.append('Validador')
-        
-        # Get folder permissions by type
-        read_permissions = folder.get_permissions_by_type('read')
-        write_permissions = folder.get_permissions_by_type('write')
-        
+
+        # OPTIMIZATION: Use preloaded permissions instead of calling get_permissions_by_type()
+        read_permissions = [p for p in folder.permissions if p.permission_type == 'read' and p.is_active]
+        write_permissions = [p for p in folder.permissions if p.permission_type == 'write' and p.is_active]
+
         folder_details.append({
             'folder': folder,
             'role': ' / '.join(role),
@@ -538,14 +569,17 @@ def my_resources():
             'write_permissions': write_permissions,
             'total_permissions': len(read_permissions) + len(write_permissions)
         })
-    
+
+    # Sort by folder name
+    folder_details.sort(key=lambda x: x['folder'].name.lower())
+
     # Paginate results manually since we're working with a list
     per_page = 10
     total = len(folder_details)
     start = (page - 1) * per_page
     end = start + per_page
     paginated_folders = folder_details[start:end]
-    
+
     # Create pagination info
     pagination_info = {
         'page': page,
@@ -557,7 +591,7 @@ def my_resources():
         'prev_num': page - 1 if page > 1 else None,
         'next_num': page + 1 if page * per_page < total else None
     }
-    
+
     return render_template('main/my_resources.html',
                          title='Mis Recursos',
                          folder_details=paginated_folders,
@@ -568,33 +602,33 @@ def my_resources():
 @login_required
 def manage_resource(folder_id):
     """Manage permissions for a specific folder"""
-    folder = Folder.query.get_or_404(folder_id)
-    
+    # OPTIMIZATION: Eager load folder with all its permissions and AD groups
+    folder = Folder.query.options(
+        db.joinedload(Folder.permissions).joinedload(FolderPermission.ad_group)
+    ).get_or_404(folder_id)
+
     # Check if user can manage this folder
     if not current_user.can_validate_folder(folder):
         flash('No tienes permisos para gestionar esta carpeta.', 'error')
         return redirect(url_for('main.my_resources'))
-    
-    # Get current permissions
-    read_permissions = folder.get_permissions_by_type('read')
-    write_permissions = folder.get_permissions_by_type('write')
-    
+
+    # OPTIMIZATION: Use preloaded permissions instead of calling get_permissions_by_type()
+    read_permissions = [p for p in folder.permissions if p.permission_type == 'read' and p.is_active]
+    write_permissions = [p for p in folder.permissions if p.permission_type == 'write' and p.is_active]
+
     # Get available AD groups for assignment
     from app.models import ADGroup
     available_groups = ADGroup.query.filter_by(is_active=True).order_by(ADGroup.name).all()
-    
-    # Get groups that already have permissions (to avoid duplicates)
-    assigned_group_ids = set()
-    for perm in folder.permissions:
-        if perm.is_active:
-            assigned_group_ids.add(perm.ad_group_id)
-    
+
+    # OPTIMIZATION: Use preloaded permissions to get assigned group IDs
+    assigned_group_ids = {perm.ad_group_id for perm in folder.permissions if perm.is_active}
+
     available_groups = [g for g in available_groups if g.id not in assigned_group_ids]
-    
+
     # Get comprehensive permissions summary (users and AD groups)
     permissions_summary = folder.get_permissions_summary()
     users_with_permissions = permissions_summary['users_with_permissions']
-    
+
     # Get all active users for the assignment form
     all_active_users = User.query.filter_by(is_active=True).order_by(User.username).all()
     
