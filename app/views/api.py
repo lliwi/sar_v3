@@ -162,7 +162,14 @@ def validate_permission_by_email(request_id, token):
         # Note: Tasks are automatically created by the permission_request.approve() method above
         # No need to create tasks manually here to avoid duplication
         current_app.logger.info(f"Email approval completed for permission request {permission_request.id}. Tasks created automatically by approve() method.")
-        
+
+        # Send status notification to requester
+        try:
+            from app.services.email_service import send_permission_status_notification
+            send_permission_status_notification(permission_request.id, 'approved')
+        except Exception as e:
+            current_app.logger.error(f"Error sending status notification: {str(e)}")
+
         # Log audit event
         AuditEvent.log_event(
             user=validator,
@@ -186,7 +193,14 @@ def validate_permission_by_email(request_id, token):
     
     elif action == 'reject':
         permission_request.reject(validator, comment)
-        
+
+        # Send status notification to requester
+        try:
+            from app.services.email_service import send_permission_status_notification
+            send_permission_status_notification(permission_request.id, 'rejected')
+        except Exception as e:
+            current_app.logger.error(f"Error sending status notification: {str(e)}")
+
         # Log audit event
         AuditEvent.log_event(
             user=validator,
@@ -503,9 +517,16 @@ def validate_request_api(request_id):
             # Note: Tasks are automatically created by the permission_request.approve() method above
             # No need to create tasks manually here to avoid duplication
             current_app.logger.info(f"Approval completed for permission request {permission_request.id}. Tasks created automatically by approve() method.")
-            
+
             # AD validation is now handled by the verification task
-            
+
+            # Send status notification to requester
+            try:
+                from app.services.email_service import send_permission_status_notification
+                send_permission_status_notification(permission_request.id, 'approved')
+            except Exception as e:
+                current_app.logger.error(f"Error sending status notification: {str(e)}")
+
             # Log audit event
             AuditEvent.log_event(
                 user=current_user,
@@ -528,7 +549,14 @@ def validate_request_api(request_id):
         
         elif action == 'reject':
             permission_request.reject(current_user, comment)
-            
+
+            # Send status notification to requester
+            try:
+                from app.services.email_service import send_permission_status_notification
+                send_permission_status_notification(permission_request.id, 'rejected')
+            except Exception as e:
+                current_app.logger.error(f"Error sending status notification: {str(e)}")
+
             # Log audit event
             AuditEvent.log_event(
                 user=current_user,
