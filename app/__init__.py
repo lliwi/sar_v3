@@ -190,11 +190,21 @@ def create_app(config_name=None):
     from app.views.main import main_bp
     from app.views.api import api_bp
     from app.views.admin import admin_bp
-    
+
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(main_bp)
     app.register_blueprint(api_bp, url_prefix='/api')
     app.register_blueprint(admin_bp, url_prefix='/admin')
+
+    # Favicon route
+    @app.route('/favicon.ico')
+    def favicon():
+        from flask import send_from_directory
+        return send_from_directory(
+            os.path.join(app.root_path, 'static'),
+            'favicon.ico',
+            mimetype='image/vnd.microsoft.icon'
+        )
 
     # Register timezone template filters
     from app.utils.timezone import format_local_datetime, get_timezone_name
