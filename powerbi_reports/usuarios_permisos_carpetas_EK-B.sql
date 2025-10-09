@@ -8,7 +8,12 @@
 -- =============================================================================
 
 SELECT DISTINCT
-    u.full_name as nombre_completo,
+    CASE
+        WHEN u.full_name LIKE '%,%' THEN
+            TRIM(SUBSTRING(u.full_name FROM POSITION(',' IN u.full_name) + 1)) || ' ' ||
+            TRIM(SUBSTRING(u.full_name FROM 1 FOR POSITION(',' IN u.full_name) - 1))
+        ELSE u.full_name
+    END as nombre_completo,
     CASE
         WHEN u.email LIKE '%partner.italdesign%' THEN 'EXT'
         ELSE 'INT'
@@ -35,7 +40,12 @@ WHERE u.is_active = true
 UNION ALL
 
 SELECT DISTINCT
-    u.full_name as nombre_completo,
+    CASE
+        WHEN u.full_name LIKE '%,%' THEN
+            TRIM(SUBSTRING(u.full_name FROM POSITION(',' IN u.full_name) + 1)) || ' ' ||
+            TRIM(SUBSTRING(u.full_name FROM 1 FOR POSITION(',' IN u.full_name) - 1))
+        ELSE u.full_name
+    END as nombre_completo,
     CASE
         WHEN u.email LIKE '%partner.italdesign%' THEN 'EXT'
         ELSE 'INT'
