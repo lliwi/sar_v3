@@ -189,7 +189,10 @@
                                             <td>
                                                 <div class="d-flex flex-column">
                                                     <strong class="text-primary">
-                                                        <i class="fas fa-user me-2"></i>{{ user.full_name or user.username }}
+                                                        <i class="fas {{ user|user_icon }} me-2"></i>{{ user.full_name or user.username }}
+                                                        {% if user.is_external_user() %}
+                                                            <span class="badge bg-warning text-dark ms-1" style="font-size: 0.65rem;">EXT</span>
+                                                        {% endif %}
                                                     </strong>
                                                     <small class="text-muted">{{ user.username }}</small>
                                                     {% if user.department %}

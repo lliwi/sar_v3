@@ -108,11 +108,16 @@
                                                     {% if user_has_deletion_in_progress %}
                                                         <i class="fas fa-spinner fa-spin text-warning"></i>
                                                     {% else %}
-                                                        <i class="fas fa-user text-secondary"></i>
+                                                        <i class="fas {{ user_data.user|user_icon }}"></i>
                                                     {% endif %}
                                                 </div>
                                                 <div>
-                                                    <div class="fw-medium {% if user_has_deletion_in_progress %}opacity-50{% endif %}">{{ user_data.user.full_name }}</div>
+                                                    <div class="fw-medium {% if user_has_deletion_in_progress %}opacity-50{% endif %}">
+                                                        {{ user_data.user.full_name }}
+                                                        {% if user_data.user.is_external_user() %}
+                                                            <span class="badge bg-warning text-dark ms-1" style="font-size: 0.65rem;">EXT</span>
+                                                        {% endif %}
+                                                    </div>
                                                     <small class="text-muted">{{ user_data.user.username }}</small>
                                                     {% if user_has_deletion_in_progress %}
                                                         <small class="text-warning d-block">

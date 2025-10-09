@@ -235,6 +235,20 @@ def create_app(config_name=None):
 
         return sanitized
 
+    @app.template_filter('user_icon')
+    def user_icon_filter(user):
+        """Return Font Awesome icon class for user based on type (internal/external)"""
+        if user.is_external_user():
+            return 'fa-user-tie text-warning'
+        return 'fa-user text-primary'
+
+    @app.template_filter('user_badge_class')
+    def user_badge_class_filter(user):
+        """Return badge CSS class for user based on type (internal/external)"""
+        if user.is_external_user():
+            return 'bg-warning'
+        return 'bg-primary'
+
     # Create tables and default data only if needed
     with app.app_context():
         # Use database lock to prevent concurrent table creation

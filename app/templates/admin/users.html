@@ -76,12 +76,15 @@
                                 <td>
                                     <div class="d-flex align-items-center">
                                         <div class="avatar avatar-sm me-2">
-                                            <span class="avatar-initial rounded-circle bg-primary">
+                                            <span class="avatar-initial rounded-circle {{ user|user_badge_class }}">
                                                 {{ user.username[0].upper() }}
                                             </span>
                                         </div>
                                         <div>
                                             <strong>{{ user.username }}</strong>
+                                            {% if user.is_external_user() %}
+                                                <span class="badge bg-warning text-dark ms-1" style="font-size: 0.65rem;">EXT</span>
+                                            {% endif %}
                                         </div>
                                     </div>
                                 </td>

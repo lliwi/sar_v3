@@ -60,6 +60,10 @@ class User(UserMixin, db.Model):
     def is_admin(self):
         return self.has_role('Administrador')
 
+    def is_external_user(self):
+        """Check if user is external based on email domain containing 'partner'"""
+        return 'partner' in self.email.lower() if self.email else False
+
     def mark_ad_not_found(self):
         """Mark user as not found in AD and set as inactive"""
         self.ad_status = 'not_found'
