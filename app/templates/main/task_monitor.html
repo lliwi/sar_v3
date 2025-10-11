@@ -173,7 +173,7 @@
                 </div>
                 <div class="card-body">
                     <div id="taskTableContainer">
-                        {% if recent_tasks %}
+                        {% if tasks_pagination.items %}
                             <div class="table-responsive">
                                 <table class="table table-hover" id="tasksTable">
                                     <thead>
@@ -190,7 +190,7 @@
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {% for task in recent_tasks %}
+                                        {% for task in tasks_pagination.items %}
                                         <tr class="task-row" data-status="{{ task.status }}" data-task-id="{{ task.id }}">
                                             <td>
                                                 <span class="badge bg-secondary">#{{ task.id }}</span>
@@ -292,10 +292,83 @@
                                     </tbody>
                                 </table>
                             </div>
+
+                            <!-- Pagination Controls -->
+                            {% if tasks_pagination.pages > 1 %}
+                            <div class="d-flex justify-content-center my-3">
+                                <nav aria-label="Paginación de tareas">
+                                    <ul class="pagination" id="paginationControls">
+                                        <!-- Previous Page -->
+                                        <li class="page-item {% if not tasks_pagination.has_prev %}disabled{% endif %}">
+                                            {% if tasks_pagination.has_prev %}
+                                                <a class="page-link" href="{{ url_for('admin.task_monitor',
+                                                    page=tasks_pagination.prev_num,
+                                                    per_page=tasks_pagination.per_page,
+                                                    status=current_status_filter if current_status_filter != 'all' else '') }}" aria-label="Anterior">
+                                                    <span aria-hidden="true">&laquo;</span>
+                                                </a>
+                                            {% else %}
+                                                <span class="page-link">&laquo;</span>
+                                            {% endif %}
+                                        </li>
+
+                                        <!-- Page Numbers -->
+                                        {% for page_num in range(1, tasks_pagination.pages + 1) %}
+                                            {% if page_num <= 3 or page_num > tasks_pagination.pages - 3 or (page_num >= tasks_pagination.page - 1 and page_num <= tasks_pagination.page + 1) %}
+                                                <li class="page-item {% if page_num == tasks_pagination.page %}active{% endif %}">
+                                                    <a class="page-link" href="{{ url_for('admin.task_monitor',
+                                                        page=page_num,
+                                                        per_page=tasks_pagination.per_page,
+                                                        status=current_status_filter if current_status_filter != 'all' else '') }}">{{ page_num }}</a>
+                                                </li>
+                                            {% elif page_num == 4 and tasks_pagination.page > 5 %}
+                                                <li class="page-item disabled">
+                                                    <span class="page-link">...</span>
+                                                </li>
+                                            {% elif page_num == tasks_pagination.pages - 3 and tasks_pagination.page < tasks_pagination.pages - 4 %}
+                                                <li class="page-item disabled">
+                                                    <span class="page-link">...</span>
+                                                </li>
+                                            {% endif %}
+                                        {% endfor %}
+
+                                        <!-- Next Page -->
+                                        <li class="page-item {% if not tasks_pagination.has_next %}disabled{% endif %}">
+                                            {% if tasks_pagination.has_next %}
+                                                <a class="page-link" href="{{ url_for('admin.task_monitor',
+                                                    page=tasks_pagination.next_num,
+                                                    per_page=tasks_pagination.per_page,
+                                                    status=current_status_filter if current_status_filter != 'all' else '') }}" aria-label="Siguiente">
+                                                    <span aria-hidden="true">&raquo;</span>
+                                                </a>
+                                            {% else %}
+                                                <span class="page-link">&raquo;</span>
+                                            {% endif %}
+                                        </li>
+                                    </ul>
+                                </nav>
+                            </div>
+
+                            <!-- Per Page Selector -->
+                            <div class="d-flex justify-content-center mb-3">
+                                <div class="btn-group" role="group" aria-label="Registros por página">
+                                    <span class="input-group-text">Registros por página:</span>
+                                    {% for per_page_option in [10, 20, 50, 100] %}
+                                        <a href="{{ url_for('admin.task_monitor',
+                                            page=1,
+                                            per_page=per_page_option,
+                                            status=current_status_filter if current_status_filter != 'all' else '') }}"
+                                           class="btn btn-outline-primary {% if tasks_pagination.per_page == per_page_option %}active{% endif %}">
+                                            {{ per_page_option }}
+                                        </a>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            {% endif %}
                         {% else %}
                             <div class="text-center py-5">
                                 <i class="fas fa-tasks fa-3x text-muted mb-3"></i>
-                                <h5 class="text-muted">No hay tareas recientes</h5>
+                                <h5 class="text-muted">No hay tareas</h5>
                                 <p class="text-muted">Las tareas aparecerán aquí cuando se creen solicitudes de permisos.</p>
                             </div>
                         {% endif %}
@@ -416,7 +489,8 @@
 
 <script>
 let autoRefreshInterval;
-let currentFilter = 'all';
+let currentFilter = '{{ current_status_filter }}';
+let currentPage = {{ tasks_pagination.page }};
 
 // Auto-refresh functionality
 function startAutoRefresh() {
@@ -540,18 +614,27 @@ function testAirflow() {
 
 // Refresh task list and statistics
 function refreshTaskList() {
+    // Build query parameters
+    const params = new URLSearchParams();
+    params.set('page', currentPage);
+    params.set('per_page', 20);
+    if (currentFilter && currentFilter !== 'all') {
+        params.set('status', currentFilter);
+    }
+
     // Refresh task list
-    fetch('/api/tasks' + (currentFilter !== 'all' ? '?status=' + currentFilter : ''))
+    fetch('/api/tasks?' + params.toString())
     .then(response => response.json())
     .then(data => {
         if (data.tasks) {
             updateTaskTable(data.tasks);
+            updatePagination(data.pagination);
         }
     })
     .catch(error => {
         console.error('Error refreshing tasks:', error);
     });
-    
+
     // Refresh statistics
     updateTaskStats();
 }
@@ -597,7 +680,7 @@ function updateTaskTable(tasks) {
                 </span>
             </td>
             <td>
-                ${task.permission_request_id ? '<span class="badge bg-white text-dark border">#' + task.permission_request_id + '</span>' : '<span class="text-muted">N/A</span>'}
+                ${task.permission_request_id ? '<a href="{{ url_for("main.my_requests") }}" class="text-decoration-none"><span class="badge bg-white text-dark border">#' + task.permission_request_id + '</span></a>' : '<span class="text-muted">N/A</span>'}
             </td>
             <td><small>${formatDate(task.created_at)}</small></td>
             <td><small>${task.updated_at ? formatDate(task.updated_at) : 'N/A'}</small></td>
@@ -670,22 +753,94 @@ function formatDate(dateString) {
     });
 }
 
+// Update pagination controls dynamically
+function updatePagination(pagination) {
+    if (!pagination) return;
+
+    const paginationControls = document.getElementById('paginationControls');
+    if (!paginationControls) return;
+
+    const paginationContainer = paginationControls.closest('.d-flex');
+    const perPageContainer = paginationContainer?.parentElement.querySelector('.btn-group')?.parentElement;
+
+    if (pagination.pages <= 1) {
+        // Hide pagination if only one page
+        if (paginationContainer) paginationContainer.style.display = 'none';
+        if (perPageContainer) perPageContainer.style.display = 'none';
+        return;
+    }
+
+    // Show pagination containers
+    if (paginationContainer) paginationContainer.style.display = 'flex';
+    if (perPageContainer) perPageContainer.style.display = 'flex';
+
+    // Build base URL with current filters
+    const baseUrl = '/admin/tasks';
+    const statusParam = currentFilter !== 'all' ? `&status=${currentFilter}` : '';
+
+    // Build pagination HTML
+    let paginationHTML = '';
+
+    // Previous button
+    if (pagination.has_prev) {
+        paginationHTML += `
+            <li class="page-item">
+                <a class="page-link" href="${baseUrl}?page=${pagination.page - 1}&per_page=${pagination.per_page}${statusParam}" aria-label="Anterior">
+                    <span aria-hidden="true">&laquo;</span>
+                </a>
+            </li>
+        `;
+    } else {
+        paginationHTML += `
+            <li class="page-item disabled">
+                <span class="page-link">&laquo;</span>
+            </li>
+        `;
+    }
+
+    // Page numbers
+    for (let i = 1; i <= pagination.pages; i++) {
+        if (i === pagination.page) {
+            paginationHTML += `<li class="page-item active"><a class="page-link" href="#">${i}</a></li>`;
+        } else if (i <= 3 || i > pagination.pages - 3 || (i >= pagination.page - 1 && i <= pagination.page + 1)) {
+            paginationHTML += `<li class="page-item"><a class="page-link" href="${baseUrl}?page=${i}&per_page=${pagination.per_page}${statusParam}">${i}</a></li>`;
+        } else if ((i === 4 && pagination.page > 5) || (i === pagination.pages - 3 && pagination.page < pagination.pages - 4)) {
+            paginationHTML += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+        }
+    }
+
+    // Next button
+    if (pagination.has_next) {
+        paginationHTML += `
+            <li class="page-item">
+                <a class="page-link" href="${baseUrl}?page=${pagination.page + 1}&per_page=${pagination.per_page}${statusParam}" aria-label="Siguiente">
+                    <span aria-hidden="true">&raquo;</span>
+                </a>
+            </li>
+        `;
+    } else {
+        paginationHTML += `
+            <li class="page-item disabled">
+                <span class="page-link">&raquo;</span>
+            </li>
+        `;
+    }
+
+    paginationControls.innerHTML = paginationHTML;
+}
+
 // Filter tasks by status
 function filterTasks(status) {
     currentFilter = status;
-    const rows = document.querySelectorAll('.task-row');
-    
-    rows.forEach(row => {
-        if (status === 'all' || row.getAttribute('data-status') === status) {
-            row.style.display = '';
-        } else {
-            row.style.display = 'none';
-        }
-    });
-    
-    // Update dropdown text
-    event.target.closest('.dropdown').querySelector('button').innerHTML = 
-        '<i class="fas fa-filter"></i> ' + event.target.textContent;
+    currentPage = 1; // Reset to first page when filtering
+
+    // Update URL and reload
+    const params = new URLSearchParams();
+    params.set('page', 1);
+    if (status && status !== 'all') {
+        params.set('status', status);
+    }
+    window.location.href = window.location.pathname + '?' + params.toString();
 }
 
 // Show task details

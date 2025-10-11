@@ -1752,30 +1752,45 @@ def task_monitor():
     """Task monitoring page for admins"""
     # Get task summary statistics
     from app.models import Task
-    
+
     total_tasks = Task.query.count()
     pending_tasks = Task.query.filter_by(status='pending').count()
     running_tasks = Task.query.filter_by(status='running').count()
     completed_tasks = Task.query.filter_by(status='completed').count()
     failed_tasks = Task.query.filter_by(status='failed').count()
     retry_tasks = Task.query.filter_by(status='retry').count()
-    
-    # Get recent tasks
-    recent_tasks = Task.query.order_by(Task.created_at.desc()).limit(10).all()
-    
+    cancelled_tasks = Task.query.filter_by(status='cancelled').count()
+
+    # Get pagination parameters
+    page = request.args.get('page', 1, type=int)
+    per_page = min(request.args.get('per_page', 20, type=int), 100)
+
+    # Get filtered tasks with pagination
+    status_filter = request.args.get('status')
+    query = Task.query
+
+    if status_filter and status_filter != 'all':
+        query = query.filter_by(status=status_filter)
+
+    tasks_pagination = query.order_by(Task.created_at.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+
     stats = {
         'total_tasks': total_tasks,
         'pending_tasks': pending_tasks,
         'running_tasks': running_tasks,
         'completed_tasks': completed_tasks,
         'failed_tasks': failed_tasks,
-        'retry_tasks': retry_tasks
+        'retry_tasks': retry_tasks,
+        'cancelled_tasks': cancelled_tasks
     }
-    
-    return render_template('main/task_monitor.html', 
+
+    return render_template('main/task_monitor.html',
                          title='Monitor de Tareas',
                          stats=stats,
-                         recent_tasks=recent_tasks)
+                         tasks_pagination=tasks_pagination,
+                         current_status_filter=status_filter or 'all')
 
 @admin_bp.route('/validate-ad', methods=['GET', 'POST'])
 @admin_required
