@@ -156,17 +156,53 @@
                             </label>
                         </div>
                         <div class="dropdown">
-                            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
-                                <i class="fas fa-filter"></i> Filtros
+                            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" id="filterButton">
+                                <i class="fas fa-filter"></i>
+                                {% if current_status_filter == 'all' or not current_status_filter %}
+                                    Todas
+                                {% elif current_status_filter == 'pending' %}
+                                    Pendientes
+                                {% elif current_status_filter == 'running' %}
+                                    Ejecutando
+                                {% elif current_status_filter == 'completed' %}
+                                    Completadas
+                                {% elif current_status_filter == 'failed' %}
+                                    Fallidas
+                                {% elif current_status_filter == 'retry' %}
+                                    Reintento
+                                {% elif current_status_filter == 'cancelled' %}
+                                    Canceladas
+                                {% endif %}
                             </button>
                             <div class="dropdown-menu">
-                                <a class="dropdown-item" href="#" onclick="filterTasks('all')">Todas</a>
-                                <a class="dropdown-item" href="#" onclick="filterTasks('pending')">Pendientes</a>
-                                <a class="dropdown-item" href="#" onclick="filterTasks('running')">Ejecutando</a>
-                                <a class="dropdown-item" href="#" onclick="filterTasks('completed')">Completadas</a>
-                                <a class="dropdown-item" href="#" onclick="filterTasks('failed')">Fallidas</a>
-                                <a class="dropdown-item" href="#" onclick="filterTasks('retry')">Reintento</a>
-                                <a class="dropdown-item" href="#" onclick="filterTasks('cancelled')">Canceladas</a>
+                                <a class="dropdown-item {% if current_status_filter == 'all' or not current_status_filter %}active{% endif %}"
+                                   href="{{ url_for('admin.task_monitor', page=1, per_page=tasks_pagination.per_page) }}">
+                                   Todas
+                                </a>
+                                <a class="dropdown-item {% if current_status_filter == 'pending' %}active{% endif %}"
+                                   href="{{ url_for('admin.task_monitor', page=1, per_page=tasks_pagination.per_page, status='pending') }}">
+                                   Pendientes
+                                </a>
+                                <a class="dropdown-item {% if current_status_filter == 'running' %}active{% endif %}"
+                                   href="{{ url_for('admin.task_monitor', page=1, per_page=tasks_pagination.per_page, status='running') }}">
+                                   Ejecutando
+                                </a>
+                                <a class="dropdown-item {% if current_status_filter == 'completed' %}active{% endif %}"
+                                   href="{{ url_for('admin.task_monitor', page=1, per_page=tasks_pagination.per_page, status='completed') }}">
+                                   Completadas
+                                </a>
+                                <a class="dropdown-item {% if current_status_filter == 'failed' %}active{% endif %}"
+                                   href="{{ url_for('admin.task_monitor', page=1, per_page=tasks_pagination.per_page, status='failed') }}">
+                                   Fallidas
+                                </a>
+                                <a class="dropdown-item {% if current_status_filter == 'retry' %}active{% endif %}"
+                                   href="{{ url_for('admin.task_monitor', page=1, per_page=tasks_pagination.per_page, status='retry') }}">
+                                   Reintento
+                                </a>
+                                <a class="dropdown-item {% if current_status_filter == 'cancelled' %}active{% endif %}"
+                                   href="{{ url_for('admin.task_monitor', page=1, per_page=tasks_pagination.per_page, status='cancelled') }}">
+                                   Canceladas
+                                </a>
                             </div>
                         </div>
                     </div>
@@ -614,10 +650,14 @@ function testAirflow() {
 
 // Refresh task list and statistics
 function refreshTaskList() {
+    // Get current per_page from URL params or default to 20
+    const urlParams = new URLSearchParams(window.location.search);
+    const perPage = urlParams.get('per_page') || 20;
+
     // Build query parameters
     const params = new URLSearchParams();
     params.set('page', currentPage);
-    params.set('per_page', 20);
+    params.set('per_page', perPage);
     if (currentFilter && currentFilter !== 'all') {
         params.set('status', currentFilter);
     }
@@ -776,7 +816,8 @@ function updatePagination(pagination) {
 
     // Build base URL with current filters
     const baseUrl = '/admin/tasks';
-    const statusParam = currentFilter !== 'all' ? `&status=${currentFilter}` : '';
+    const statusParam = currentFilter !== 'all' && currentFilter ? `&status=${currentFilter}` : '';
+    const perPage = pagination.per_page || 20;
 
     // Build pagination HTML
     let paginationHTML = '';
@@ -785,7 +826,7 @@ function updatePagination(pagination) {
     if (pagination.has_prev) {
         paginationHTML += `
             <li class="page-item">
-                <a class="page-link" href="${baseUrl}?page=${pagination.page - 1}&per_page=${pagination.per_page}${statusParam}" aria-label="Anterior">
+                <a class="page-link" href="${baseUrl}?page=${pagination.page - 1}&per_page=${perPage}${statusParam}" aria-label="Anterior">
                     <span aria-hidden="true">&laquo;</span>
                 </a>
             </li>
@@ -803,7 +844,7 @@ function updatePagination(pagination) {
         if (i === pagination.page) {
             paginationHTML += `<li class="page-item active"><a class="page-link" href="#">${i}</a></li>`;
         } else if (i <= 3 || i > pagination.pages - 3 || (i >= pagination.page - 1 && i <= pagination.page + 1)) {
-            paginationHTML += `<li class="page-item"><a class="page-link" href="${baseUrl}?page=${i}&per_page=${pagination.per_page}${statusParam}">${i}</a></li>`;
+            paginationHTML += `<li class="page-item"><a class="page-link" href="${baseUrl}?page=${i}&per_page=${perPage}${statusParam}">${i}</a></li>`;
         } else if ((i === 4 && pagination.page > 5) || (i === pagination.pages - 3 && pagination.page < pagination.pages - 4)) {
             paginationHTML += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
         }
@@ -813,7 +854,7 @@ function updatePagination(pagination) {
     if (pagination.has_next) {
         paginationHTML += `
             <li class="page-item">
-                <a class="page-link" href="${baseUrl}?page=${pagination.page + 1}&per_page=${pagination.per_page}${statusParam}" aria-label="Siguiente">
+                <a class="page-link" href="${baseUrl}?page=${pagination.page + 1}&per_page=${perPage}${statusParam}" aria-label="Siguiente">
                     <span aria-hidden="true">&raquo;</span>
                 </a>
             </li>
@@ -827,20 +868,6 @@ function updatePagination(pagination) {
     }
 
     paginationControls.innerHTML = paginationHTML;
-}
-
-// Filter tasks by status
-function filterTasks(status) {
-    currentFilter = status;
-    currentPage = 1; // Reset to first page when filtering
-
-    // Update URL and reload
-    const params = new URLSearchParams();
-    params.set('page', 1);
-    if (status && status !== 'all') {
-        params.set('status', status);
-    }
-    window.location.href = window.location.pathname + '?' + params.toString();
 }
 
 // Show task details
