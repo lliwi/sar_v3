@@ -72,7 +72,7 @@
                             </a>
                         </li>
                         {% endif %}
-                        {% if current_user.has_validated_folders() or current_user.is_admin() %}
+                        {% if current_user.has_owned_folders() or current_user.has_validated_folders() or current_user.is_admin() %}
                         <li class="nav-item">
                             <a href="{{ url_for('main.pending_validations') }}" class="nav-link {% if request.endpoint == 'main.pending_validations' %}active{% endif %}">
                                 <i class="fas fa-check-circle me-2"></i>

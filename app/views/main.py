@@ -79,19 +79,41 @@ def dashboard():
             .all()
         )
     else:
-        # Non-admin users see ONLY requests specifically assigned to them as validator
-        # This matches the filtering logic used in pending_validations()
-        validation_requests = (
-            PermissionRequest.query
-            .filter_by(status='pending', validator_id=current_user.id)
-            .options(
-                db.joinedload(PermissionRequest.folder),
-                db.joinedload(PermissionRequest.requester),
-                db.joinedload(PermissionRequest.ad_group)
+        # Non-admin users see:
+        # 1. Requests specifically assigned to them as validator
+        # 2. Requests for folders they own (owners are de-facto validators)
+        owned_folder_ids = [f.id for f in current_user.owned_folders]
+
+        if owned_folder_ids:
+            validation_requests = (
+                PermissionRequest.query
+                .filter(
+                    PermissionRequest.status == 'pending',
+                    db.or_(
+                        PermissionRequest.validator_id == current_user.id,
+                        PermissionRequest.folder_id.in_(owned_folder_ids)
+                    )
+                )
+                .options(
+                    db.joinedload(PermissionRequest.folder),
+                    db.joinedload(PermissionRequest.requester),
+                    db.joinedload(PermissionRequest.ad_group)
+                )
+                .limit(5)
+                .all()
             )
-            .limit(5)
-            .all()
-        )
+        else:
+            validation_requests = (
+                PermissionRequest.query
+                .filter_by(status='pending', validator_id=current_user.id)
+                .options(
+                    db.joinedload(PermissionRequest.folder),
+                    db.joinedload(PermissionRequest.requester),
+                    db.joinedload(PermissionRequest.ad_group)
+                )
+                .limit(5)
+                .all()
+            )
     
     # Get recent audit events
     recent_events = AuditEvent.query.filter_by(user=current_user).order_by(
@@ -460,18 +482,34 @@ def my_permissions():
 @login_required
 def pending_validations():
     page = request.args.get('page', 1, type=int)
-    
+
     if current_user.is_admin():
         # Admins see all pending requests
         requests = PermissionRequest.query.filter_by(status='pending')
     else:
-        # Non-admin users see ONLY requests specifically assigned to them as validator
-        # This means they only see requests where validator_id matches their user ID
-        requests = PermissionRequest.query.filter_by(
-            status='pending',
-            validator_id=current_user.id
-        )
-    
+        # Non-admin users see:
+        # 1. Requests specifically assigned to them as validator (validator_id matches)
+        # 2. Requests for folders they own (owner of the folder)
+        from app.models.user import folder_owners
+
+        owned_folder_ids = [f.id for f in current_user.owned_folders]
+
+        if owned_folder_ids:
+            # Show requests where user is validator OR folder owner
+            requests = PermissionRequest.query.filter(
+                PermissionRequest.status == 'pending',
+                db.or_(
+                    PermissionRequest.validator_id == current_user.id,
+                    PermissionRequest.folder_id.in_(owned_folder_ids)
+                )
+            )
+        else:
+            # User has no owned folders, only show requests assigned as validator
+            requests = PermissionRequest.query.filter_by(
+                status='pending',
+                validator_id=current_user.id
+            )
+
     # Load all necessary relationships to avoid N+1 queries
     requests = requests.options(
         db.joinedload(PermissionRequest.requester),
@@ -481,8 +519,8 @@ def pending_validations():
     ).order_by(PermissionRequest.created_at.desc()).paginate(
         page=page, per_page=20, error_out=False
     )
-    
-    return render_template('main/pending_validations.html', 
+
+    return render_template('main/pending_validations.html',
                          title='Validaciones Pendientes',
                          requests=requests)
 
