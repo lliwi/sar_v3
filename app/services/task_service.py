@@ -1623,6 +1623,20 @@ class TaskService:
     def _create_ad_permission_removal_task(self, permission_request, validator, existing_permission_info, csv_file_path):
         """Create task for removing AD-synchronized permission"""
         try:
+            # Get existing group info - it might be an ADGroup object or a dict
+            existing_group = existing_permission_info.get('existing_group')
+            if existing_group:
+                if isinstance(existing_group, dict):
+                    ad_group_name = existing_group.get('name')
+                    ad_group_id = existing_group.get('id')
+                else:
+                    # It's an ADGroup object
+                    ad_group_name = existing_group.name
+                    ad_group_id = existing_group.id
+            else:
+                ad_group_name = None
+                ad_group_id = None
+
             removal_task = Task(
                 name=f"Remove AD-synced {existing_permission_info.get('existing_permission_type')} permission for request #{permission_request.id}",
                 task_type='airflow_dag',
@@ -1633,26 +1647,28 @@ class TaskService:
                 permission_request_id=permission_request.id,
                 next_execution_at=datetime.utcnow()
             )
-            
+
             task_data = {
                 'permission_request_id': permission_request.id,
                 'action': 'remove_ad_sync',
                 'folder_path': permission_request.folder.path,
                 'folder_id': permission_request.folder_id,
                 'permission_type': existing_permission_info.get('existing_permission_type'),
-                'ad_group_name': existing_permission_info.get('existing_group', {}).get('name'),
-                'ad_group_id': existing_permission_info.get('existing_group', {}).get('id'),
+                'ad_group_name': ad_group_name,
+                'ad_group_id': ad_group_id,
                 'validator': validator.username,
                 'csv_file_path': os.path.basename(csv_file_path) if csv_file_path else None,
                 'existing_source': 'ad_sync',
                 'requester': permission_request.requester.username
             }
-            
+
             removal_task.set_task_data(task_data)
             return removal_task
-            
+
         except Exception as e:
             logger.error(f"Error creating AD permission removal task: {str(e)}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             return None
     
     def _create_addition_task(self, permission_request, validator, csv_file_path):

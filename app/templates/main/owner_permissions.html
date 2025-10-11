@@ -1,0 +1,678 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} - SAR{% endblock %}
+
+{% block page_title %}{{ title }}{% endblock %}
+
+{% block extra_css %}{% endblock %}
+
+{% block main_content %}
+<div class="container-fluid">
+    <!-- Header with actions -->
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <h2><i class="fas fa-clipboard-list me-2"></i>{{ title }}</h2>
+                <div>
+                    <a href="{{ url_for('main.my_resources') }}" class="btn btn-secondary">
+                        <i class="fas fa-arrow-left me-2"></i>Volver a Mis Recursos
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card permissions-card text-center">
+                <div class="card-body">
+                    <i class="fas fa-users fa-2x mb-2"></i>
+                    <h4 class="card-title mb-0">{{ total_unique_users }}</h4>
+                    <p class="card-text small">Usuarios con Permisos</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card permissions-card text-center">
+                <div class="card-body">
+                    <i class="fas fa-check-circle fa-2x mb-2"></i>
+                    <h4 class="card-title mb-0">{{ total_active_permissions }}</h4>
+                    <p class="card-text small">Permisos Activos</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card permissions-card text-center">
+                <div class="card-body">
+                    <i class="fas fa-folder fa-2x mb-2"></i>
+                    <h4 class="card-title mb-0">{{ total_unique_folders }}</h4>
+                    <p class="card-text small">Carpetas Gestionadas</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card permissions-card text-center">
+                <div class="card-body">
+                    <i class="fas fa-shield-alt fa-2x mb-2"></i>
+                    <h4 class="card-title mb-0">{{ total_unique_ad_groups }}</h4>
+                    <p class="card-text small">Grupos AD Utilizados</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden CSRF Token for JavaScript -->
+    <input type="hidden" id="csrf_token" name="csrf_token" value="{{ csrf_token() }}">
+
+    <!-- Search and Filters -->
+    <div class="search-container">
+        <form method="GET" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">Buscar Usuario</label>
+                <div class="position-relative">
+                    <input type="text" name="user_search" class="form-control search-input"
+                           placeholder="Buscar por nombre de usuario..." value="{{ user_search }}">
+                    <i class="fas fa-search search-icon"></i>
+                </div>
+            </div>
+            <div class="col-md-5">
+                <label class="form-label">Carpeta</label>
+                <div class="combobox-container">
+                    <input type="text" class="combobox-input" id="folderComboboxInput"
+                           placeholder="📁 Buscar carpeta..." value="{{ folder_search or '' }}">
+                    <div class="combobox-dropdown" id="folderComboboxDropdown">
+                        <div class="combobox-option" data-value="">
+                            <span class="folder-icon">🗂️</span>
+                            <div class="folder-info">
+                                <div class="folder-path">Todas las carpetas</div>
+                            </div>
+                        </div>
+                        {% for folder in all_folders %}
+                            <div class="combobox-option" data-value="{{ folder.id }}" {% if folder.id|string == request.args.get('folder_id', '') %}class="selected"{% endif %}>
+                                <span class="folder-icon">📁</span>
+                                <div class="folder-info">
+                                    <div class="folder-path">{{ folder.name }}</div>
+                                    <div class="folder-description">{{ folder.sanitized_path }}</div>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                    <input type="hidden" name="folder_id" id="folder_id" value="{{ request.args.get('folder_id', '') }}">
+                </div>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Tipo de Permiso</label>
+                <select name="permission_type" class="form-select">
+                    <option value="all" {% if filters.permission_type == 'all' %}selected{% endif %}>
+                        Todos los permisos
+                    </option>
+                    <option value="read" {% if filters.permission_type == 'read' %}selected{% endif %}>
+                        Solo lectura
+                    </option>
+                    <option value="write" {% if filters.permission_type == 'write' %}selected{% endif %}>
+                        Solo escritura
+                    </option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">&nbsp;</label>
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="fas fa-filter me-2"></i>Filtrar
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Results Summary -->
+    {% if permissions_by_user %}
+        <div class="row mb-3">
+            <div class="col-12 text-end">
+                <span class="text-muted">
+                    <i class="fas fa-info-circle me-1"></i>
+                    {{ total_unique_users }} usuario(s) con permisos activos | {{ total_active_permissions }} permiso(s) total
+                </span>
+            </div>
+        </div>
+
+        <!-- Active Permissions Table -->
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-list me-2"></i>Permisos Activos por Usuario
+                    </h5>
+                    {% if pagination %}
+                    <small class="text-muted">
+                        <i class="fas fa-info-circle me-1"></i>
+                        {{ total_unique_users }} usuario(s) con permisos |
+                        {{ total_active_permissions }} permiso(s) total
+                        {% if pagination.pages > 1 %}
+                            | Página {{ pagination.page }} de {{ pagination.pages }}
+                        {% endif %}
+                    </small>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover permissions-table">
+                        <thead>
+                            <tr>
+                                <th><i class="fas fa-user me-2"></i>Usuario</th>
+                                <th><i class="fas fa-folder me-2"></i>Carpeta</th>
+                                <th><i class="fas fa-route me-2"></i>Ruta</th>
+                                <th><i class="fas fa-key me-2"></i>Tipo de Permiso</th>
+                                <th><i class="fas fa-users me-2"></i>Grupo AD</th>
+                                <th><i class="fas fa-check me-2"></i>Validado Por</th>
+                                <th><i class="fas fa-calendar me-2"></i>Fecha Aprobación</th>
+                                <th><i class="fas fa-cogs me-2"></i>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for user_id, user_data in permissions_by_user.items() %}
+                                {% set user = user_data.user %}
+                                {% for folder_id, folder_data in user_data.folders.items() %}
+                                    {% set folder = folder_data.folder %}
+                                    {% for permission in folder_data.permissions %}
+                                        <tr>
+                                            <td>
+                                                <div class="d-flex flex-column">
+                                                    <strong class="text-primary">
+                                                        <i class="fas {{ user|user_icon }} me-2"></i>{{ user.full_name or user.username }}
+                                                        {% if user.is_external_user() %}
+                                                            <span class="badge bg-warning text-dark ms-1" style="font-size: 0.65rem;">EXT</span>
+                                                        {% endif %}
+                                                    </strong>
+                                                    <small class="text-muted">{{ user.username }}</small>
+                                                    {% if user.department %}
+                                                        <small class="text-muted">{{ user.department }}</small>
+                                                    {% endif %}
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div class="d-flex flex-column">
+                                                    <strong class="text-success">
+                                                        <i class="fas fa-folder me-2"></i>{{ folder.name }}
+                                                    </strong>
+                                                    {% if folder.description %}
+                                                        <small class="text-muted">{{ folder.description }}</small>
+                                                    {% endif %}
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <code class="text-muted">{{ folder.sanitized_path }}</code>
+                                            </td>
+                                            <td>
+                                                {% if permission.permission_type == 'read' %}
+                                                    <span class="badge bg-success permission-badge">
+                                                        <i class="fas fa-eye me-1"></i>Lectura
+                                                    </span>
+                                                {% else %}
+                                                    <span class="badge bg-warning permission-badge">
+                                                        <i class="fas fa-edit me-1"></i>Escritura
+                                                    </span>
+                                                {% endif %}
+                                                {% if permission.source is defined and permission.source == 'ad_sync' %}
+                                                    <span class="badge bg-info permission-badge ms-1">
+                                                        <i class="fas fa-sync-alt me-1"></i>Sincronizado
+                                                    </span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if permission.ad_group %}
+                                                    <span class="badge bg-info permission-badge">
+                                                        <i class="fas fa-users me-1"></i>{{ permission.ad_group.name }}
+                                                    </span>
+                                                {% else %}
+                                                    <span class="text-muted">Sin grupo asignado</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if permission.validator %}
+                                                    <small>
+                                                        <i class="fas fa-user-check me-1"></i>
+                                                        {{ permission.validator.full_name or permission.validator.username }}
+                                                    </small>
+                                                {% elif permission.source is defined and permission.source == 'ad_sync' %}
+                                                    <small class="text-info">
+                                                        <i class="fas fa-sync-alt me-1"></i>
+                                                        Sincronización AD
+                                                    </small>
+                                                {% else %}
+                                                    <span class="text-muted">Sistema</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <small>
+                                                    {% if permission.validated_at %}
+                                                        <i class="fas fa-calendar me-1"></i>
+                                                        {{ permission.validated_at.strftime('%d/%m/%Y %H:%M') }}
+                                                    {% elif permission.source is defined and permission.source == 'ad_sync' %}
+                                                        <i class="fas fa-sync-alt me-1"></i>
+                                                        <span class="text-info">Sincronizado</span>
+                                                    {% else %}
+                                                        <span class="text-muted">N/A</span>
+                                                    {% endif %}
+                                                </small>
+                                            </td>
+                                            <td>
+                                                <div class="btn-group" role="group">
+                                                    <!-- Change Permission Button -->
+                                                    <button type="button"
+                                                            class="btn btn-sm btn-warning"
+                                                            onclick="confirmChangePermission({{ user.id }}, {{ folder.id }}, {{ permission.ad_group.id if permission.ad_group else 'null' }}, '{{ permission.permission_type }}', '{{ user.full_name or user.username }}', '{{ folder.name }}')"
+                                                            title="{% if permission.permission_type == 'read' %}Cambiar a Escritura{% else %}Cambiar a Lectura{% endif %}">
+                                                        <i class="fas fa-exchange-alt"></i>
+                                                    </button>
+
+                                                    <!-- Delete Permission Button -->
+                                                    <button type="button"
+                                                            class="btn btn-sm btn-danger"
+                                                            onclick="confirmDeletePermission({{ user.id }}, {{ folder.id }}, {{ permission.ad_group.id if permission.ad_group else 'null' }}, '{{ permission.permission_type }}', '{{ user.full_name or user.username }}', '{{ folder.name }}')"
+                                                            title="Eliminar permiso">
+                                                        <i class="fas fa-trash"></i>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                {% endfor %}
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination Controls -->
+                {% if pagination and pagination.pages > 1 %}
+                <div class="d-flex justify-content-center my-3">
+                    <nav aria-label="Paginación de registros">
+                        <ul class="pagination">
+                            <!-- Previous Page -->
+                            <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+                                {% if pagination.has_prev %}
+                                    <a class="page-link" href="{{ url_for('main.owner_permissions',
+                                        page=pagination.prev_num,
+                                        per_page=pagination.per_page,
+                                        folder_id=folder_id or '',
+                                        user_search=user_search or '',
+                                        permission_type=filters.permission_type or 'all') }}" aria-label="Anterior">
+                                        <span aria-hidden="true">&laquo;</span>
+                                    </a>
+                                {% else %}
+                                    <span class="page-link">&laquo;</span>
+                                {% endif %}
+                            </li>
+
+                            <!-- Page Numbers -->
+                            {% for page_num in range(1, pagination.pages + 1) %}
+                                {% if page_num <= 3 or page_num > pagination.pages - 3 or (page_num >= pagination.page - 1 and page_num <= pagination.page + 1) %}
+                                    <li class="page-item {% if page_num == pagination.page %}active{% endif %}">
+                                        <a class="page-link" href="{{ url_for('main.owner_permissions',
+                                            page=page_num,
+                                            per_page=pagination.per_page,
+                                            folder_id=folder_id or '',
+                                            user_search=user_search or '',
+                                            permission_type=filters.permission_type or 'all') }}">{{ page_num }}</a>
+                                    </li>
+                                {% elif page_num == 4 and pagination.page > 5 %}
+                                    <li class="page-item disabled">
+                                        <span class="page-link">...</span>
+                                    </li>
+                                {% elif page_num == pagination.pages - 3 and pagination.page < pagination.pages - 4 %}
+                                    <li class="page-item disabled">
+                                        <span class="page-link">...</span>
+                                    </li>
+                                {% endif %}
+                            {% endfor %}
+
+                            <!-- Next Page -->
+                            <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+                                {% if pagination.has_next %}
+                                    <a class="page-link" href="{{ url_for('main.owner_permissions',
+                                        page=pagination.next_num,
+                                        per_page=pagination.per_page,
+                                        folder_id=folder_id or '',
+                                        user_search=user_search or '',
+                                        permission_type=filters.permission_type or 'all') }}" aria-label="Siguiente">
+                                        <span aria-hidden="true">&raquo;</span>
+                                    </a>
+                                {% else %}
+                                    <span class="page-link">&raquo;</span>
+                                {% endif %}
+                            </li>
+                        </ul>
+                    </nav>
+                </div>
+
+                <!-- Per Page Selector -->
+                <div class="d-flex justify-content-center mb-3">
+                    <div class="btn-group" role="group" aria-label="Registros por página">
+                        <span class="input-group-text">Registros por página:</span>
+                        {% for per_page_option in [10, 20, 50, 100] %}
+                            <a href="{{ url_for('main.owner_permissions',
+                                page=1,
+                                per_page=per_page_option,
+                                folder_id=folder_id or '',
+                                user_search=user_search or '',
+                                permission_type=filters.permission_type or 'all') }}"
+                               class="btn btn-outline-primary {% if pagination.per_page == per_page_option %}active{% endif %}">
+                                {{ per_page_option }}
+                            </a>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+            <div class="card-footer text-muted">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <small>
+                            <i class="fas fa-clock me-1"></i>
+                            Reporte generado el {{ now.strftime('%d/%m/%Y %H:%M:%S') }}
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% else %}
+        <!-- Empty State -->
+        <div class="empty-state">
+            <i class="fas fa-users"></i>
+            <h4>No hay permisos activos</h4>
+            <p>No se encontraron usuarios con permisos aprobados en tus carpetas según los filtros aplicados.</p>
+            <a href="{{ url_for('main.my_resources') }}" class="btn btn-primary">
+                <i class="fas fa-arrow-left me-1"></i>
+                Volver a Mis Recursos
+            </a>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize folder combobox
+    initializeCombobox('folderComboboxInput', 'folderComboboxDropdown', 'folder_id');
+
+    // Auto-submit form on select change
+    const selects = document.querySelectorAll('select[name="permission_type"]');
+    selects.forEach(select => {
+        select.addEventListener('change', function() {
+            this.form.submit();
+        });
+    });
+
+    // Search input enter key handler
+    const searchInput = document.querySelector('input[name="user_search"]');
+    if (searchInput) {
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                this.form.submit();
+            }
+        });
+    }
+
+    // Combobox initialization function
+    function initializeCombobox(inputId, dropdownId, hiddenInputId) {
+        const input = document.getElementById(inputId);
+        const dropdown = document.getElementById(dropdownId);
+        const hiddenInput = document.getElementById(hiddenInputId);
+
+        if (!input || !dropdown || !hiddenInput) {
+            console.error(`Error initializing combobox: missing elements for ${inputId}`);
+            return;
+        }
+
+        let currentSelection = -1;
+        let filteredOptions = [];
+        let allOptions = [];
+
+        function initializeOptions() {
+            const options = dropdown.querySelectorAll('.combobox-option');
+            allOptions = Array.from(options).map(option => {
+                const pathElement = option.querySelector('.folder-path');
+                const descriptionElement = option.querySelector('.folder-description');
+
+                return {
+                    element: option,
+                    value: option.dataset.value || '',
+                    text: option.textContent.toLowerCase(),
+                    pathText: pathElement ? pathElement.textContent : '',
+                    descriptionText: descriptionElement ? descriptionElement.textContent : ''
+                };
+            });
+            filteredOptions = [...allOptions];
+
+            // Set initial selected state based on hidden input value
+            const currentValue = hiddenInput.value;
+            if (currentValue) {
+                const selectedOption = allOptions.find(opt => opt.value === currentValue);
+                if (selectedOption) {
+                    input.value = selectedOption.pathText;
+                    selectedOption.element.classList.add('selected');
+                }
+            }
+        }
+
+        function filterOptions(searchTerm) {
+            const term = searchTerm.toLowerCase().trim();
+            filteredOptions = allOptions.filter(option =>
+                option.pathText.toLowerCase().includes(term) ||
+                option.descriptionText.toLowerCase().includes(term) ||
+                option.text.includes(term)
+            );
+            renderOptions(filteredOptions);
+        }
+
+        function renderOptions(options) {
+            // Clear existing options
+            dropdown.innerHTML = '';
+
+            if (options.length === 0) {
+                // Show no results message
+                const noResults = document.createElement('div');
+                noResults.className = 'no-results combobox-option';
+                noResults.innerHTML = '<span class="folder-icon">🚫</span><div class="folder-info"><div class="folder-path">No se encontraron resultados</div></div>';
+                dropdown.appendChild(noResults);
+                return;
+            }
+
+            options.forEach((option, index) => {
+                const clonedOption = option.element.cloneNode(true);
+                clonedOption.addEventListener('click', () => selectOption(option));
+                dropdown.appendChild(clonedOption);
+            });
+
+            currentSelection = -1;
+        }
+
+        function selectOption(option) {
+            // Clear all selected states
+            allOptions.forEach(opt => opt.element.classList.remove('selected'));
+
+            // Set new selection
+            option.element.classList.add('selected');
+            input.value = option.pathText;
+            hiddenInput.value = option.value;
+
+            dropdown.classList.remove('show');
+
+            // Auto-submit the form
+            input.closest('form').submit();
+        }
+
+        // Event listeners
+        input.addEventListener('focus', () => {
+            dropdown.classList.add('show');
+            renderOptions(filteredOptions);
+        });
+
+        input.addEventListener('input', (e) => {
+            filterOptions(e.target.value);
+            dropdown.classList.add('show');
+        });
+
+        input.addEventListener('keydown', (e) => {
+            if (!dropdown.classList.contains('show')) return;
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                currentSelection = Math.min(currentSelection + 1, filteredOptions.length - 1);
+                updateSelection();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                currentSelection = Math.max(currentSelection - 1, -1);
+                updateSelection();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (currentSelection >= 0 && filteredOptions[currentSelection]) {
+                    selectOption(filteredOptions[currentSelection]);
+                }
+            } else if (e.key === 'Escape') {
+                dropdown.classList.remove('show');
+            }
+        });
+
+        function updateSelection() {
+            const options = dropdown.querySelectorAll('.combobox-option');
+            options.forEach((option, index) => {
+                option.classList.toggle('hover', index === currentSelection);
+            });
+        }
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            const comboboxContainer = input.closest('.combobox-container');
+            if (!comboboxContainer || !comboboxContainer.contains(e.target)) {
+                dropdown.classList.remove('show');
+            }
+        });
+
+        // Initialize
+        try {
+            initializeOptions();
+            renderOptions(allOptions);
+        } catch (error) {
+            console.error(`Error initializing combobox ${inputId}:`, error);
+        }
+    }
+});
+
+// Get CSRF token helper function
+function getCsrfToken() {
+    const csrfElementById = document.querySelector('input#csrf_token');
+    if (csrfElementById && csrfElementById.value) {
+        return csrfElementById.value;
+    }
+
+    const csrfElement = document.querySelector('input[name="csrf_token"]');
+    if (csrfElement && csrfElement.value) {
+        return csrfElement.value;
+    }
+
+    const metaElement = document.querySelector('meta[name="csrf-token"]');
+    if (metaElement) {
+        const content = metaElement.getAttribute('content');
+        if (content) {
+            return content;
+        }
+    }
+
+    const cookies = document.cookie.split(';');
+    for (let cookie of cookies) {
+        const [name, value] = cookie.trim().split('=');
+        if (name === 'csrf_token') {
+            return value;
+        }
+    }
+
+    console.warn('No CSRF token found');
+    return null;
+}
+
+// Confirm and delete permission
+function confirmDeletePermission(userId, folderId, adGroupId, permissionType, userName, folderName) {
+    const permissionText = permissionType === 'read' ? 'lectura' : 'escritura';
+
+    if (confirm(`¿Está seguro de que desea eliminar el permiso de ${permissionText} de ${userName} para la carpeta "${folderName}"?\n\nEsta acción creará tareas para aplicar los cambios en AD.`)) {
+        // Create form and submit
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '{{ url_for("main.owner_permission_delete") }}';
+
+        // Add CSRF token
+        const csrfToken = getCsrfToken();
+        if (csrfToken) {
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrf_token';
+            csrfInput.value = csrfToken;
+            form.appendChild(csrfInput);
+        }
+
+        // Add form data
+        const fields = {
+            'user_id': userId,
+            'folder_id': folderId,
+            'ad_group_id': adGroupId,
+            'permission_type': permissionType
+        };
+
+        for (const [key, value] of Object.entries(fields)) {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = key;
+            input.value = value;
+            form.appendChild(input);
+        }
+
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+
+// Confirm and change permission type
+function confirmChangePermission(userId, folderId, adGroupId, currentPermissionType, userName, folderName) {
+    const currentText = currentPermissionType === 'read' ? 'lectura' : 'escritura';
+    const newText = currentPermissionType === 'read' ? 'escritura' : 'lectura';
+
+    if (confirm(`¿Está seguro de que desea cambiar el permiso de ${userName} en "${folderName}" de ${currentText} a ${newText}?\n\nEsta acción creará tareas para eliminar el permiso actual y aplicar el nuevo.`)) {
+        // Create form and submit
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '{{ url_for("main.owner_permission_change") }}';
+
+        // Add CSRF token
+        const csrfToken = getCsrfToken();
+        if (csrfToken) {
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrf_token';
+            csrfInput.value = csrfToken;
+            form.appendChild(csrfInput);
+        }
+
+        // Add form data
+        const fields = {
+            'user_id': userId,
+            'folder_id': folderId,
+            'ad_group_id': adGroupId,
+            'permission_type': currentPermissionType
+        };
+
+        for (const [key, value] of Object.entries(fields)) {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = key;
+            input.value = value;
+            form.appendChild(input);
+        }
+
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+</script>
+{% endblock %}

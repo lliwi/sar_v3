@@ -418,8 +418,8 @@ class PermissionRequest(db.Model):
                         'old_permission_type': existing_info.get('existing_permission_type'),
                         'new_permission_type': self.permission_type,
                         'existing_source': existing_info.get('existing_source'),
-                        'removal_task': next((task.id for task in tasks if 'remove' in task.description.lower()), None),
-                        'addition_task': next((task.id for task in tasks if 'add' in task.description.lower()), None)
+                        'removal_task': next((task.id for task in tasks if 'remove' in task.name.lower()), None),
+                        'addition_task': next((task.id for task in tasks if 'add' in task.name.lower()), None)
                     }
                 )
                 

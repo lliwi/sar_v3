@@ -65,6 +65,12 @@
                                 Mis Recursos
                             </a>
                         </li>
+                        <li class="nav-item">
+                            <a href="{{ url_for('main.owner_permissions') }}" class="nav-link {% if request.endpoint == 'main.owner_permissions' %}active{% endif %}">
+                                <i class="fas fa-clipboard-list me-2"></i>
+                                Permisos
+                            </a>
+                        </li>
                         {% endif %}
                         {% if current_user.has_validated_folders() or current_user.is_admin() %}
                         <li class="nav-item">

@@ -1556,44 +1556,44 @@ def delete_user_permission_from_ad_group():
 def manage_validators(folder_id):
     """Add or remove validators for a folder (only for owners)"""
     from flask import jsonify
-    
+
     folder = Folder.query.get_or_404(folder_id)
-    
+
     # Check if user is owner of this folder
     if folder not in current_user.owned_folders:
         return jsonify({'success': False, 'message': 'Solo los propietarios pueden gestionar validadores.'})
-    
+
     user_id = request.form.get('user_id', type=int)
     action = request.form.get('action')  # 'add' or 'remove'
-    
+
     if not user_id or not action or action not in ['add', 'remove']:
         return jsonify({'success': False, 'message': 'Datos de solicitud inválidos.'})
-    
+
     target_user = User.query.get(user_id)
     if not target_user:
         return jsonify({'success': False, 'message': 'Usuario no encontrado.'})
-    
+
     try:
         if action == 'add':
             # Check if user is already a validator
             if target_user in folder.validators:
                 return jsonify({'success': False, 'message': 'El usuario ya es validador de esta carpeta.'})
-            
+
             # Add as validator
             folder.validators.append(target_user)
             action_description = f'Validador {target_user.username} añadido'
-            
+
         elif action == 'remove':
             # Check if user is a validator
             if target_user not in folder.validators:
                 return jsonify({'success': False, 'message': 'El usuario no es validador de esta carpeta.'})
-            
+
             # Remove as validator
             folder.validators.remove(target_user)
             action_description = f'Validador {target_user.username} removido'
-        
+
         db.session.commit()
-        
+
         # Log audit event
         AuditEvent.log_event(
             user=current_user,
@@ -1610,13 +1610,521 @@ def manage_validators(folder_id):
             ip_address=request.remote_addr,
             user_agent=request.headers.get('User-Agent')
         )
-        
+
         return jsonify({
-            'success': True, 
+            'success': True,
             'message': f'Validador {"añadido" if action == "add" else "removido"} exitosamente.'
         })
-        
+
     except Exception as e:
         db.session.rollback()
         return jsonify({'success': False, 'message': f'Error al procesar la solicitud: {str(e)}'})
+
+@main_bp.route('/owner-permissions')
+@login_required
+def owner_permissions():
+    """Show active permissions for folders owned by the current user"""
+    from datetime import datetime
+    from app.models import PermissionRequest, UserADGroupMembership, FolderPermission
+
+    # Check if user owns any folders
+    if not current_user.has_owned_folders():
+        flash('No tienes carpetas bajo tu gestión.', 'warning')
+        return redirect(url_for('main.dashboard'))
+
+    try:
+        # Get filter parameters
+        folder_id_raw = request.args.get('folder_id', '')
+        folder_id = str(folder_id_raw).strip() if folder_id_raw else ''
+        user_search = request.args.get('user_search', '').strip()
+        permission_type = request.args.get('permission_type', 'all')
+
+        # Pagination parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+
+        # Get owned folders IDs for filtering
+        owned_folder_ids = [f.id for f in current_user.owned_folders]
+
+        permissions_by_user = {}
+        all_permissions = []
+
+        # STEP 1: Get approved permission requests for owned folders
+        query = PermissionRequest.query.filter(
+            PermissionRequest.status == 'approved',
+            PermissionRequest.folder_id.in_(owned_folder_ids)
+        )
+
+        # Apply filters
+        if folder_id and str(folder_id).isdigit():
+            query = query.filter(PermissionRequest.folder_id == int(folder_id))
+
+        if permission_type and permission_type != 'all':
+            query = query.filter(PermissionRequest.permission_type == permission_type)
+
+        approved_requests = query.options(
+            db.joinedload(PermissionRequest.requester),
+            db.joinedload(PermissionRequest.folder),
+            db.joinedload(PermissionRequest.ad_group)
+        ).all()
+
+        for permission in approved_requests:
+            if not permission.folder or not permission.folder.is_active:
+                continue
+
+            # Apply user search filter
+            if user_search:
+                if not (user_search.lower() in permission.requester.username.lower() or
+                       user_search.lower() in (permission.requester.full_name or '').lower()):
+                    continue
+
+            user_id = permission.requester.id
+            folder_id_key = permission.folder_id
+
+            if user_id not in permissions_by_user:
+                permissions_by_user[user_id] = {
+                    'user': permission.requester,
+                    'folders': {}
+                }
+
+            if folder_id_key not in permissions_by_user[user_id]['folders']:
+                permissions_by_user[user_id]['folders'][folder_id_key] = {
+                    'folder': permission.folder,
+                    'permissions': []
+                }
+
+            permissions_by_user[user_id]['folders'][folder_id_key]['permissions'].append(permission)
+            all_permissions.append(permission)
+
+        # STEP 2: Get AD memberships for owned folders
+        membership_permissions_query = db.session.query(
+            UserADGroupMembership,
+            FolderPermission,
+            User,
+            ADGroup,
+            Folder
+        ).join(
+            ADGroup, UserADGroupMembership.ad_group_id == ADGroup.id
+        ).join(
+            FolderPermission, ADGroup.id == FolderPermission.ad_group_id
+        ).join(
+            User, UserADGroupMembership.user_id == User.id
+        ).join(
+            Folder, FolderPermission.folder_id == Folder.id
+        ).filter(
+            UserADGroupMembership.is_active == True,
+            FolderPermission.is_active == True,
+            Folder.is_active == True,
+            Folder.id.in_(owned_folder_ids)  # Only owned folders
+        )
+
+        # Apply filters at database level
+        if folder_id and str(folder_id).isdigit():
+            membership_permissions_query = membership_permissions_query.filter(
+                Folder.id == int(folder_id)
+            )
+
+        if permission_type and permission_type != 'all':
+            membership_permissions_query = membership_permissions_query.filter(
+                FolderPermission.permission_type == permission_type
+            )
+
+        if user_search:
+            search_term = f"%{user_search.lower()}%"
+            membership_permissions_query = membership_permissions_query.filter(
+                db.or_(
+                    User.username.ilike(search_term),
+                    User.full_name.ilike(search_term)
+                )
+            )
+
+        # Execute single optimized query
+        membership_permissions = membership_permissions_query.all()
+
+        # Process results from optimized query
+        for membership, fp, user, ad_group, folder in membership_permissions:
+            user_id = user.id
+            folder_id_key = folder.id
+
+            # Initialize user entry if not exists
+            if user_id not in permissions_by_user:
+                permissions_by_user[user_id] = {
+                    'user': user,
+                    'folders': {}
+                }
+
+            # Initialize folder entry if not exists
+            if folder_id_key not in permissions_by_user[user_id]['folders']:
+                permissions_by_user[user_id]['folders'][folder_id_key] = {
+                    'folder': folder,
+                    'permissions': []
+                }
+
+            # Check if this permission already exists (avoid duplicates)
+            exists = False
+            for existing in permissions_by_user[user_id]['folders'][folder_id_key]['permissions']:
+                if (hasattr(existing, 'permission_type') and
+                    existing.permission_type == fp.permission_type):
+                    exists = True
+                    break
+
+            if not exists:
+                # Create virtual permission
+                class VirtualPermission:
+                    def __init__(self, membership, folder_permission, user, ad_group):
+                        self.id = f"sync_{membership.id}_{folder_permission.id}"
+                        self.folder_id = folder_permission.folder_id
+                        self.folder = folder_permission.folder
+                        self.permission_type = folder_permission.permission_type
+                        self.ad_group = ad_group
+                        self.validator = folder_permission.granted_by
+                        self.validated_at = folder_permission.granted_at
+                        self.requester_id = user.id
+                        self.requester = user
+                        self.source = 'ad_sync'
+
+                virtual_perm = VirtualPermission(membership, fp, user, ad_group)
+                permissions_by_user[user_id]['folders'][folder_id_key]['permissions'].append(virtual_perm)
+                all_permissions.append(virtual_perm)
+
+        # Get owned folders for filter dropdown
+        owned_folders = Folder.query.filter(
+            Folder.id.in_(owned_folder_ids),
+            Folder.is_active == True
+        ).order_by(Folder.name).all()
+
+        # Create flat list of individual permission records for pagination
+        flat_permissions = []
+        for user_id, user_data in permissions_by_user.items():
+            user = user_data['user']
+            for folder_id_key, folder_data in user_data['folders'].items():
+                folder = folder_data['folder']
+                for permission in folder_data['permissions']:
+                    flat_permissions.append({
+                        'user': user,
+                        'folder': folder,
+                        'permission': permission
+                    })
+
+        # Sort by username then folder name
+        flat_permissions.sort(key=lambda x: (x['user'].username.lower(), x['folder'].name.lower()))
+
+        # Calculate statistics
+        total_unique_users = len(permissions_by_user)
+        total_active_permissions = len(all_permissions)
+        total_unique_folders = len(set(perm['folder'].id for perm in flat_permissions))
+        total_unique_ad_groups = len(set(perm['permission'].ad_group.id for perm in flat_permissions if perm['permission'].ad_group))
+
+        # Calculate pagination
+        total_records = len(flat_permissions)
+        total_pages = (total_records + per_page - 1) // per_page if total_records > 0 else 1
+        has_prev = page > 1
+        has_next = page < total_pages
+        prev_num = page - 1 if has_prev else None
+        next_num = page + 1 if has_next else None
+
+        # Get records for current page
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        paginated_permissions = flat_permissions[start_idx:end_idx]
+
+        # Reconstruct permissions_by_user structure with only paginated records
+        paginated_permissions_by_user = {}
+        for record in paginated_permissions:
+            user = record['user']
+            folder = record['folder']
+            permission = record['permission']
+
+            user_id = user.id
+            current_folder_id = folder.id
+
+            if user_id not in paginated_permissions_by_user:
+                paginated_permissions_by_user[user_id] = {
+                    'user': user,
+                    'folders': {}
+                }
+
+            if current_folder_id not in paginated_permissions_by_user[user_id]['folders']:
+                paginated_permissions_by_user[user_id]['folders'][current_folder_id] = {
+                    'folder': folder,
+                    'permissions': []
+                }
+
+            paginated_permissions_by_user[user_id]['folders'][current_folder_id]['permissions'].append(permission)
+
+        # Create pagination object
+        pagination = {
+            'page': page,
+            'per_page': per_page,
+            'total': total_records,
+            'pages': total_pages,
+            'has_prev': has_prev,
+            'has_next': has_next,
+            'prev_num': prev_num,
+            'next_num': next_num
+        }
+
+        return render_template('main/owner_permissions.html',
+                             title='Permisos',
+                             permissions_by_user=paginated_permissions_by_user,
+                             all_folders=owned_folders,
+                             folder_id=folder_id,
+                             user_search=user_search,
+                             filters={'permission_type': permission_type},
+                             total_unique_users=total_unique_users,
+                             total_active_permissions=total_active_permissions,
+                             total_unique_folders=total_unique_folders,
+                             total_unique_ad_groups=total_unique_ad_groups,
+                             pagination=pagination,
+                             now=datetime.now())
+
+    except Exception as e:
+        current_app.logger.error(f"Error in owner_permissions: {str(e)}")
+        flash(f'Error al generar el reporte de permisos: {str(e)}', 'error')
+        return redirect(url_for('main.dashboard'))
+
+@main_bp.route('/owner-permissions/delete', methods=['POST'])
+@login_required
+def owner_permission_delete():
+    """Delete a user permission from owner permissions view"""
+    user_id = request.form.get('user_id', type=int)
+    folder_id = request.form.get('folder_id', type=int)
+    ad_group_id = request.form.get('ad_group_id', type=int)
+    permission_type = request.form.get('permission_type')
+
+    if not all([user_id, folder_id, permission_type]):
+        flash('Datos de solicitud inválidos.', 'error')
+        return redirect(url_for('main.owner_permissions'))
+
+    folder = Folder.query.get_or_404(folder_id)
+    target_user = User.query.get_or_404(user_id)
+
+    # Check if current user owns this folder
+    if folder not in current_user.owned_folders:
+        flash('Solo puedes eliminar permisos de carpetas que gestionas.', 'error')
+        return redirect(url_for('main.owner_permissions'))
+
+    # Get AD group if provided
+    ad_group = None
+    if ad_group_id:
+        ad_group = ADGroup.query.get(ad_group_id)
+        if not ad_group:
+            flash('Grupo AD no encontrado.', 'error')
+            return redirect(url_for('main.owner_permissions'))
+
+    # Find permission
+    permission_found = False
+    permission_request = None
+    permission_source = None
+
+    # 1. Try to find approved permission request
+    if ad_group_id:
+        permission_request = PermissionRequest.query.filter_by(
+            requester_id=user_id,
+            folder_id=folder_id,
+            ad_group_id=ad_group_id,
+            permission_type=permission_type,
+            status='approved'
+        ).first()
+    else:
+        permission_request = PermissionRequest.query.filter_by(
+            requester_id=user_id,
+            folder_id=folder_id,
+            permission_type=permission_type,
+            status='approved'
+        ).first()
+
+    if permission_request:
+        permission_found = True
+        permission_source = 'permission_request'
+        if not ad_group and permission_request.ad_group:
+            ad_group = permission_request.ad_group
+
+    # 2. If not found, check for AD-synced permission
+    if not permission_found and ad_group:
+        from app.models import UserADGroupMembership
+        membership = UserADGroupMembership.query.filter_by(
+            user_id=user_id,
+            ad_group_id=ad_group.id,
+            is_active=True
+        ).first()
+
+        folder_permission = FolderPermission.query.filter_by(
+            folder_id=folder_id,
+            ad_group_id=ad_group.id,
+            permission_type=permission_type,
+            is_active=True
+        ).first()
+
+        if membership and folder_permission:
+            permission_request = PermissionRequest(
+                requester_id=user_id,
+                folder_id=folder_id,
+                permission_type=permission_type,
+                ad_group_id=ad_group.id,
+                status='approved',
+                justification='Permission removal by folder owner',
+                validator_id=current_user.id,
+                validation_date=datetime.utcnow()
+            )
+            permission_found = True
+            permission_source = 'ad_sync'
+
+    if not permission_found or not ad_group:
+        flash(f'No se encontró el permiso {permission_type} para el usuario {target_user.username}.', 'error')
+        return redirect(url_for('main.owner_permissions'))
+
+    current_app.logger.info(f"Permission found for deletion by owner: source={permission_source}, user={target_user.username}, folder={folder.path}, type={permission_type}")
+
+    # Generate CSV for permission deletion
+    from app.services.csv_generator_service import CSVGeneratorService
+    csv_service = CSVGeneratorService()
+    csv_file_path = csv_service.generate_user_permission_deletion_csv(
+        user=target_user,
+        folder=folder,
+        ad_group=ad_group,
+        permission_type=permission_type
+    )
+
+    # Create deletion task
+    from app.services.task_service import create_user_permission_deletion_task
+    task = create_user_permission_deletion_task(
+        user=target_user,
+        folder=folder,
+        ad_group=ad_group,
+        permission_type=permission_type,
+        csv_file_path=csv_file_path,
+        original_request=permission_request
+    )
+
+    if task:
+        # Mark request as revoked
+        if permission_request.id:
+            permission_request.status = 'revoked'
+            db.session.commit()
+        else:
+            permission_request.status = 'revoked'
+            db.session.add(permission_request)
+            db.session.commit()
+
+        # Log audit event
+        AuditEvent.log_event(
+            user=current_user,
+            event_type='permission_deletion',
+            action='delete_by_owner',
+            resource_type='permission_request',
+            resource_id=permission_request.id,
+            description=f'Propietario eliminó permiso {permission_type} del usuario {target_user.username} para carpeta {folder.sanitized_path}',
+            metadata={
+                'folder_path': folder.path,
+                'target_user_id': target_user.id,
+                'target_username': target_user.username,
+                'ad_group_name': ad_group.name,
+                'permission_type': permission_type,
+                'task_id': task.id,
+                'csv_file_path': csv_file_path
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent')
+        )
+
+        flash(f'Permiso de {permission_type} eliminado para {target_user.username}. Se han creado tareas para aplicar los cambios.', 'success')
+    else:
+        flash('Error al crear las tareas de eliminación de permiso.', 'error')
+
+    return redirect(url_for('main.owner_permissions'))
+
+@main_bp.route('/owner-permissions/change', methods=['POST'])
+@login_required
+def owner_permission_change():
+    """Change permission type (read <-> write) from owner permissions view"""
+    user_id = request.form.get('user_id', type=int)
+    folder_id = request.form.get('folder_id', type=int)
+    ad_group_id = request.form.get('ad_group_id', type=int)
+    current_permission_type = request.form.get('permission_type')
+
+    if not all([user_id, folder_id, current_permission_type]):
+        flash('Datos de solicitud inválidos.', 'error')
+        return redirect(url_for('main.owner_permissions'))
+
+    # Determine new permission type
+    new_permission_type = 'write' if current_permission_type == 'read' else 'read'
+
+    folder = Folder.query.get_or_404(folder_id)
+    target_user = User.query.get_or_404(user_id)
+
+    # Check if current user owns this folder
+    if folder not in current_user.owned_folders:
+        flash('Solo puedes cambiar permisos de carpetas que gestionas.', 'error')
+        return redirect(url_for('main.owner_permissions'))
+
+    # Check for existing permissions
+    existing_permission_check = PermissionRequest.check_existing_permissions(
+        user_id,
+        folder_id,
+        current_permission_type
+    )
+
+    if existing_permission_check['action'] == 'error':
+        flash(existing_permission_check['message'], 'error')
+        return redirect(url_for('main.owner_permissions'))
+
+    # Create permission change request
+    permission_request = PermissionRequest.create_permission_change_request(
+        requester=target_user,
+        folder_id=folder_id,
+        validator_id=current_user.id,
+        new_permission_type=new_permission_type,
+        business_need=f"Cambio de permiso por propietario {current_user.full_name}",
+        existing_permission_info=existing_permission_check
+    )
+
+    # Add to session first to avoid warnings
+    db.session.add(permission_request)
+    db.session.flush()
+
+    # Check if there are applicable groups for the new permission type
+    applicable_groups = permission_request.get_applicable_groups()
+    if not applicable_groups:
+        flash(f'No hay grupos configurados para permisos de {new_permission_type} en esta carpeta. Contacte al administrador.', 'error')
+        return redirect(url_for('main.owner_permissions'))
+
+    # Assign groups automatically
+    permission_request.assign_groups_automatically()
+    db.session.flush()
+
+    # Use approve_with_change to create both deletion and addition tasks
+    try:
+        permission_request.approve_with_change(current_user, f"Cambio aprobado automáticamente por propietario.")
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error approving permission change: {str(e)}")
+        flash(f'Error al procesar el cambio de permiso: {str(e)}', 'error')
+        return redirect(url_for('main.owner_permissions'))
+
+    # Log audit event
+    AuditEvent.log_event(
+        user=current_user,
+        event_type='permission_change_request',
+        action='change_by_owner',
+        resource_type='permission_request',
+        resource_id=permission_request.id,
+        description=f'Propietario cambió permiso: {current_permission_type} → {new_permission_type} para usuario {target_user.username} en carpeta {folder.sanitized_path}',
+        metadata={
+            'folder_path': folder.path,
+            'target_username': target_user.username,
+            'old_permission_type': current_permission_type,
+            'new_permission_type': new_permission_type,
+            'existing_source': existing_permission_check.get('existing_source'),
+            'applicable_groups': [g.name for g in applicable_groups],
+            'is_change_request': True,
+            'auto_approved': True
+        },
+        ip_address=request.remote_addr,
+        user_agent=request.headers.get('User-Agent')
+    )
+
+    flash(f'Cambio de permiso aprobado: {current_permission_type} → {new_permission_type} para {target_user.username}.', 'success')
+    return redirect(url_for('main.owner_permissions'))
 
