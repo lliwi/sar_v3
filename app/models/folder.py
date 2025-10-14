@@ -184,26 +184,175 @@ class Folder(db.Model):
         return result
     
     def has_user_deletion_in_progress(self, user_id):
-        """Check if a specific user has deletion in progress for this folder"""
+        """Check if a specific user has deletion or permission change in progress for this folder"""
         from app.models.task import Task
+        from app.models.user import User
         from sqlalchemy import and_, or_
+        import json
 
-        # Check for active deletion tasks for this specific user and folder
-        # Look for both airflow_dag and ad_verification tasks with delete action
-        active_deletion_task = Task.query.filter(
+        # Get username for the user
+        user = User.query.get(user_id)
+        if not user:
+            return False
+
+        # Get all active tasks that might be related to this folder and user
+        # We cast to a broader net to avoid missing tasks due to JSON formatting differences
+        active_tasks = Task.query.filter(
             and_(
-                Task.status.in_(['pending', 'processing']),
+                Task.status.in_(['pending', 'processing', 'retry']),
                 or_(
                     Task.task_type == 'airflow_dag',
                     Task.task_type == 'ad_verification'
-                ),
-                Task.task_data.contains(f'"user_id": {user_id}'),
-                Task.task_data.contains(f'"folder_id": {self.id}'),
-                Task.task_data.contains('"action": "delete"')
+                )
             )
-        ).first()
+        ).all()
 
-        return active_deletion_task is not None
+        # Check each task to see if it matches this user and folder
+        for task in active_tasks:
+            try:
+                task_data = json.loads(task.task_data)
+
+                # Check if task is for this folder (by folder_id or folder_path)
+                task_folder_id = task_data.get('folder_id')
+                task_folder_path = task_data.get('folder_path', '').replace('\\\\', '\\')
+
+                is_same_folder = (
+                    task_folder_id == self.id or
+                    task_folder_path == self.path
+                )
+
+                if not is_same_folder:
+                    continue
+
+                # Check if this task is for the specific user
+                # Check multiple possible identifiers
+                task_user_id = task_data.get('user_id')
+                task_requester = task_data.get('requester', '')
+
+                is_same_user = (
+                    task_user_id == user_id or
+                    task_requester == user.username or
+                    task_requester == user.full_name
+                )
+
+                if not is_same_user:
+                    continue
+
+                # If we get here, the task is for this user and folder
+                # Check the action to determine if it's relevant
+                action = task_data.get('action', '')
+
+                # These actions indicate an in-progress operation
+                relevant_actions = [
+                    'delete', 'add', 'remove_ad_sync', 'remove_direct',
+                    'remove_existing', 'remove_manual'
+                ]
+
+                if action in relevant_actions or not action:
+                    return True
+
+            except Exception as e:
+                # Log but don't fail - continue checking other tasks
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.debug(f"Error parsing task {task.id} data: {str(e)}")
+                continue
+
+        return False
+
+    def get_user_task_type_in_progress(self, user_id):
+        """Get the type of task in progress for a user (deletion or change)"""
+        from app.models.task import Task
+        from app.models.user import User
+        from sqlalchemy import and_, or_
+        import json
+
+        # Get username for the user
+        user = User.query.get(user_id)
+        if not user:
+            return None
+
+        # Get all active tasks that might be related to this folder and user
+        all_active_tasks = Task.query.filter(
+            and_(
+                Task.status.in_(['pending', 'processing', 'retry']),
+                or_(
+                    Task.task_type == 'airflow_dag',
+                    Task.task_type == 'ad_verification'
+                )
+            )
+        ).all()
+
+        # Filter tasks for this folder and user
+        folder_tasks = []
+        for task in all_active_tasks:
+            try:
+                task_data = json.loads(task.task_data)
+
+                # Check if task is for this folder
+                task_folder_id = task_data.get('folder_id')
+                task_folder_path = task_data.get('folder_path', '').replace('\\\\', '\\')
+
+                is_same_folder = (
+                    task_folder_id == self.id or
+                    task_folder_path == self.path
+                )
+
+                if not is_same_folder:
+                    continue
+
+                # Check if this task is for the specific user
+                task_user_id = task_data.get('user_id')
+                task_requester = task_data.get('requester', '')
+
+                is_same_user = (
+                    task_user_id == user_id or
+                    task_requester == user.username or
+                    task_requester == user.full_name
+                )
+
+                if is_same_user:
+                    folder_tasks.append(task)
+
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.debug(f"Error parsing task {task.id} data: {str(e)}")
+                continue
+
+        if not folder_tasks:
+            return None
+
+        # Check if there are both delete and add tasks (indicates a change)
+        has_delete = False
+        has_add = False
+
+        for task in folder_tasks:
+            try:
+                task_data = json.loads(task.task_data)
+                action = task_data.get('action', '')
+
+                # Removal actions
+                if action in ('delete', 'remove_ad_sync', 'remove_direct', 'remove_existing', 'remove_manual'):
+                    has_delete = True
+                # Addition actions
+                elif action == 'add' or not action:
+                    # Tasks without action field are typically addition tasks
+                    has_add = True
+            except:
+                pass
+
+        # If we have both delete and add, it's a change
+        if has_delete and has_add:
+            return 'change'
+        # If only delete, it's a deletion
+        elif has_delete:
+            return 'delete'
+        # If only add, it's likely an addition
+        elif has_add:
+            return 'add'
+
+        return None
 
     def get_permissions_summary(self):
         """Get a comprehensive summary of all permissions including AD groups and users"""

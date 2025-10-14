@@ -177,9 +177,16 @@
                                     {% for permission in folder_data.permissions %}
                                         <tr>
                                             <td>
-                                                <div class="d-flex flex-column">
+                                                {% set user_has_deletion_in_progress = folder.has_user_deletion_in_progress(user.id) %}
+                                                {% set user_task_type = folder.get_user_task_type_in_progress(user.id) %}
+                                                <div class="d-flex flex-column {% if user_has_deletion_in_progress %}opacity-50{% endif %}">
                                                     <strong class="text-primary">
-                                                        <i class="fas {{ user|user_icon }} me-2"></i>{{ user.full_name or user.username }}
+                                                        {% if user_has_deletion_in_progress %}
+                                                            <i class="fas fa-spinner fa-spin text-warning me-2"></i>
+                                                        {% else %}
+                                                            <i class="fas {{ user|user_icon }} me-2"></i>
+                                                        {% endif %}
+                                                        {{ user.full_name or user.username }}
                                                         {% if user.is_external_user() %}
                                                             <span class="badge bg-warning text-dark ms-1" style="font-size: 0.65rem;">EXT</span>
                                                         {% endif %}
@@ -187,6 +194,20 @@
                                                     <small class="text-muted">{{ user.username }}</small>
                                                     {% if user.department %}
                                                         <small class="text-muted">{{ user.department }}</small>
+                                                    {% endif %}
+                                                    {% if user_has_deletion_in_progress %}
+                                                        <small class="text-warning d-block mt-1">
+                                                            <i class="fas fa-clock me-1"></i>
+                                                            {% if user_task_type == 'change' %}
+                                                                Cambio de permiso en proceso...
+                                                            {% elif user_task_type == 'delete' %}
+                                                                Eliminación en proceso...
+                                                            {% elif user_task_type == 'add' %}
+                                                                Adición de permiso en proceso...
+                                                            {% else %}
+                                                                Operación en proceso...
+                                                            {% endif %}
+                                                        </small>
                                                     {% endif %}
                                                 </div>
                                             </td>
@@ -260,18 +281,28 @@
                                                 <div class="btn-group" role="group">
                                                     <!-- Change Permission Button -->
                                                     <button type="button"
-                                                            class="btn btn-sm btn-warning"
-                                                            onclick="confirmChangePermission({{ user.id }}, {{ folder.id }}, {{ permission.ad_group.id if permission.ad_group else 'null' }}, '{{ permission.permission_type }}', '{{ user.full_name or user.username }}', '{{ folder.name }}')"
-                                                            title="{% if permission.permission_type == 'read' %}Cambiar a Escritura{% else %}Cambiar a Lectura{% endif %}">
-                                                        <i class="fas fa-exchange-alt"></i>
+                                                            class="btn btn-sm btn-warning {{ 'disabled' if user_has_deletion_in_progress else '' }}"
+                                                            onclick="confirmChangePermission({{ user.id }}, {{ folder.id }}, {{ permission.ad_group.id if permission.ad_group else 'null' }}, '{{ permission.permission_type }}', '{{ user.full_name or user.username }}', '{{ folder.name }}', event)"
+                                                            title="{% if user_has_deletion_in_progress %}{% if user_task_type == 'change' %}Cambio de permiso en proceso...{% elif user_task_type == 'delete' %}Eliminación en proceso...{% elif user_task_type == 'add' %}Adición de permiso en proceso...{% else %}Operación en proceso...{% endif %}{% elif permission.permission_type == 'read' %}Cambiar a Escritura{% else %}Cambiar a Lectura{% endif %}"
+                                                            {{ 'disabled' if user_has_deletion_in_progress else '' }}>
+                                                        {% if user_has_deletion_in_progress %}
+                                                            <i class="fas fa-spinner fa-spin"></i>
+                                                        {% else %}
+                                                            <i class="fas fa-exchange-alt"></i>
+                                                        {% endif %}
                                                     </button>
 
                                                     <!-- Delete Permission Button -->
                                                     <button type="button"
-                                                            class="btn btn-sm btn-danger"
-                                                            onclick="confirmDeletePermission({{ user.id }}, {{ folder.id }}, {{ permission.ad_group.id if permission.ad_group else 'null' }}, '{{ permission.permission_type }}', '{{ user.full_name or user.username }}', '{{ folder.name }}')"
-                                                            title="Eliminar permiso">
-                                                        <i class="fas fa-trash"></i>
+                                                            class="btn btn-sm btn-danger {{ 'disabled' if user_has_deletion_in_progress else '' }}"
+                                                            onclick="confirmDeletePermission({{ user.id }}, {{ folder.id }}, {{ permission.ad_group.id if permission.ad_group else 'null' }}, '{{ permission.permission_type }}', '{{ user.full_name or user.username }}', '{{ folder.name }}', event)"
+                                                            title="{% if user_has_deletion_in_progress %}{% if user_task_type == 'change' %}Cambio de permiso en proceso...{% elif user_task_type == 'delete' %}Eliminación en proceso...{% elif user_task_type == 'add' %}Adición de permiso en proceso...{% else %}Operación en proceso...{% endif %}{% else %}Eliminar permiso{% endif %}"
+                                                            {{ 'disabled' if user_has_deletion_in_progress else '' }}>
+                                                        {% if user_has_deletion_in_progress %}
+                                                            <i class="fas fa-spinner fa-spin"></i>
+                                                        {% else %}
+                                                            <i class="fas fa-trash"></i>
+                                                        {% endif %}
                                                     </button>
                                                 </div>
                                             </td>
@@ -593,85 +624,151 @@ function getCsrfToken() {
 }
 
 // Confirm and delete permission
-function confirmDeletePermission(userId, folderId, adGroupId, permissionType, userName, folderName) {
+function confirmDeletePermission(userId, folderId, adGroupId, permissionType, userName, folderName, event) {
     const permissionText = permissionType === 'read' ? 'lectura' : 'escritura';
 
-    if (confirm(`¿Está seguro de que desea eliminar el permiso de ${permissionText} de ${userName} para la carpeta "${folderName}"?\n\nEsta acción creará tareas para aplicar los cambios en AD.`)) {
-        // Create form and submit
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = '{{ url_for("main.owner_permission_delete") }}';
-
-        // Add CSRF token
-        const csrfToken = getCsrfToken();
-        if (csrfToken) {
-            const csrfInput = document.createElement('input');
-            csrfInput.type = 'hidden';
-            csrfInput.name = 'csrf_token';
-            csrfInput.value = csrfToken;
-            form.appendChild(csrfInput);
+    if (confirm(`¿Está seguro de que desea eliminar el permiso de ${permissionText} de ${userName} para la carpeta "${folderName}"?\n\n⚠️ Esta acción:\n• Creará tareas automáticas en AD\n• El proceso puede tardar unos minutos\n• Recibirá una notificación cuando finalice`)) {
+        // Get the clicked button - handle both button and icon clicks
+        let clickedButton = null;
+        if (event) {
+            // If clicked on icon, get parent button
+            if (event.target.tagName === 'I') {
+                clickedButton = event.target.parentElement;
+            } else {
+                clickedButton = event.target.closest('button');
+            }
         }
 
-        // Add form data
-        const fields = {
-            'user_id': userId,
-            'folder_id': folderId,
-            'ad_group_id': adGroupId,
-            'permission_type': permissionType
-        };
-
-        for (const [key, value] of Object.entries(fields)) {
-            const input = document.createElement('input');
-            input.type = 'hidden';
-            input.name = key;
-            input.value = value;
-            form.appendChild(input);
+        if (clickedButton) {
+            const btnGroup = clickedButton.closest('.btn-group');
+            if (btnGroup) {
+                // Disable all buttons in this group and show spinners
+                const buttons = btnGroup.querySelectorAll('button');
+                buttons.forEach(btn => {
+                    btn.disabled = true;
+                    btn.classList.add('disabled');
+                    // Replace the button content with spinner
+                    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                });
+            }
         }
 
-        document.body.appendChild(form);
-        form.submit();
+        // Force a repaint to ensure spinner is visible
+        if (clickedButton) {
+            clickedButton.offsetHeight; // Force browser repaint
+        }
+
+        // Small delay to ensure DOM updates are visible before form submission
+        setTimeout(() => {
+            // Create form and submit
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '{{ url_for("main.owner_permission_delete") }}';
+
+            // Add CSRF token
+            const csrfToken = getCsrfToken();
+            if (csrfToken) {
+                const csrfInput = document.createElement('input');
+                csrfInput.type = 'hidden';
+                csrfInput.name = 'csrf_token';
+                csrfInput.value = csrfToken;
+                form.appendChild(csrfInput);
+            }
+
+            // Add form data
+            const fields = {
+                'user_id': userId,
+                'folder_id': folderId,
+                'ad_group_id': adGroupId,
+                'permission_type': permissionType
+            };
+
+            for (const [key, value] of Object.entries(fields)) {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = key;
+                input.value = value;
+                form.appendChild(input);
+            }
+
+            document.body.appendChild(form);
+            form.submit();
+        }, 200);
     }
 }
 
 // Confirm and change permission type
-function confirmChangePermission(userId, folderId, adGroupId, currentPermissionType, userName, folderName) {
+function confirmChangePermission(userId, folderId, adGroupId, currentPermissionType, userName, folderName, event) {
     const currentText = currentPermissionType === 'read' ? 'lectura' : 'escritura';
     const newText = currentPermissionType === 'read' ? 'escritura' : 'lectura';
 
-    if (confirm(`¿Está seguro de que desea cambiar el permiso de ${userName} en "${folderName}" de ${currentText} a ${newText}?\n\nEsta acción creará tareas para eliminar el permiso actual y aplicar el nuevo.`)) {
-        // Create form and submit
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = '{{ url_for("main.owner_permission_change") }}';
-
-        // Add CSRF token
-        const csrfToken = getCsrfToken();
-        if (csrfToken) {
-            const csrfInput = document.createElement('input');
-            csrfInput.type = 'hidden';
-            csrfInput.name = 'csrf_token';
-            csrfInput.value = csrfToken;
-            form.appendChild(csrfInput);
+    if (confirm(`¿Está seguro de que desea cambiar el permiso de ${userName} en "${folderName}"?\n\n🔄 Cambio:\n• De: ${currentText.toUpperCase()}\n• A: ${newText.toUpperCase()}\n\n⚠️ Esta acción:\n• Eliminará el permiso actual\n• Aplicará el nuevo permiso\n• Creará tareas automáticas en AD\n• El proceso puede tardar unos minutos`)) {
+        // Get the clicked button - handle both button and icon clicks
+        let clickedButton = null;
+        if (event) {
+            // If clicked on icon, get parent button
+            if (event.target.tagName === 'I') {
+                clickedButton = event.target.parentElement;
+            } else {
+                clickedButton = event.target.closest('button');
+            }
         }
 
-        // Add form data
-        const fields = {
-            'user_id': userId,
-            'folder_id': folderId,
-            'ad_group_id': adGroupId,
-            'permission_type': currentPermissionType
-        };
-
-        for (const [key, value] of Object.entries(fields)) {
-            const input = document.createElement('input');
-            input.type = 'hidden';
-            input.name = key;
-            input.value = value;
-            form.appendChild(input);
+        if (clickedButton) {
+            const btnGroup = clickedButton.closest('.btn-group');
+            if (btnGroup) {
+                // Disable all buttons in this group and show spinners
+                const buttons = btnGroup.querySelectorAll('button');
+                buttons.forEach(btn => {
+                    btn.disabled = true;
+                    btn.classList.add('disabled');
+                    // Replace the button content with spinner
+                    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                });
+            }
         }
 
-        document.body.appendChild(form);
-        form.submit();
+        // Force a repaint to ensure spinner is visible
+        if (clickedButton) {
+            clickedButton.offsetHeight; // Force browser repaint
+        }
+
+        // Small delay to ensure DOM updates are visible before form submission
+        setTimeout(() => {
+            // Create form and submit
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '{{ url_for("main.owner_permission_change") }}';
+
+            // Add CSRF token
+            const csrfToken = getCsrfToken();
+            if (csrfToken) {
+                const csrfInput = document.createElement('input');
+                csrfInput.type = 'hidden';
+                csrfInput.name = 'csrf_token';
+                csrfInput.value = csrfToken;
+                form.appendChild(csrfInput);
+            }
+
+            // Add form data
+            const fields = {
+                'user_id': userId,
+                'folder_id': folderId,
+                'ad_group_id': adGroupId,
+                'permission_type': currentPermissionType
+            };
+
+            for (const [key, value] of Object.entries(fields)) {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = key;
+                input.value = value;
+                form.appendChild(input);
+            }
+
+            document.body.appendChild(form);
+            form.submit();
+        }, 200);
     }
 }
 </script>
