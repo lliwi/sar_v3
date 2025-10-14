@@ -1930,9 +1930,18 @@ def owner_permission_delete():
     ad_group_id = request.form.get('ad_group_id', type=int)
     permission_type = request.form.get('permission_type')
 
+    # Get filter parameters to maintain state after redirect
+    filter_params = {
+        'page': request.form.get('filter_page', 1),
+        'per_page': request.form.get('filter_per_page', 10),
+        'folder_id': request.form.get('filter_folder_id', ''),
+        'user_search': request.form.get('filter_user_search', ''),
+        'permission_type': request.form.get('filter_permission_type', 'all')
+    }
+
     if not all([user_id, folder_id, permission_type]):
         flash('Datos de solicitud inválidos.', 'error')
-        return redirect(url_for('main.owner_permissions'))
+        return redirect(url_for('main.owner_permissions', **filter_params))
 
     folder = Folder.query.get_or_404(folder_id)
     target_user = User.query.get_or_404(user_id)
@@ -1940,7 +1949,7 @@ def owner_permission_delete():
     # Check if current user owns this folder
     if folder not in current_user.owned_folders:
         flash('Solo puedes eliminar permisos de carpetas que gestionas.', 'error')
-        return redirect(url_for('main.owner_permissions'))
+        return redirect(url_for('main.owner_permissions', **filter_params))
 
     # Get AD group if provided
     ad_group = None
@@ -1948,7 +1957,7 @@ def owner_permission_delete():
         ad_group = ADGroup.query.get(ad_group_id)
         if not ad_group:
             flash('Grupo AD no encontrado.', 'error')
-            return redirect(url_for('main.owner_permissions'))
+            return redirect(url_for('main.owner_permissions', **filter_params))
 
     # Find permission
     permission_found = False
@@ -2010,7 +2019,7 @@ def owner_permission_delete():
 
     if not permission_found or not ad_group:
         flash(f'No se encontró el permiso {permission_type} para el usuario {target_user.username}.', 'error')
-        return redirect(url_for('main.owner_permissions'))
+        return redirect(url_for('main.owner_permissions', **filter_params))
 
     current_app.logger.info(f"Permission found for deletion by owner: source={permission_source}, user={target_user.username}, folder={folder.path}, type={permission_type}")
 
@@ -2070,7 +2079,7 @@ def owner_permission_delete():
     else:
         flash('Error al crear las tareas de eliminación de permiso.', 'error')
 
-    return redirect(url_for('main.owner_permissions'))
+    return redirect(url_for('main.owner_permissions', **filter_params))
 
 @main_bp.route('/owner-permissions/change', methods=['POST'])
 @login_required
@@ -2081,9 +2090,18 @@ def owner_permission_change():
     ad_group_id = request.form.get('ad_group_id', type=int)
     current_permission_type = request.form.get('permission_type')
 
+    # Get filter parameters to maintain state after redirect
+    filter_params = {
+        'page': request.form.get('filter_page', 1),
+        'per_page': request.form.get('filter_per_page', 10),
+        'folder_id': request.form.get('filter_folder_id', ''),
+        'user_search': request.form.get('filter_user_search', ''),
+        'permission_type': request.form.get('filter_permission_type', 'all')
+    }
+
     if not all([user_id, folder_id, current_permission_type]):
         flash('Datos de solicitud inválidos.', 'error')
-        return redirect(url_for('main.owner_permissions'))
+        return redirect(url_for('main.owner_permissions', **filter_params))
 
     # Determine new permission type
     new_permission_type = 'write' if current_permission_type == 'read' else 'read'
@@ -2094,7 +2112,7 @@ def owner_permission_change():
     # Check if current user owns this folder
     if folder not in current_user.owned_folders:
         flash('Solo puedes cambiar permisos de carpetas que gestionas.', 'error')
-        return redirect(url_for('main.owner_permissions'))
+        return redirect(url_for('main.owner_permissions', **filter_params))
 
     # Check for existing permissions
     existing_permission_check = PermissionRequest.check_existing_permissions(
@@ -2105,7 +2123,7 @@ def owner_permission_change():
 
     if existing_permission_check['action'] == 'error':
         flash(existing_permission_check['message'], 'error')
-        return redirect(url_for('main.owner_permissions'))
+        return redirect(url_for('main.owner_permissions', **filter_params))
 
     # Create permission change request
     permission_request = PermissionRequest.create_permission_change_request(
@@ -2125,7 +2143,7 @@ def owner_permission_change():
     applicable_groups = permission_request.get_applicable_groups()
     if not applicable_groups:
         flash(f'No hay grupos configurados para permisos de {new_permission_type} en esta carpeta. Contacte al administrador.', 'error')
-        return redirect(url_for('main.owner_permissions'))
+        return redirect(url_for('main.owner_permissions', **filter_params))
 
     # Assign groups automatically
     permission_request.assign_groups_automatically()
@@ -2139,7 +2157,7 @@ def owner_permission_change():
         db.session.rollback()
         current_app.logger.error(f"Error approving permission change: {str(e)}")
         flash(f'Error al procesar el cambio de permiso: {str(e)}', 'error')
-        return redirect(url_for('main.owner_permissions'))
+        return redirect(url_for('main.owner_permissions', **filter_params))
 
     # Log audit event
     AuditEvent.log_event(
@@ -2164,5 +2182,5 @@ def owner_permission_change():
     )
 
     flash(f'Cambio de permiso aprobado: {current_permission_type} → {new_permission_type} para {target_user.username}.', 'success')
-    return redirect(url_for('main.owner_permissions'))
+    return redirect(url_for('main.owner_permissions', **filter_params))
 

@@ -623,6 +623,18 @@ function getCsrfToken() {
     return null;
 }
 
+// Helper function to get current filter parameters
+function getCurrentFilters() {
+    const params = new URLSearchParams(window.location.search);
+    return {
+        page: params.get('page') || '1',
+        per_page: params.get('per_page') || '10',
+        folder_id: params.get('folder_id') || '',
+        user_search: params.get('user_search') || '',
+        permission_type: params.get('permission_type') || 'all'
+    };
+}
+
 // Confirm and delete permission
 function confirmDeletePermission(userId, folderId, adGroupId, permissionType, userName, folderName, event) {
     const permissionText = permissionType === 'read' ? 'lectura' : 'escritura';
@@ -687,6 +699,16 @@ function confirmDeletePermission(userId, folderId, adGroupId, permissionType, us
                 const input = document.createElement('input');
                 input.type = 'hidden';
                 input.name = key;
+                input.value = value;
+                form.appendChild(input);
+            }
+
+            // Add current filter parameters to maintain state
+            const filters = getCurrentFilters();
+            for (const [key, value] of Object.entries(filters)) {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'filter_' + key;
                 input.value = value;
                 form.appendChild(input);
             }
@@ -762,6 +784,16 @@ function confirmChangePermission(userId, folderId, adGroupId, currentPermissionT
                 const input = document.createElement('input');
                 input.type = 'hidden';
                 input.name = key;
+                input.value = value;
+                form.appendChild(input);
+            }
+
+            // Add current filter parameters to maintain state
+            const filters = getCurrentFilters();
+            for (const [key, value] of Object.entries(filters)) {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'filter_' + key;
                 input.value = value;
                 form.appendChild(input);
             }
